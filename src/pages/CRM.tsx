@@ -7908,12 +7908,16 @@ const CRM = () => {
                                         <Copy className="h-3.5 w-3.5" />
                                       </Button>
                                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={async () => {
-                                        if (confirm('Deseja excluir este fluxo?')) {
+                                        if (confirm('Deseja excluir este fluxo? Os arquivos enviados só neste fluxo também serão apagados do armazenamento.')) {
+                                          // Coleta a mídia antes de apagar: depois do delete
+                                          // não há como saber quais arquivos ficaram órfãos.
+                                          const flowMedia = Array.from(collectStorageUrls([flow.nodes, flow.edges]));
                                           await supabase.from('crm_flows').delete().eq('id', flow.id);
-      fetchData(false);
-
+                                          await deleteMediaUrlsIfUnused(flowMedia, { userId: currentUserIdRef.current });
+                                          fetchData(false);
                                         }
                                       }}>
+
                                         <Trash2 className="h-3.5 w-3.5" />
                                       </Button>
                                     </div>

@@ -4050,41 +4050,44 @@ const CRM = () => {
         throw new Error(`Arquivo muito grande. O WhatsApp aceita no máximo ${Math.round(metaLimits[type] / 1024 / 1024)}MB para ${type === 'document' ? 'documentos' : type}.`);
       }
 
-      const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-      const filePath = `chat-media/${fileName}`;
       const originalFileName = file instanceof File && file.name ? file.name : `document.${fileExt}`;
 
       setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 30 }));
 
-      const { error: uploadError } = await supabase.storage
-        .from('crm-media')
-        .upload(filePath, file, {
-          contentType: contentType || 'application/octet-stream',
-          upsert: true
-        });
-
-      if (uploadError) throw uploadError;
+      // Deduplicação por hash: o mesmo binário enviado para vários contatos
+      // reaproveita um único objeto no bucket em vez de duplicar o arquivo.
+      const uploaded = await uploadDedupedMedia({
+        bucket: 'crm-media',
+        folder: 'chat-media',
+        file,
+        contentType: contentType || 'application/octet-stream',
+        extension: fileExt,
+      });
+      console.log('[CRM][sendMedia] mídia pronta', { path: uploaded.path, reused: uploaded.reused });
       setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 60 }));
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('crm-media')
-        .getPublicUrl(filePath);
+      const publicUrl = uploaded.url;
 
       let historyAudioUrl = publicUrl;
       let historyContentType = contentType;
       if (isAudio) {
         const wavBlob = await createMobilePlayableAudioBlob(file);
         if (wavBlob) {
-          const wavPath = `chat-media/history_${fileName.replace(/\.[^.]+$/, '')}.wav`;
-          const { error: wavUploadError } = await supabase.storage
-            .from('crm-media')
-            .upload(wavPath, wavBlob, { contentType: 'audio/wav', upsert: true });
-          if (!wavUploadError) {
-            const { data: { publicUrl: wavPublicUrl } } = supabase.storage.from('crm-media').getPublicUrl(wavPath);
-            historyAudioUrl = wavPublicUrl;
+          try {
+            const wavUploaded = await uploadDedupedMedia({
+              bucket: 'crm-media',
+              folder: 'chat-media',
+              file: wavBlob,
+              contentType: 'audio/wav',
+              extension: 'wav',
+            });
+            historyAudioUrl = wavUploaded.url;
             historyContentType = 'audio/wav';
+          } catch (wavError) {
+            console.error('[CRM][sendMedia] falha ao subir versão wav', wavError);
           }
         }
+
         await persistOutboundAudio(historyAudioUrl, null, 'history_saved_before_send', historyContentType, 'sending');
       }
       setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 80 }));

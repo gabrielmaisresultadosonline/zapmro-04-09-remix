@@ -232,7 +232,13 @@ export async function runMediaDedupeScan(
   for (const [, list] of groups) {
     const byHash = new Map<string, string[]>();
     for (const url of list) {
-      const hash = await hashUrl(url);
+      report("Confirmando arquivos idênticos", 55 + (processed / totalGroups) * 40, {
+        done: processed,
+        total: totalGroups,
+        current: shortFileName(url),
+      });
+      const hash = await hashUrl(netOf.get(url) || url);
+
       if (!hash) {
         result.skipped += 1;
         continue; // sem certeza => preserva

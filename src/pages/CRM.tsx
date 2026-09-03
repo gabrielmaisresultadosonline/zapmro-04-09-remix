@@ -659,10 +659,10 @@ const CRM = () => {
   // Per-contact inbound message timestamps (last 7 days) used to compute
   // unread counts shown as a yellow badge on the conversation list.
   const [inboundTimestampsByContact, setInboundTimestampsByContact] = useState<Record<string, string[]>>({});
-  // Baseline timestamp for unread counts: messages received before the user
-  // first loaded the CRM are considered "already seen" so the badge only
-  // shows truly new inbound messages.
-  const unreadBaselineRef = useRef<number>(Date.now());
+  // Janela considerada para o aviso de não lida (mesma dos timestamps: 7 dias).
+  // A leitura em si vem sempre de `contact.last_read_at`, que fica no banco —
+  // por isso a bolinha amarela continua após recarregar a página.
+  const unreadWindowStartRef = useRef<number>(Date.now() - 7 * 24 * 60 * 60 * 1000);
   // Freeze conversation order toggle — when on, the conversation list keeps
   // its current ordering (new contacts go on top, but existing ones don't
   // jump when new messages arrive). Persisted in localStorage.

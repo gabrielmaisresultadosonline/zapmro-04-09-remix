@@ -46,6 +46,10 @@ export const MediaDedupeScanOverlay = ({ userId, onFinished }: MediaDedupeScanOv
   const [pos, setPos] = useState<Point>({ x: 16, y: 16 });
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
   const startedRef = useRef(false);
+  // Último progresso reportado. É guardado em ref e "descarregado" na tela por
+  // um intervalo, para que o painel acompanhe em tempo real mesmo quando o CRM
+  // está renderizando muita coisa (evita ficar preso no primeiro valor).
+  const latestRef = useRef<DedupeProgress | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -54,17 +58,33 @@ export const MediaDedupeScanOverlay = ({ userId, onFinished }: MediaDedupeScanOv
     startedRef.current = true;
 
     let cancelled = false;
-    setProgress({ step: "Preparando a verificação...", percent: 2 });
+    const first: DedupeProgress = { step: "Preparando a verificação...", percent: 2 };
+    latestRef.current = first;
+    setProgress(first);
     console.log("[dedupe] varredura iniciada em segundo plano para", userId);
+
+    // Sincroniza a barra com o progresso mais recente 4x por segundo.
+    const ticker = window.setInterval(() => {
+      if (cancelled) return;
+      const latest = latestRef.current;
+      setProgress((prev) => {
+        if (!latest) return prev;
+        if (prev && prev.percent === latest.percent && prev.step === latest.step && prev.done === latest.done) {
+          return prev;
+        }
+        return { ...latest };
+      });
+    }, 250);
 
     (async () => {
       try {
         const result = await runMediaDedupeScan(userId, (p) => {
-          if (!cancelled) setProgress(p);
+          latestRef.current = p;
         });
         markDedupeScanDone(userId);
         if (cancelled) return;
-        setProgress({ step: "Concluído", percent: 100 });
+        latestRef.current = { step: "Concluído", percent: 100 };
+        setProgress(latestRef.current);
         console.log("[dedupe] varredura concluída", result);
         if (result.duplicatesRemoved > 0) {
           toast({
@@ -76,14 +96,17 @@ export const MediaDedupeScanOverlay = ({ userId, onFinished }: MediaDedupeScanOv
       } catch (error) {
         console.error("[dedupe] varredura falhou", error);
       } finally {
+        window.clearInterval(ticker);
         if (!cancelled) setTimeout(() => setProgress(null), 1200);
       }
     })();
 
     return () => {
       cancelled = true;
+      window.clearInterval(ticker);
     };
   }, [userId, onFinished, toast]);
+
 
   const onPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     dragRef.current = { dx: event.clientX - pos.x, dy: event.clientY - pos.y };

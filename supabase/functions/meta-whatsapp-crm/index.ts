@@ -5946,11 +5946,24 @@ async function fetchAndStoreIncomingMedia(
       }
 
       if (!response.ok) {
-        console.error('Meta API Error:', JSON.stringify(result, null, 2));
+        console.error('[TEMPLATE-CREATE-META-ERROR]', JSON.stringify({
+          http_status: response.status,
+          template_name: name,
+          requested_category: requestedCategory,
+          language,
+          payload_sent: { ...createTemplatePayload, components: processedComponents },
+          meta_error: result?.error || result,
+        }, null, 2));
         let friendly = getMetaTemplateErrorMessage(result);
         if (result?.error?.error_subcode === 2388023) {
           friendly = 'A Meta está bloqueando este nome de template porque o anterior (mesmo nome em pt_BR) ainda está em janela de exclusão (~4 semanas). Tente um nome diferente, ex.: adicione "_v2" ao final.';
         }
+        const rawMsg = `${result?.error?.error_user_msg || ''} ${result?.error?.message || ''} ${result?.error?.error_user_title || ''}`.toLowerCase();
+        if (rawMsg.includes('categor')) {
+          const suggestion = `${String(name).slice(0, 500)}_${requestedCategory.toLowerCase().slice(0, 4)}2`;
+          friendly = `A Meta trava a categoria pelo NOME do template. O nome "${name}" já está registrado com outra categoria, então não é possível recriá-lo como ${requestedCategory}. Crie com um nome novo, por exemplo: "${suggestion}". (Meta: ${result?.error?.fbtrace_id || 'sem trace'})`;
+        }
+
         return new Response(JSON.stringify({
           success: false,
           error: friendly,

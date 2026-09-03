@@ -124,13 +124,18 @@ async function findUrlsStillInUse(urls: string[], userId?: string | null): Promi
   const inUse = new Set<string>();
   if (!urls.length) return inUse;
 
-  // Mensagens: media_url e conteúdo/metadata.
+  // Mensagens: consultas separadas com .eq evitam problemas de escape que o
+  // filtro `or(...)` do PostgREST teria com URLs contendo vírgulas/parênteses.
   for (const url of urls) {
-    let query = supabase.from("crm_messages").select("id").limit(1);
-    query = query.or(`media_url.eq.${url},content.eq.${url}`);
-    const { data } = await query;
-    if (data && data.length > 0) inUse.add(url);
+    const byMedia = await supabase.from("crm_messages").select("id").eq("media_url", url).limit(1);
+    if (byMedia.data && byMedia.data.length > 0) {
+      inUse.add(url);
+      continue;
+    }
+    const byContent = await supabase.from("crm_messages").select("id").eq("content", url).limit(1);
+    if (byContent.data && byContent.data.length > 0) inUse.add(url);
   }
+
 
   // Fluxos: os nodes são pequenos, então varremos no cliente.
   let flowQuery = supabase.from("crm_flows").select("nodes, edges");

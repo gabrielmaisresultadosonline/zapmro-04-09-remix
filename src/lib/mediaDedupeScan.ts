@@ -22,7 +22,16 @@ export interface DedupeProgress {
   step: string;
   /** 0–100. */
   percent: number;
+  /** Quantos arquivos já foram verificados. */
+  done?: number;
+  /** Total de arquivos a verificar. */
+  total?: number;
+  /** Estimativa de tempo restante em segundos. */
+  etaSeconds?: number;
+  /** Arquivo/conversa sendo verificada agora (nome curto). */
+  current?: string;
 }
+
 
 export interface DedupeResult {
   scanned: number;

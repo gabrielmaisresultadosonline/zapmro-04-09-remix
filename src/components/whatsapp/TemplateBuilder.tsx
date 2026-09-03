@@ -294,6 +294,17 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
 
   const bodyVariableIndexes = getTemplateVariableIndexes(bodyText);
 
+  /**
+   * A Meta rejeita corpos que começam ou terminam com uma variável.
+   * Estado derivado (sem useEffect) usado para bloquear o envio e avisar na hora.
+   */
+  const bodyStartsOrEndsWithVariable = (() => {
+    const trimmed = bodyText.trim();
+    if (!trimmed) return false;
+    return /^\{\{\s*\d+\s*\}\}/.test(trimmed) || /\{\{\s*\d+\s*\}\}$/.test(trimmed);
+  })();
+
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, cardIndex?: number) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -348,6 +359,18 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
       toast({ title: "Variáveis fora de sequência", description: "Use {{1}}, {{2}}, {{3}} em ordem, sem pular números.", variant: "destructive" });
       return;
     }
+
+    // Regra da Meta: o corpo não pode começar nem terminar com uma variável
+    // ("Variables can't be at the start or end of the template").
+    if (templateType === 'STANDARD' && bodyStartsOrEndsWithVariable) {
+      toast({
+        title: "Variável no início ou fim",
+        description: "A Meta não aceita o corpo começando ou terminando com {{n}}. Ex.: use \"Olá {{1}}, tudo bem?\" em vez de \"{{1}}\" no fim.",
+        variant: "destructive",
+      });
+      return;
+    }
+
 
     const invalidButton = buttons.find(button => !String(button.text || '').trim() || (button.type === 'URL' && !/^https?:\/\//i.test(String(button.url || '').trim())));
     if (templateType === 'STANDARD' && invalidButton) {
@@ -663,6 +686,12 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
                       {!hasSequentialTemplateVariables(bodyText) && (
                         <p className="text-[10px] text-destructive">As variáveis precisam ser sequenciais: {'{{1}}'}, {'{{2}}'}, {'{{3}}'}...</p>
                       )}
+                      {bodyStartsOrEndsWithVariable && (
+                        <p className="text-[10px] text-destructive">
+                          A Meta não aceita variável no início nem no fim do corpo. Escreva algum texto antes e depois (ex.: “Olá {'{{1}}'}, tudo bem?”).
+                        </p>
+                      )}
+
                     </div>
                   )}
                 </div>

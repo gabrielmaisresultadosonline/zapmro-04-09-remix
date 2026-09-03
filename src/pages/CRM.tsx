@@ -127,6 +127,7 @@ import SalesTutorials from "@/components/sales/SalesTutorials";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { EmojiPicker } from "@/components/crm/EmojiPicker";
 import { getFileExtension, resolveMimeType } from "@/lib/mime";
+import MediaDedupeScanOverlay from "@/components/crm/MediaDedupeScanOverlay";
 import ConversationStorageSettings from "@/components/crm/ConversationStorageSettings";
 import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from "@/lib/mediaStorage";
 
@@ -5399,6 +5400,9 @@ const CRM = () => {
     <SidebarProvider>
       <div className={`h-[100dvh] w-full flex overflow-hidden bg-[#f0f2f5] dark:bg-[#0c1317] ${crmTheme === 'light' ? 'crm-theme-light' : ''}`}>
         <AnnouncementPopup />
+        {/* Varredura única por cliente: unifica arquivos idênticos já existentes. */}
+        <MediaDedupeScanOverlay userId={currentUserId} onFinished={() => fetchData(false)} />
+
         {whatsappDisconnected && (
           <div className="fixed top-0 left-0 right-0 z-[100] bg-red-600 text-white px-4 py-3 shadow-lg flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-medium">
@@ -9839,6 +9843,7 @@ const CRM = () => {
                           setInboundTimestampsByContact({});
                         }}
                       />
+
                      </Accordion>
 
                   </div>

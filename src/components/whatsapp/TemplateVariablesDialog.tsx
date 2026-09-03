@@ -239,11 +239,16 @@ export const TemplateVariablesDialog: React.FC<TemplateVariablesDialogProps> = (
     setUploading(true);
     try {
       const ext = file.name.split('.').pop() || 'bin';
-      const path = `template-media/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error } = await supabase.storage.from('crm-media').upload(path, file, { contentType: file.type || undefined });
-      if (error) throw error;
-      const { data } = supabase.storage.from('crm-media').getPublicUrl(path);
-      setConfig(prev => ({ ...prev, headerMediaUrl: data.publicUrl, headerDocumentFilename: schema.headerKind === 'DOCUMENT' ? file.name : prev.headerDocumentFilename }));
+      // Deduplicação por hash: a mesma imagem de template não é reenviada.
+      const uploaded = await uploadDedupedMedia({
+        bucket: 'crm-media',
+        folder: 'template-media',
+        file,
+        contentType: file.type || undefined,
+        extension: ext,
+      });
+      setConfig(prev => ({ ...prev, headerMediaUrl: uploaded.url, headerDocumentFilename: schema.headerKind === 'DOCUMENT' ? file.name : prev.headerDocumentFilename }));
+
       toast({ title: 'Mídia enviada', description: 'Ela será usada apenas neste envio/campanha.' });
     } catch (err: any) {
       toast({ title: 'Erro no upload', description: err?.message || 'Tente novamente.', variant: 'destructive' });

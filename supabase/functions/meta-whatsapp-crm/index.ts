@@ -108,7 +108,16 @@ function validateTemplateForMeta(name: unknown, category: unknown, language: unk
       }
     };
 
-    if (component?.type === 'BODY') assertSequentialVariables(component?.text, 'O corpo da mensagem');
+    if (component?.type === 'BODY') {
+      assertSequentialVariables(component?.text, 'O corpo da mensagem');
+      // Regra da Meta: "Variables can't be at the start or end of the template".
+      const bodyText = String(component?.text || '').trim();
+      if (/^\{\{\s*\d+\s*\}\}/.test(bodyText) || /\{\{\s*\d+\s*\}\}$/.test(bodyText)) {
+        console.error('[TEMPLATE-VALIDATION] variável no início/fim do corpo', { bodyText });
+        throw new Error('A Meta não aceita o corpo começando ou terminando com variável ({{1}}, {{2}}...). Escreva algum texto antes e depois da variável.');
+      }
+    }
+
     if (component?.type === 'HEADER' && component?.format === 'TEXT' && !firstNonEmptyString(component?.text)) {
       throw new Error('Preencha o texto do cabeçalho ou selecione “Nenhum”.');
     }

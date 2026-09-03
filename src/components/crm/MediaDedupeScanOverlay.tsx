@@ -22,6 +22,15 @@ function formatBytes(bytes: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
 }
 
+/** Tempo restante em linguagem simples ("cerca de 2 min"). */
+function formatEta(seconds?: number): string | null {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 60) return `cerca de ${Math.ceil(seconds)} s restantes`;
+  const minutes = Math.ceil(seconds / 60);
+  return `cerca de ${minutes} min ${minutes === 1 ? "restante" : "restantes"}`;
+}
+
+
 /**
  * Varredura única por cliente: unifica arquivos idênticos já existentes no
  * armazenamento. Aparece uma vez, com barra de progresso, e nas próximas

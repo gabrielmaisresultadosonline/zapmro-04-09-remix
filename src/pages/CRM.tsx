@@ -127,6 +127,9 @@ import SalesTutorials from "@/components/sales/SalesTutorials";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { EmojiPicker } from "@/components/crm/EmojiPicker";
 import { getFileExtension, resolveMimeType } from "@/lib/mime";
+import ConversationStorageSettings from "@/components/crm/ConversationStorageSettings";
+import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from "@/lib/mediaStorage";
+
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";

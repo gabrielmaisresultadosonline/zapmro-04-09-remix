@@ -929,7 +929,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   if (!aiPrompt) aiPrompt = "Você é um assistente prestativo.";
   
   const kanbanInstruction = aiSettings?.ai_kanban_auto_organizer
-    ? `\n14. ORGANIZADOR KANBAN: ao final de TODA resposta, inclua exatamente uma etiqueta interna: [[KANBAN:frio]], [[KANBAN:quente]], [[KANBAN:cliente]] ou [[KANBAN:humano]]. Use frio para baixo interesse, quente para intenção de compra clara, cliente para compra/contratação confirmada e humano quando pedir atendimento humano. A etiqueta não será mostrada ao cliente.`
+    ? `\n14. ORGANIZADOR KANBAN (OBRIGATÓRIO): ao final de TODA resposta, inclua exatamente uma etiqueta interna: [[KANBAN:frio]], [[KANBAN:quente]], [[KANBAN:cliente]] ou [[KANBAN:humano]]. Use frio para baixo interesse, quente para intenção de compra clara, cliente para compra/contratação confirmada e humano quando pedir atendimento humano. Nunca responda sem essa etiqueta.\n14.1. AUTONOMIA DE ETIQUETAS: você também pode criar/ajustar uma etiqueta própria do CRM quando nenhuma das quatro descrever bem a conversa, usando [[ETIQUETA:Nome curto]] (ex.: [[ETIQUETA:Orçamento enviado]]). Ela será criada automaticamente no Kanban e aplicada só a este contato. Use no máximo uma por resposta e sempre em português.\n14.2. As etiquetas internas nunca são mostradas ao cliente.`
     : '';
   const sendingInstruction = aiSettings?.ai_send_bundled
     ? '\n15. FORMATO DE ENVIO: responda em um único bloco coeso sempre que possível.'

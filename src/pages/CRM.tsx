@@ -659,10 +659,10 @@ const CRM = () => {
   // Per-contact inbound message timestamps (last 7 days) used to compute
   // unread counts shown as a yellow badge on the conversation list.
   const [inboundTimestampsByContact, setInboundTimestampsByContact] = useState<Record<string, string[]>>({});
-  // Baseline timestamp for unread counts: messages received before the user
-  // first loaded the CRM are considered "already seen" so the badge only
-  // shows truly new inbound messages.
-  const unreadBaselineRef = useRef<number>(Date.now());
+  // Janela considerada para o aviso de não lida (mesma dos timestamps: 7 dias).
+  // A leitura em si vem sempre de `contact.last_read_at`, que fica no banco —
+  // por isso a bolinha amarela continua após recarregar a página.
+  const unreadWindowStartRef = useRef<number>(Date.now() - 7 * 24 * 60 * 60 * 1000);
   // Freeze conversation order toggle — when on, the conversation list keeps
   // its current ordering (new contacts go on top, but existing ones don't
   // jump when new messages arrive). Persisted in localStorage.
@@ -6352,18 +6352,22 @@ const CRM = () => {
                               <div className="flex items-center w-full gap-2 min-w-0">
                                 <div className="flex flex-1 min-w-0 items-center gap-2 overflow-hidden">
                                   {(() => {
-                                     // Se o contato já foi aberto alguma vez, usamos `last_read_at`.
-                                     // Só quando nunca houve leitura caímos no baseline da sessão,
-                                     // assim as mensagens novas continuam marcadas após recarregar.
-                                     const lastReadT = contact.last_read_at ? new Date(contact.last_read_at).getTime() : 0;
-                                     const baselineT = lastReadT > 0 ? lastReadT : unreadBaselineRef.current;
+                                     // A marcação de "não lida" vive no banco (`last_read_at`),
+                                     // nunca em um baseline da sessão. Assim a bolinha amarela
+                                     // sobrevive a recarregar a página e só desaparece quando a
+                                     // conversa é realmente aberta.
+                                     const baselineT = contact.last_read_at ? new Date(contact.last_read_at).getTime() : 0;
                                      const stamps = inboundTimestampsByContact[contact.id] || [];
                                      const unread = stamps.filter(ts => new Date(ts).getTime() > baselineT).length;
                                      // Fallback: se ainda não carregamos os timestamps, mas o contato
                                      // tem interação mais recente que a leitura, mostramos o aviso.
+                                     // Limitado à mesma janela de 7 dias usada pelos timestamps para
+                                     // não marcar conversas históricas em massa.
                                      const lastInboundRaw = contact.last_message_received_at || contact.last_interaction;
                                      const lastInboundT = lastInboundRaw ? new Date(lastInboundRaw).getTime() : 0;
-                                     const hasPending = unread > 0 || (stamps.length === 0 && lastInboundT > baselineT);
+                                     const withinWindow = lastInboundT > unreadWindowStartRef.current;
+                                     const hasPending = unread > 0
+                                       || (stamps.length === 0 && withinWindow && lastInboundT > baselineT);
                                      if (!hasPending) return null;
                                     return (
                                       <div

@@ -456,9 +456,34 @@ function extractAiKanbanCategory(reply: string): AiKanbanCategory | null {
   return match ? match[1].toLowerCase() as AiKanbanCategory : null;
 }
 
+/**
+ * Autonomia de etiquetas: o agente pode pedir uma etiqueta livre com
+ * [[ETIQUETA:Nome da etiqueta]]. Ela é criada no Kanban do próprio usuário
+ * quando ainda não existir e nunca sobrescreve etiquetas de outros cadastros.
+ */
+function extractAiCustomLabel(reply: string): string | null {
+  const match = reply.match(/\[\[ETIQUETA:\s*([^\]]{2,40}?)\s*\]\]/i);
+  if (!match) return null;
+  const label = match[1].replace(/\s+/g, ' ').trim();
+  return label ? label : null;
+}
+
+/** Valor técnico estável para a etiqueta livre (sem acentos, sem espaços). */
+function slugifyLabelValue(label: string): string {
+  const slug = label
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return slug ? `ai_${slug}` : '';
+}
+
 function cleanAiControlTags(reply: string): string {
   return reply
     .replace(/\[\[KANBAN:(?:frio|quente|cliente|humano)\]\]/gi, '')
+    .replace(/\[\[ETIQUETA:[^\]]*\]\]/gi, '')
     .replace(/\[\[TRANSFER_TO_HUMAN\]\]/gi, '')
     .trim();
 }
@@ -510,6 +535,88 @@ async function organizeContactInAiKanban(supabase: any, contact: any, userId: st
     .eq('id', contact.id)
     .eq('user_id', userId);
   if (contactError) throw new Error(`Não foi possível organizar o contato no Kanban: ${contactError.message}`);
+}
+
+/**
+ * Aplica uma etiqueta livre criada pelo próprio agente. Idempotente: cria o
+ * status no Kanban do usuário apenas quando ele ainda não existe (por valor ou
+ * por nome) e depois move somente o contato desta conversa.
+ */
+async function applyAiCustomLabel(supabase: any, contact: any, userId: string, label: string) {
+  const value = slugifyLabelValue(label);
+  if (!value) return;
+
+  const { data: existing, error: readError } = await supabase
+    .from('crm_statuses')
+    .select('value,label')
+    .eq('user_id', userId);
+  if (readError) throw new Error(`Não foi possível consultar as etiquetas: ${readError.message}`);
+
+  const normalized = label.toLowerCase();
+  const match = (existing || []).find((s: any) =>
+    String(s.value) === value || String(s.label || '').toLowerCase() === normalized);
+
+  if (!match) {
+    const { error: insertError } = await supabase.from('crm_statuses').insert({
+      user_id: userId,
+      label,
+      value,
+      color: 'slate',
+      sort_order: 50 + (existing?.length || 0),
+    });
+    // Corrida entre duas mensagens simultâneas não deve virar erro visível.
+    if (insertError && !/duplicate|unique/i.test(insertError.message || '')) {
+      throw new Error(`Não foi possível criar a etiqueta: ${insertError.message}`);
+    }
+  }
+
+  const finalValue = match?.value || value;
+  const { error: contactError } = await supabase
+    .from('crm_contacts')
+    .update({ status: finalValue })
+    .eq('id', contact.id)
+    .eq('user_id', userId);
+  if (contactError) throw new Error(`Não foi possível aplicar a etiqueta: ${contactError.message}`);
+}
+
+/**
+ * Rede de segurança do organizador: quando o modelo esquece de emitir a
+ * etiqueta interna, classificamos a conversa em uma chamada curta e barata.
+ * Uma falha aqui nunca interrompe a resposta ao cliente.
+ */
+async function classifyConversationForKanban(
+  apiKey: string,
+  history: string,
+  lastMessage: string,
+): Promise<AiKanbanCategory | null> {
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        max_tokens: 5,
+        messages: [
+          {
+            role: 'system',
+            content: 'Classifique a conversa de vendas em UMA palavra, sem pontuação: frio, quente, cliente ou humano. frio=pouco interesse; quente=intenção de compra clara; cliente=compra confirmada; humano=pediu atendimento humano.',
+          },
+          { role: 'user', content: `Histórico:\n${history}\n\nÚltima mensagem do cliente: ${lastMessage || '(vazia)'}` },
+        ],
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const raw = String(data?.choices?.[0]?.message?.content || '').toLowerCase().trim();
+    if (raw.includes('humano')) return 'humano';
+    if (raw.includes('cliente')) return 'cliente';
+    if (raw.includes('quente')) return 'quente';
+    if (raw.includes('frio')) return 'frio';
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -822,7 +929,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   if (!aiPrompt) aiPrompt = "Você é um assistente prestativo.";
   
   const kanbanInstruction = aiSettings?.ai_kanban_auto_organizer
-    ? `\n14. ORGANIZADOR KANBAN: ao final de TODA resposta, inclua exatamente uma etiqueta interna: [[KANBAN:frio]], [[KANBAN:quente]], [[KANBAN:cliente]] ou [[KANBAN:humano]]. Use frio para baixo interesse, quente para intenção de compra clara, cliente para compra/contratação confirmada e humano quando pedir atendimento humano. A etiqueta não será mostrada ao cliente.`
+    ? `\n14. ORGANIZADOR KANBAN (OBRIGATÓRIO): ao final de TODA resposta, inclua exatamente uma etiqueta interna: [[KANBAN:frio]], [[KANBAN:quente]], [[KANBAN:cliente]] ou [[KANBAN:humano]]. Use frio para baixo interesse, quente para intenção de compra clara, cliente para compra/contratação confirmada e humano quando pedir atendimento humano. Nunca responda sem essa etiqueta.\n14.1. AUTONOMIA DE ETIQUETAS: você também pode criar/ajustar uma etiqueta própria do CRM quando nenhuma das quatro descrever bem a conversa, usando [[ETIQUETA:Nome curto]] (ex.: [[ETIQUETA:Orçamento enviado]]). Ela será criada automaticamente no Kanban e aplicada só a este contato. Use no máximo uma por resposta e sempre em português.\n14.2. As etiquetas internas nunca são mostradas ao cliente.`
     : '';
   const sendingInstruction = aiSettings?.ai_send_bundled
     ? '\n15. FORMATO DE ENVIO: responda em um único bloco coeso sempre que possível.'
@@ -904,18 +1011,32 @@ ${aiPrompt}
     }
     
     const rawReply = aiData.choices?.[0]?.message?.content || "";
-    const kanbanCategory = aiSettings?.ai_kanban_auto_organizer
-      ? extractAiKanbanCategory(rawReply)
-      : null;
+    const organizerEnabled = aiSettings?.ai_kanban_auto_organizer === true;
+    let kanbanCategory = organizerEnabled ? extractAiKanbanCategory(rawReply) : null;
+    const customLabel = organizerEnabled ? extractAiCustomLabel(rawReply) : null;
     const wantsHumanTransfer = rawReply.includes('[[TRANSFER_TO_HUMAN]]');
     const reply = cleanAiControlTags(rawReply);
     aiLog('model_reply_received', { reply_length: reply.length });
     console.log(`[AI-AGENT] OpenAI reply for ${waId}: ${reply.slice(0, 100)}...`);
 
-    if (kanbanCategory && contact?.id && (userId || contact?.user_id)) {
+    const organizerUserId = userId || contact?.user_id;
+
+    // Rede de segurança: sem etiqueta livre e sem categoria, classificamos a
+    // conversa para que o organizador nunca deixe o contato sem etiqueta.
+    if (organizerEnabled && !customLabel && !kanbanCategory) {
+      kanbanCategory = await classifyConversationForKanban(OPENAI_API_KEY, history, messageText || '');
+      aiLog('kanban_fallback_classification', { category: kanbanCategory || 'none' });
+    }
+
+    if (organizerEnabled && contact?.id && organizerUserId) {
       try {
-        await organizeContactInAiKanban(supabase, contact, userId || contact.user_id, kanbanCategory);
-        aiLog('kanban_organized', { category: kanbanCategory });
+        if (customLabel) {
+          await applyAiCustomLabel(supabase, contact, organizerUserId, customLabel);
+          aiLog('kanban_custom_label_applied', { label: customLabel });
+        } else if (kanbanCategory) {
+          await organizeContactInAiKanban(supabase, contact, organizerUserId, kanbanCategory);
+          aiLog('kanban_organized', { category: kanbanCategory });
+        }
       } catch (kanbanError: any) {
         // Organização é auxiliar: uma falha nela nunca deve impedir a resposta.
         aiLog('kanban_organization_failed', { error: kanbanError?.message || String(kanbanError) });

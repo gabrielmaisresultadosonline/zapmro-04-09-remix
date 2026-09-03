@@ -534,44 +534,62 @@ serve(async (req) => {
         return json({ success: false, error: "Senha inválida (mínimo 6 caracteres)" });
       }
 
-      // 1ª tentativa: SDK admin. Em instalações self-hosted o SDK às vezes
-      // falha silenciosamente (proxy/URL interna), por isso há o fallback REST.
-      let sdkError: string | null = null;
-      try {
-        const { error } = await supabase.auth.admin.updateUserById(userId, { password: pwd });
-        if (!error) return json({ success: true });
-        sdkError = error.message;
-      } catch (e: any) {
-        sdkError = e?.message || "Falha no SDK";
-      }
-      console.error("[set_password] SDK falhou:", sdkError);
+      // Porquê da ordem invertida: em instalações self-hosted o SDK admin às
+      // vezes fica pendurado no proxy interno por dezenas de segundos. O painel
+      // abortava por tempo limite e mostrava "não confirmada" mesmo com a senha
+      // já trocada. A chamada REST direta ao GoTrue responde em milissegundos,
+      // então ela vira a 1ª tentativa — com tempo limite próprio.
+      const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+      const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+      let restError: string | null = null;
 
-      // 2ª tentativa: chamada direta ao GoTrue com a service role key.
       try {
-        const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
-        const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-        const res = await fetch(`${base}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: key,
-            Authorization: `Bearer ${key}`,
-          },
-          body: JSON.stringify({ password: pwd }),
-        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        let res: Response;
+        try {
+          res = await fetch(`${base}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: key,
+              Authorization: `Bearer ${key}`,
+            },
+            body: JSON.stringify({ password: pwd }),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+
         const raw = await res.text();
         if (res.ok) return json({ success: true });
-        console.error("[set_password] GoTrue falhou:", res.status, raw);
+
         let detail = raw;
         try {
           const parsed = JSON.parse(raw);
           detail = parsed?.msg || parsed?.message || parsed?.error_description || raw;
         } catch { /* mantém texto cru */ }
-        return json({ success: false, error: `Não foi possível trocar a senha: ${detail || sdkError}` });
+        restError = detail || `HTTP ${res.status}`;
+        console.error("[set_password] GoTrue falhou:", res.status, restError);
+      } catch (e: any) {
+        restError = e?.name === "AbortError" ? "GoTrue não respondeu em 8s" : (e?.message || "Falha no GoTrue");
+        console.error("[set_password] GoTrue indisponível:", restError);
+      }
+
+      // 2ª tentativa: SDK admin, apenas se o caminho direto falhou.
+      try {
+        const { error } = await supabase.auth.admin.updateUserById(userId, { password: pwd });
+        if (!error) return json({ success: true });
+        console.error("[set_password] SDK falhou:", error.message);
+        return json({
+          success: false,
+          error: `Não foi possível trocar a senha: ${error.message || restError}`,
+        });
       } catch (e: any) {
         return json({
           success: false,
-          error: `Não foi possível trocar a senha: ${e?.message || sdkError || "erro desconhecido"}`,
+          error: `Não foi possível trocar a senha: ${e?.message || restError || "erro desconhecido"}`,
         });
       }
     }

@@ -3,7 +3,7 @@
 # =============================================================
 # Script de Instalação Automática - I.A MRO
 # Para Ubuntu LTS (VPS Hostinger)
-# Repositório: https://github.com/gabrielmaisresultadosonline/whatsapp-home-launcher.git
+# Repositório: https://github.com/gabrielmaisresultadosonline/zapmro-remix-03-09-2026.git
 # Domínio: zapmro.com.br
 # =============================================================
 
@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 APP_NAME="ia-mro"
 APP_DIR="/var/www/$APP_NAME"
 DOMAIN="${1:-zapmro.com.br}"
-REPO_URL="https://github.com/gabrielmaisresultadosonline/whatsapp-home-launcher.git"
+REPO_URL="https://github.com/gabrielmaisresultadosonline/zapmro-remix-03-09-2026.git"
 
 echo -e "${YELLOW}Atualizando sistema...${NC}"
 sudo apt update && sudo apt upgrade -y

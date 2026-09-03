@@ -9803,8 +9803,16 @@ const CRM = () => {
                             </div>
                           </div>
                         </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
+                       </AccordionItem>
+                      <ConversationStorageSettings
+                        userId={currentUserId}
+                        onHistoryCleared={() => {
+                          setChatMessages([]);
+                          setInboundTimestampsByContact({});
+                        }}
+                      />
+                     </Accordion>
+
                   </div>
 
                   <div className="flex justify-end pt-4">

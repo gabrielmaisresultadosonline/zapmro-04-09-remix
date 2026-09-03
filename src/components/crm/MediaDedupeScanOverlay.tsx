@@ -101,13 +101,30 @@ export const MediaDedupeScanOverlay = ({ userId, onFinished }: MediaDedupeScanOv
 
         <Progress value={progress.percent} className="h-2" />
 
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          {progress.step}
-        </p>
+        <div className="space-y-1">
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+            <span className="truncate">{progress.step}</span>
+          </p>
+          <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <span>
+              {typeof progress.done === "number" && typeof progress.total === "number"
+                ? `${progress.done} de ${progress.total} arquivos`
+                : `${Math.round(progress.percent)}%`}
+            </span>
+            <span>{formatEta(progress.etaSeconds) ?? "calculando tempo..."}</span>
+          </div>
+          {progress.current && (
+            <p className="truncate font-mono text-[10px] text-muted-foreground/80" title={progress.current}>
+              {progress.current}
+            </p>
+          )}
+        </div>
+
         <p className="text-[11px] text-muted-foreground">
           Nada é perdido: apenas cópias com conteúdo idêntico são unificadas.
         </p>
+
       </div>
     </div>
   );

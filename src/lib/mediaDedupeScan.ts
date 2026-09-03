@@ -16,6 +16,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { collectStorageUrls, hashBlob, parseStorageUrl } from "@/lib/mediaStorage";
+import { resolveMediaUrl } from "@/lib/mediaUrl";
 
 export interface DedupeProgress {
   /** Etapa legível para o usuário. */

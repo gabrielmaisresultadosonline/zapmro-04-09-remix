@@ -1098,7 +1098,11 @@ serve(async (req) => {
           grantFullName = prof?.full_name || "";
           grantAccessUntil = prof?.access_until || undefined;
 
-          if (resetPassword !== false) {
+          // Porquê: liberar plano NÃO deve mexer na senha do cliente. Antes o
+          // padrão era resetar (`!== false`), então quem já tinha cadastro
+          // perdia o acesso ao ativar o plano. Agora só reseta se o painel
+          // pedir explicitamente `resetPassword: true`.
+          if (resetPassword === true) {
             grantPassword = `Zap${Math.random().toString(36).slice(2, 8)}${Math.floor(
               10 + Math.random() * 89
             )}`;

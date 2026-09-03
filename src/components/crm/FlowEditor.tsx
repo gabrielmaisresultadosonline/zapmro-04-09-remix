@@ -1940,13 +1940,15 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
               setUploading(true);
               try {
                 const fileExt = type === 'video' ? 'mp4' : (file.name.split('.').pop() || 'jpg');
-                const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-                const filePath = `flow-media/carousel/${fileName}`;
-                const { error: uploadError } = await supabase.storage
-                  .from('crm-media')
-                  .upload(filePath, file, { contentType: type === 'video' ? 'video/mp4' : file.type || undefined });
-                if (uploadError) throw uploadError;
-                const { data: { publicUrl } } = supabase.storage.from('crm-media').getPublicUrl(filePath);
+                const uploaded = await uploadDedupedMedia({
+                  bucket: 'crm-media',
+                  folder: 'flow-media/carousel',
+                  file,
+                  contentType: type === 'video' ? 'video/mp4' : file.type || undefined,
+                  extension: fileExt,
+                });
+                const publicUrl = uploaded.url;
+
                 const next = [...cards];
                 next[cardIdx] = { ...next[cardIdx], mediaType: type, mediaUrl: publicUrl, fileName: file.name };
                 updateCards(next);

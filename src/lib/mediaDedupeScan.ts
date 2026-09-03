@@ -285,7 +285,7 @@ export async function runMediaDedupeScan(
           });
 
           // 3) Só agora o arquivo sobrando sai do bucket.
-          const meta = await headMeta(duplicate);
+          const meta = await headMeta(duplicateNet);
           const { error: removeError } = await supabase.storage.from(parsed.bucket).remove([parsed.path]);
           if (removeError) throw removeError;
           result.duplicatesRemoved += 1;

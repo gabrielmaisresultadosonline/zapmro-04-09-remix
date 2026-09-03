@@ -3133,6 +3133,18 @@ const CRM = () => {
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
+  /**
+   * Coleta as URLs de mídia das mensagens do contato ANTES de apagá-las,
+   * para que a limpeza possa remover o que ficou órfão no armazenamento.
+   */
+  const collectContactMediaUrls = async (contactId: string): Promise<string[]> => {
+    const { data } = await supabase
+      .from('crm_messages')
+      .select('media_url, content, metadata')
+      .eq('contact_id', contactId);
+    return Array.from(collectStorageUrls(data || []));
+  };
+
   const handleClearConversation = async (contactId: string) => {
     try {
       if (metaSettings.save_deleted_messages) {
@@ -3144,8 +3156,11 @@ const CRM = () => {
           .or('is_deleted.is.null,is_deleted.eq.false');
         if (error) throw error;
       } else {
+        const mediaUrls = await collectContactMediaUrls(contactId);
         const { error } = await supabase.from('crm_messages').delete().eq('contact_id', contactId);
         if (error) throw error;
+        // Só remove do bucket o que nenhuma outra conversa/fluxo referencia.
+        await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current });
       }
       if (selectedContactRef.current?.id === contactId) {
         setChatMessages([]);
@@ -3164,10 +3179,13 @@ const CRM = () => {
 
   const handleDeleteConversation = async (contactId: string) => {
     try {
+      const mediaUrls = await collectContactMediaUrls(contactId);
       const { error: msgErr } = await supabase.from('crm_messages').delete().eq('contact_id', contactId);
       if (msgErr) throw msgErr;
       const { error: contactErr } = await supabase.from('crm_contacts').delete().eq('id', contactId);
       if (contactErr) throw contactErr;
+      await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current });
+
       setContacts(prev => prev.filter(c => c.id !== contactId));
       if (selectedContactRef.current?.id === contactId) {
         setSelectedContact(null);

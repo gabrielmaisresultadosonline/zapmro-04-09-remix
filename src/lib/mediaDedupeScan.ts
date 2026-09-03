@@ -194,7 +194,9 @@ export async function runMediaDedupeScan(
   }
 
   result.scanned = urls.length;
+  console.log("[dedupe] arquivos do armazenamento atual:", urls.length, "| ignorados:", result.skipped);
   if (urls.length < 2) return result;
+
 
   report("Analisando os arquivos...", 8, { done: 0, total: urls.length });
   const byFingerprint = new Map<string, string[]>();

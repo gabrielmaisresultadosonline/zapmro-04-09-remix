@@ -86,23 +86,43 @@ async function fetchMessagesWithMedia(userId: string): Promise<MessageRow[]> {
   return rows;
 }
 
-/** Metadados do objeto sem baixar o binário (usado para pré-agrupar). */
-async function headMeta(url: string): Promise<{ size: number; type: string } | null> {
+/** Nome curto do arquivo, para exibir no overlay. */
+export function shortFileName(url: string): string {
   try {
-    const res = await fetch(url, { method: "HEAD" });
-    if (!res.ok) return null;
-    const size = Number(res.headers.get("content-length") || 0);
-    if (!size) return null;
-    return { size, type: res.headers.get("content-type") || "" };
+    const path = new URL(url).pathname;
+    const name = path.split("/").filter(Boolean).pop() || url;
+    return name.length > 34 ? `${name.slice(0, 31)}...` : name;
   } catch {
-    return null;
+    return url.slice(-34);
   }
 }
 
-async function hashUrl(url: string): Promise<string | null> {
+/** fetch com tempo limite: host morto (ERR_NAME_NOT_RESOLVED) não pode travar a varredura. */
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Metadados do objeto sem baixar o binário (usado para pré-agrupar). */
+async function headMeta(url: string): Promise<{ size: number; type: string } | null> {
+  const res = await fetchWithTimeout(url, { method: "HEAD" }, 8000);
+  if (!res?.ok) return null;
+  const size = Number(res.headers.get("content-length") || 0);
+  if (!size) return null;
+  return { size, type: res.headers.get("content-type") || "" };
+}
+
+async function hashUrl(url: string): Promise<string | null> {
+  const res = await fetchWithTimeout(url, {}, 30000);
+  if (!res?.ok) return null;
+  try {
     const blob = await res.blob();
     if (!blob.size || blob.size > MAX_HASH_BYTES) return null;
     return await hashBlob(blob);
@@ -110,6 +130,7 @@ async function hashUrl(url: string): Promise<string | null> {
     return null;
   }
 }
+
 
 /**
  * Executa a varredura. `onProgress` alimenta a barra de carregamento.

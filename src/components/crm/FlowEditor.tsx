@@ -729,10 +729,25 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
   };
 
   const deleteNode = (nodeId: string) => {
+    const removed = nodes.find((n) => n.id === nodeId);
     setNodes((nds) => nds.filter((n) => n.id !== nodeId));
     setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
     setSelectedNode(null);
+
+    // Apagar o bloco também libera o arquivo do armazenamento, desde que
+    // nenhuma mensagem ou outro fluxo ainda aponte para aquela URL.
+    const urls = Array.from(collectStorageUrls(removed?.data ?? null));
+    if (urls.length) {
+      void deleteMediaUrlsIfUnused(urls)
+        .then((result) => {
+          if (result.removed) {
+            toast({ title: `Bloco removido`, description: `${result.removed} arquivo(s) apagado(s) do armazenamento.` });
+          }
+        })
+        .catch((error) => console.error('[FlowEditor] falha na limpeza de mídia', error));
+    }
   };
+
 
   const handleSave = () => {
     onSave({

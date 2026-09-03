@@ -728,28 +728,26 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
     }
   };
 
+  // Mídia de blocos apagados: só pode sair do bucket DEPOIS que o fluxo for
+  // salvo, senão a versão gravada no banco ainda referencia a URL.
+  const pendingMediaCleanupRef = React.useRef<Set<string>>(new Set());
+
   const deleteNode = (nodeId: string) => {
     const removed = nodes.find((n) => n.id === nodeId);
     setNodes((nds) => nds.filter((n) => n.id !== nodeId));
     setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
     setSelectedNode(null);
 
-    // Apagar o bloco também libera o arquivo do armazenamento, desde que
-    // nenhuma mensagem ou outro fluxo ainda aponte para aquela URL.
-    const urls = Array.from(collectStorageUrls(removed?.data ?? null));
-    if (urls.length) {
-      void deleteMediaUrlsIfUnused(urls)
-        .then((result) => {
-          if (result.removed) {
-            toast({ title: `Bloco removido`, description: `${result.removed} arquivo(s) apagado(s) do armazenamento.` });
-          }
-        })
-        .catch((error) => console.error('[FlowEditor] falha na limpeza de mídia', error));
-    }
+    collectStorageUrls(removed?.data ?? null).forEach((url) => pendingMediaCleanupRef.current.add(url));
   };
 
 
   const handleSave = () => {
+    const pending = Array.from(pendingMediaCleanupRef.current);
+    // As URLs ainda presentes nos blocos atuais nunca devem ser apagadas.
+    const stillUsed = collectStorageUrls(nodes);
+    const toPurge = pending.filter((url) => !stillUsed.has(url));
+
     onSave({
       ...flow,
       name: flowName,
@@ -762,7 +760,25 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
       nodes,
       edges,
     });
+
+    pendingMediaCleanupRef.current = new Set();
+    if (toPurge.length) {
+      // Aguarda a gravação propagar antes de checar referências no banco.
+      window.setTimeout(() => {
+        void deleteMediaUrlsIfUnused(toPurge)
+          .then((result) => {
+            if (result.removed) {
+              toast({
+                title: 'Armazenamento liberado',
+                description: `${result.removed} arquivo(s) sem uso foram apagados.`,
+              });
+            }
+          })
+          .catch((error) => console.error('[FlowEditor] falha na limpeza de mídia', error));
+      }, 2500);
+    }
   };
+
 
   return (
     <div className="fixed inset-0 bg-background z-50 flex flex-col">

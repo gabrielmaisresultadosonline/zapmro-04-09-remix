@@ -140,30 +140,74 @@ export async function runMediaDedupeScan(
   onProgress?: (progress: DedupeProgress) => void,
 ): Promise<DedupeResult> {
   const result: DedupeResult = { scanned: 0, duplicatesRemoved: 0, bytesFreed: 0, referencesUpdated: 0, skipped: 0 };
-  const report = (step: string, percent: number) => onProgress?.({ step, percent: Math.min(99, Math.max(1, percent)) });
+  const startedAt = Date.now();
+  const report = (step: string, percent: number, extra?: Partial<DedupeProgress>) =>
+    onProgress?.({ step, percent: Math.min(99, Math.max(1, percent)), ...extra });
 
   report("Lendo as conversas...", 3);
   const messages = await fetchMessagesWithMedia(userId);
 
   // URLs distintas do Storage referenciadas pelas mensagens.
-  const urls = Array.from(collectStorageUrls(messages.map((m) => [m.media_url, m.content])));
+  const rawUrls = Array.from(collectStorageUrls(messages.map((m) => [m.media_url, m.content])));
+
+  // Só analisamos arquivos que apontam para o armazenamento ATUAL. URLs de hosts
+  // antigos (ex.: *.supabase.co já desativado) não resolvem e travariam a barra.
+  const currentOrigin = (() => {
+    try {
+      return new URL(String(import.meta.env.VITE_SUPABASE_URL || "")).origin;
+    } catch {
+      return "";
+    }
+  })();
+  const netOf = new Map<string, string>();
+  const urls: string[] = [];
+  for (const raw of rawUrls) {
+    const net = resolveMediaUrl(raw);
+    let sameOrigin = false;
+    try {
+      sameOrigin = !!currentOrigin && new URL(net).origin === currentOrigin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (!sameOrigin) {
+      result.skipped += 1;
+      continue;
+    }
+    netOf.set(raw, net);
+    urls.push(raw);
+  }
+
   result.scanned = urls.length;
   if (urls.length < 2) return result;
 
-  report("Analisando os arquivos...", 8);
+  report("Analisando os arquivos...", 8, { done: 0, total: urls.length });
   const byFingerprint = new Map<string, string[]>();
-  for (let i = 0; i < urls.length; i += 1) {
-    const meta = await headMeta(urls[i]);
-    if (!meta) {
-      result.skipped += 1;
-    } else {
+  const CONCURRENCY = 6;
+  let checked = 0;
+  for (let i = 0; i < urls.length; i += CONCURRENCY) {
+    const batch = urls.slice(i, i + CONCURRENCY);
+    const metas = await Promise.all(batch.map((u) => headMeta(netOf.get(u) || u)));
+    metas.forEach((meta, idx) => {
+      if (!meta) {
+        result.skipped += 1;
+        return;
+      }
       const key = `${meta.size}|${meta.type}`;
       const list = byFingerprint.get(key) || [];
-      list.push(urls[i]);
+      list.push(batch[idx]);
       byFingerprint.set(key, list);
-    }
-    if (i % 15 === 0) report(`Analisando arquivos (${i + 1}/${urls.length})...`, 8 + (i / urls.length) * 42);
+    });
+    checked += batch.length;
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const etaSeconds = checked > 0 ? Math.max(1, Math.round((elapsed / checked) * (urls.length - checked))) : undefined;
+    report(`Verificando arquivos das conversas`, 8 + (checked / urls.length) * 42, {
+      done: checked,
+      total: urls.length,
+      etaSeconds,
+      current: shortFileName(batch[batch.length - 1]),
+    });
   }
+
 
   // Só grupos com mais de um candidato podem ter duplicata real.
   const groups = Array.from(byFingerprint.entries()).filter(([, list]) => list.length > 1);

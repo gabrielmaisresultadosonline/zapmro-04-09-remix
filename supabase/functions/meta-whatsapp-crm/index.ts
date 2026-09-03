@@ -1011,18 +1011,32 @@ ${aiPrompt}
     }
     
     const rawReply = aiData.choices?.[0]?.message?.content || "";
-    const kanbanCategory = aiSettings?.ai_kanban_auto_organizer
-      ? extractAiKanbanCategory(rawReply)
-      : null;
+    const organizerEnabled = aiSettings?.ai_kanban_auto_organizer === true;
+    let kanbanCategory = organizerEnabled ? extractAiKanbanCategory(rawReply) : null;
+    const customLabel = organizerEnabled ? extractAiCustomLabel(rawReply) : null;
     const wantsHumanTransfer = rawReply.includes('[[TRANSFER_TO_HUMAN]]');
     const reply = cleanAiControlTags(rawReply);
     aiLog('model_reply_received', { reply_length: reply.length });
     console.log(`[AI-AGENT] OpenAI reply for ${waId}: ${reply.slice(0, 100)}...`);
 
-    if (kanbanCategory && contact?.id && (userId || contact?.user_id)) {
+    const organizerUserId = userId || contact?.user_id;
+
+    // Rede de segurança: sem etiqueta livre e sem categoria, classificamos a
+    // conversa para que o organizador nunca deixe o contato sem etiqueta.
+    if (organizerEnabled && !customLabel && !kanbanCategory) {
+      kanbanCategory = await classifyConversationForKanban(OPENAI_API_KEY, history, messageText || '');
+      aiLog('kanban_fallback_classification', { category: kanbanCategory || 'none' });
+    }
+
+    if (organizerEnabled && contact?.id && organizerUserId) {
       try {
-        await organizeContactInAiKanban(supabase, contact, userId || contact.user_id, kanbanCategory);
-        aiLog('kanban_organized', { category: kanbanCategory });
+        if (customLabel) {
+          await applyAiCustomLabel(supabase, contact, organizerUserId, customLabel);
+          aiLog('kanban_custom_label_applied', { label: customLabel });
+        } else if (kanbanCategory) {
+          await organizeContactInAiKanban(supabase, contact, organizerUserId, kanbanCategory);
+          aiLog('kanban_organized', { category: kanbanCategory });
+        }
       } catch (kanbanError: any) {
         // Organização é auxiliar: uma falha nela nunca deve impedir a resposta.
         aiLog('kanban_organization_failed', { error: kanbanError?.message || String(kanbanError) });

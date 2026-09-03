@@ -180,7 +180,7 @@ export async function runMediaDedupeScan(
           // 1) Reaponta as mensagens para o arquivo mantido.
           const affected = messages.filter((m) => m.media_url === duplicate || m.content === duplicate);
           for (const message of affected) {
-            const patch: Record<string, string> = {};
+            const patch: { media_url?: string; content?: string } = {};
             if (message.media_url === duplicate) patch.media_url = keep;
             if (message.content === duplicate) patch.content = keep;
             if (!Object.keys(patch).length) continue;

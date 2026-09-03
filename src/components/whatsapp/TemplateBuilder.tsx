@@ -686,6 +686,12 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
                       {!hasSequentialTemplateVariables(bodyText) && (
                         <p className="text-[10px] text-destructive">As variáveis precisam ser sequenciais: {'{{1}}'}, {'{{2}}'}, {'{{3}}'}...</p>
                       )}
+                      {bodyStartsOrEndsWithVariable && (
+                        <p className="text-[10px] text-destructive">
+                          A Meta não aceita variável no início nem no fim do corpo. Escreva algum texto antes e depois (ex.: “Olá {'{{1}}'}, tudo bem?”).
+                        </p>
+                      )}
+
                     </div>
                   )}
                 </div>

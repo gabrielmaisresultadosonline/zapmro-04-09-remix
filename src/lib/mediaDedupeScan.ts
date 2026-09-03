@@ -142,14 +142,29 @@ export async function runMediaDedupeScan(
 ): Promise<DedupeResult> {
   const result: DedupeResult = { scanned: 0, duplicatesRemoved: 0, bytesFreed: 0, referencesUpdated: 0, skipped: 0 };
   const startedAt = Date.now();
-  const report = (step: string, percent: number, extra?: Partial<DedupeProgress>) =>
-    onProgress?.({ step, percent: Math.min(99, Math.max(1, percent)), ...extra });
+  const report = (step: string, percent: number, extra?: Partial<DedupeProgress>) => {
+    const safePercent = Math.min(99, Math.max(1, percent));
+    // Log no console do navegador (visível também no terminal do dev server)
+    // para acompanhar a varredura em segundo plano.
+    console.log(
+      `[dedupe] ${step} | ${safePercent.toFixed(0)}%` +
+        (typeof extra?.done === "number" && typeof extra?.total === "number"
+          ? ` | ${extra.done}/${extra.total}`
+          : "") +
+        (extra?.etaSeconds ? ` | ETA ${extra.etaSeconds}s` : "") +
+        (extra?.current ? ` | ${extra.current}` : ""),
+    );
+    onProgress?.({ step, percent: safePercent, ...extra });
+  };
 
   report("Lendo as conversas...", 3);
   const messages = await fetchMessagesWithMedia(userId);
+  console.log("[dedupe] mensagens com mídia:", messages.length);
 
   // URLs distintas do Storage referenciadas pelas mensagens.
   const rawUrls = Array.from(collectStorageUrls(messages.map((m) => [m.media_url, m.content])));
+  console.log("[dedupe] URLs encontradas:", rawUrls.length);
+
 
   // Só analisamos arquivos que apontam para o armazenamento ATUAL. URLs de hosts
   // antigos (ex.: *.supabase.co já desativado) não resolvem e travariam a barra.
@@ -179,7 +194,9 @@ export async function runMediaDedupeScan(
   }
 
   result.scanned = urls.length;
+  console.log("[dedupe] arquivos do armazenamento atual:", urls.length, "| ignorados:", result.skipped);
   if (urls.length < 2) return result;
+
 
   report("Analisando os arquivos...", 8, { done: 0, total: urls.length });
   const byFingerprint = new Map<string, string[]>();

@@ -22,6 +22,15 @@ function formatBytes(bytes: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
 }
 
+/** Tempo restante em linguagem simples ("cerca de 2 min"). */
+function formatEta(seconds?: number): string | null {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 60) return `cerca de ${Math.ceil(seconds)} s restantes`;
+  const minutes = Math.ceil(seconds / 60);
+  return `cerca de ${minutes} min ${minutes === 1 ? "restante" : "restantes"}`;
+}
+
+
 /**
  * Varredura única por cliente: unifica arquivos idênticos já existentes no
  * armazenamento. Aparece uma vez, com barra de progresso, e nas próximas
@@ -92,13 +101,30 @@ export const MediaDedupeScanOverlay = ({ userId, onFinished }: MediaDedupeScanOv
 
         <Progress value={progress.percent} className="h-2" />
 
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          {progress.step}
-        </p>
+        <div className="space-y-1">
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+            <span className="truncate">{progress.step}</span>
+          </p>
+          <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <span>
+              {typeof progress.done === "number" && typeof progress.total === "number"
+                ? `${progress.done} de ${progress.total} arquivos`
+                : `${Math.round(progress.percent)}%`}
+            </span>
+            <span>{formatEta(progress.etaSeconds) ?? "calculando tempo..."}</span>
+          </div>
+          {progress.current && (
+            <p className="truncate font-mono text-[10px] text-muted-foreground/80" title={progress.current}>
+              {progress.current}
+            </p>
+          )}
+        </div>
+
         <p className="text-[11px] text-muted-foreground">
           Nada é perdido: apenas cópias com conteúdo idêntico são unificadas.
         </p>
+
       </div>
     </div>
   );

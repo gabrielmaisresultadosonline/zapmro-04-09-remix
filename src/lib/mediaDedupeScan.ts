@@ -16,13 +16,23 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { collectStorageUrls, hashBlob, parseStorageUrl } from "@/lib/mediaStorage";
+import { resolveMediaUrl } from "@/lib/mediaUrl";
 
 export interface DedupeProgress {
   /** Etapa legível para o usuário. */
   step: string;
   /** 0–100. */
   percent: number;
+  /** Quantos arquivos já foram verificados. */
+  done?: number;
+  /** Total de arquivos a verificar. */
+  total?: number;
+  /** Estimativa de tempo restante em segundos. */
+  etaSeconds?: number;
+  /** Arquivo/conversa sendo verificada agora (nome curto). */
+  current?: string;
 }
+
 
 export interface DedupeResult {
   scanned: number;
@@ -77,23 +87,43 @@ async function fetchMessagesWithMedia(userId: string): Promise<MessageRow[]> {
   return rows;
 }
 
-/** Metadados do objeto sem baixar o binário (usado para pré-agrupar). */
-async function headMeta(url: string): Promise<{ size: number; type: string } | null> {
+/** Nome curto do arquivo, para exibir no overlay. */
+export function shortFileName(url: string): string {
   try {
-    const res = await fetch(url, { method: "HEAD" });
-    if (!res.ok) return null;
-    const size = Number(res.headers.get("content-length") || 0);
-    if (!size) return null;
-    return { size, type: res.headers.get("content-type") || "" };
+    const path = new URL(url).pathname;
+    const name = path.split("/").filter(Boolean).pop() || url;
+    return name.length > 34 ? `${name.slice(0, 31)}...` : name;
   } catch {
-    return null;
+    return url.slice(-34);
   }
 }
 
-async function hashUrl(url: string): Promise<string | null> {
+/** fetch com tempo limite: host morto (ERR_NAME_NOT_RESOLVED) não pode travar a varredura. */
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
   try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Metadados do objeto sem baixar o binário (usado para pré-agrupar). */
+async function headMeta(url: string): Promise<{ size: number; type: string } | null> {
+  const res = await fetchWithTimeout(url, { method: "HEAD" }, 8000);
+  if (!res?.ok) return null;
+  const size = Number(res.headers.get("content-length") || 0);
+  if (!size) return null;
+  return { size, type: res.headers.get("content-type") || "" };
+}
+
+async function hashUrl(url: string): Promise<string | null> {
+  const res = await fetchWithTimeout(url, {}, 30000);
+  if (!res?.ok) return null;
+  try {
     const blob = await res.blob();
     if (!blob.size || blob.size > MAX_HASH_BYTES) return null;
     return await hashBlob(blob);
@@ -101,6 +131,7 @@ async function hashUrl(url: string): Promise<string | null> {
     return null;
   }
 }
+
 
 /**
  * Executa a varredura. `onProgress` alimenta a barra de carregamento.
@@ -110,30 +141,74 @@ export async function runMediaDedupeScan(
   onProgress?: (progress: DedupeProgress) => void,
 ): Promise<DedupeResult> {
   const result: DedupeResult = { scanned: 0, duplicatesRemoved: 0, bytesFreed: 0, referencesUpdated: 0, skipped: 0 };
-  const report = (step: string, percent: number) => onProgress?.({ step, percent: Math.min(99, Math.max(1, percent)) });
+  const startedAt = Date.now();
+  const report = (step: string, percent: number, extra?: Partial<DedupeProgress>) =>
+    onProgress?.({ step, percent: Math.min(99, Math.max(1, percent)), ...extra });
 
   report("Lendo as conversas...", 3);
   const messages = await fetchMessagesWithMedia(userId);
 
   // URLs distintas do Storage referenciadas pelas mensagens.
-  const urls = Array.from(collectStorageUrls(messages.map((m) => [m.media_url, m.content])));
+  const rawUrls = Array.from(collectStorageUrls(messages.map((m) => [m.media_url, m.content])));
+
+  // Só analisamos arquivos que apontam para o armazenamento ATUAL. URLs de hosts
+  // antigos (ex.: *.supabase.co já desativado) não resolvem e travariam a barra.
+  const currentOrigin = (() => {
+    try {
+      return new URL(String(import.meta.env.VITE_SUPABASE_URL || "")).origin;
+    } catch {
+      return "";
+    }
+  })();
+  const netOf = new Map<string, string>();
+  const urls: string[] = [];
+  for (const raw of rawUrls) {
+    const net = resolveMediaUrl(raw);
+    let sameOrigin = false;
+    try {
+      sameOrigin = !!currentOrigin && new URL(net).origin === currentOrigin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (!sameOrigin) {
+      result.skipped += 1;
+      continue;
+    }
+    netOf.set(raw, net);
+    urls.push(raw);
+  }
+
   result.scanned = urls.length;
   if (urls.length < 2) return result;
 
-  report("Analisando os arquivos...", 8);
+  report("Analisando os arquivos...", 8, { done: 0, total: urls.length });
   const byFingerprint = new Map<string, string[]>();
-  for (let i = 0; i < urls.length; i += 1) {
-    const meta = await headMeta(urls[i]);
-    if (!meta) {
-      result.skipped += 1;
-    } else {
+  const CONCURRENCY = 6;
+  let checked = 0;
+  for (let i = 0; i < urls.length; i += CONCURRENCY) {
+    const batch = urls.slice(i, i + CONCURRENCY);
+    const metas = await Promise.all(batch.map((u) => headMeta(netOf.get(u) || u)));
+    metas.forEach((meta, idx) => {
+      if (!meta) {
+        result.skipped += 1;
+        return;
+      }
       const key = `${meta.size}|${meta.type}`;
       const list = byFingerprint.get(key) || [];
-      list.push(urls[i]);
+      list.push(batch[idx]);
       byFingerprint.set(key, list);
-    }
-    if (i % 15 === 0) report(`Analisando arquivos (${i + 1}/${urls.length})...`, 8 + (i / urls.length) * 42);
+    });
+    checked += batch.length;
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const etaSeconds = checked > 0 ? Math.max(1, Math.round((elapsed / checked) * (urls.length - checked))) : undefined;
+    report(`Verificando arquivos das conversas`, 8 + (checked / urls.length) * 42, {
+      done: checked,
+      total: urls.length,
+      etaSeconds,
+      current: shortFileName(batch[batch.length - 1]),
+    });
   }
+
 
   // Só grupos com mais de um candidato podem ter duplicata real.
   const groups = Array.from(byFingerprint.entries()).filter(([, list]) => list.length > 1);
@@ -157,7 +232,13 @@ export async function runMediaDedupeScan(
   for (const [, list] of groups) {
     const byHash = new Map<string, string[]>();
     for (const url of list) {
-      const hash = await hashUrl(url);
+      report("Confirmando arquivos idênticos", 55 + (processed / totalGroups) * 40, {
+        done: processed,
+        total: totalGroups,
+        current: shortFileName(url),
+      });
+      const hash = await hashUrl(netOf.get(url) || url);
+
       if (!hash) {
         result.skipped += 1;
         continue; // sem certeza => preserva
@@ -173,8 +254,10 @@ export async function runMediaDedupeScan(
 
       for (const duplicate of duplicates) {
         if (duplicate === keep) continue;
-        const parsed = parseStorageUrl(duplicate);
+        const duplicateNet = netOf.get(duplicate) || duplicate;
+        const parsed = parseStorageUrl(duplicateNet);
         if (!parsed) continue;
+
 
         try {
           // 1) Reaponta as mensagens para o arquivo mantido.
@@ -202,7 +285,7 @@ export async function runMediaDedupeScan(
           });
 
           // 3) Só agora o arquivo sobrando sai do bucket.
-          const meta = await headMeta(duplicate);
+          const meta = await headMeta(duplicateNet);
           const { error: removeError } = await supabase.storage.from(parsed.bucket).remove([parsed.path]);
           if (removeError) throw removeError;
           result.duplicatesRemoved += 1;

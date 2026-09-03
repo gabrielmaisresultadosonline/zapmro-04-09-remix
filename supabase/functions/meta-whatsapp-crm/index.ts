@@ -456,9 +456,34 @@ function extractAiKanbanCategory(reply: string): AiKanbanCategory | null {
   return match ? match[1].toLowerCase() as AiKanbanCategory : null;
 }
 
+/**
+ * Autonomia de etiquetas: o agente pode pedir uma etiqueta livre com
+ * [[ETIQUETA:Nome da etiqueta]]. Ela é criada no Kanban do próprio usuário
+ * quando ainda não existir e nunca sobrescreve etiquetas de outros cadastros.
+ */
+function extractAiCustomLabel(reply: string): string | null {
+  const match = reply.match(/\[\[ETIQUETA:\s*([^\]]{2,40}?)\s*\]\]/i);
+  if (!match) return null;
+  const label = match[1].replace(/\s+/g, ' ').trim();
+  return label ? label : null;
+}
+
+/** Valor técnico estável para a etiqueta livre (sem acentos, sem espaços). */
+function slugifyLabelValue(label: string): string {
+  const slug = label
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return slug ? `ai_${slug}` : '';
+}
+
 function cleanAiControlTags(reply: string): string {
   return reply
     .replace(/\[\[KANBAN:(?:frio|quente|cliente|humano)\]\]/gi, '')
+    .replace(/\[\[ETIQUETA:[^\]]*\]\]/gi, '')
     .replace(/\[\[TRANSFER_TO_HUMAN\]\]/gi, '')
     .trim();
 }

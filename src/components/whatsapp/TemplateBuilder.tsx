@@ -294,6 +294,17 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
 
   const bodyVariableIndexes = getTemplateVariableIndexes(bodyText);
 
+  /**
+   * A Meta rejeita corpos que começam ou terminam com uma variável.
+   * Estado derivado (sem useEffect) usado para bloquear o envio e avisar na hora.
+   */
+  const bodyStartsOrEndsWithVariable = (() => {
+    const trimmed = bodyText.trim();
+    if (!trimmed) return false;
+    return /^\{\{\s*\d+\s*\}\}/.test(trimmed) || /\{\{\s*\d+\s*\}\}$/.test(trimmed);
+  })();
+
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, cardIndex?: number) => {
     const file = e.target.files?.[0];
     if (!file) return;

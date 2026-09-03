@@ -5775,6 +5775,55 @@ async function fetchAndStoreIncomingMedia(
 
       console.log(`Creating template ${name}...`);
 
+      // --- PRE-CHECK: a Meta trava a categoria por NOME de template.
+      // Se já existe qualquer idioma desse nome com outra categoria, o POST falha
+      // com "category does not match". Consultamos antes e logamos o estado real.
+      let existingTemplateCategories: string[] = [];
+      try {
+        const preRes = await fetch(
+          `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${meta_waba_id}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,language,category,status&limit=50`,
+          { headers: { 'Authorization': `Bearer ${meta_access_token}` } }
+        );
+        const preData = await preRes.json();
+        console.log('[TEMPLATE-PRECHECK-META]', JSON.stringify({
+          http_status: preRes.status,
+          template_name: name,
+          requested_category: requestedCategory,
+          existing: (preData?.data || []).map((t: any) => ({
+            id: t?.id, name: t?.name, language: t?.language, category: t?.category, status: t?.status,
+          })),
+          error: preData?.error || null,
+        }, null, 2));
+        existingTemplateCategories = [...new Set(
+          (preData?.data || [])
+            .filter((t: any) => String(t?.name) === String(name))
+            .map((t: any) => String(t?.category || '').toUpperCase())
+            .filter(Boolean)
+        )] as string[];
+      } catch (preErr) {
+        console.warn('[TEMPLATE-PRECHECK-FAILED]', String(preErr));
+      }
+
+      const conflictingCategory = existingTemplateCategories.find((c) => c !== requestedCategory);
+      if (conflictingCategory) {
+        const suggestion = `${String(name).slice(0, 500)}_${requestedCategory.toLowerCase().slice(0, 4)}2`;
+        console.error('[TEMPLATE-CATEGORY-CONFLICT]', {
+          template_name: name,
+          requested_category: requestedCategory,
+          existing_categories: existingTemplateCategories,
+          suggested_name: suggestion,
+        });
+        return new Response(JSON.stringify({
+          success: false,
+          error: `O nome "${name}" já existe na sua conta Meta com a categoria ${conflictingCategory}. A Meta não permite trocar a categoria de um nome já usado (nem depois de excluir, por ~4 semanas). Use outro nome, por exemplo: "${suggestion}".`,
+          details: { existing_categories: existingTemplateCategories, suggested_name: suggestion },
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+
       // 1. Process components to get Meta handles for media examples
       const processedComponents = [...components];
       
@@ -5897,11 +5946,24 @@ async function fetchAndStoreIncomingMedia(
       }
 
       if (!response.ok) {
-        console.error('Meta API Error:', JSON.stringify(result, null, 2));
+        console.error('[TEMPLATE-CREATE-META-ERROR]', JSON.stringify({
+          http_status: response.status,
+          template_name: name,
+          requested_category: requestedCategory,
+          language,
+          payload_sent: { ...createTemplatePayload, components: processedComponents },
+          meta_error: result?.error || result,
+        }, null, 2));
         let friendly = getMetaTemplateErrorMessage(result);
         if (result?.error?.error_subcode === 2388023) {
           friendly = 'A Meta está bloqueando este nome de template porque o anterior (mesmo nome em pt_BR) ainda está em janela de exclusão (~4 semanas). Tente um nome diferente, ex.: adicione "_v2" ao final.';
         }
+        const rawMsg = `${result?.error?.error_user_msg || ''} ${result?.error?.message || ''} ${result?.error?.error_user_title || ''}`.toLowerCase();
+        if (rawMsg.includes('categor')) {
+          const suggestion = `${String(name).slice(0, 500)}_${requestedCategory.toLowerCase().slice(0, 4)}2`;
+          friendly = `A Meta trava a categoria pelo NOME do template. O nome "${name}" já está registrado com outra categoria, então não é possível recriá-lo como ${requestedCategory}. Crie com um nome novo, por exemplo: "${suggestion}". (Meta: ${result?.error?.fbtrace_id || 'sem trace'})`;
+        }
+
         return new Response(JSON.stringify({
           success: false,
           error: friendly,

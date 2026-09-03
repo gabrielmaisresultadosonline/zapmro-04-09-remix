@@ -9843,8 +9843,6 @@ const CRM = () => {
                           setInboundTimestampsByContact({});
                         }}
                       />
-                      {/* Varredura única por cliente: unifica arquivos idênticos já existentes. */}
-                      <MediaDedupeScanOverlay userId={currentUserId} onFinished={() => fetchData(false)} />
 
                      </Accordion>
 

@@ -5775,6 +5775,55 @@ async function fetchAndStoreIncomingMedia(
 
       console.log(`Creating template ${name}...`);
 
+      // --- PRE-CHECK: a Meta trava a categoria por NOME de template.
+      // Se já existe qualquer idioma desse nome com outra categoria, o POST falha
+      // com "category does not match". Consultamos antes e logamos o estado real.
+      let existingTemplateCategories: string[] = [];
+      try {
+        const preRes = await fetch(
+          `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${meta_waba_id}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,language,category,status&limit=50`,
+          { headers: { 'Authorization': `Bearer ${meta_access_token}` } }
+        );
+        const preData = await preRes.json();
+        console.log('[TEMPLATE-PRECHECK-META]', JSON.stringify({
+          http_status: preRes.status,
+          template_name: name,
+          requested_category: requestedCategory,
+          existing: (preData?.data || []).map((t: any) => ({
+            id: t?.id, name: t?.name, language: t?.language, category: t?.category, status: t?.status,
+          })),
+          error: preData?.error || null,
+        }, null, 2));
+        existingTemplateCategories = [...new Set(
+          (preData?.data || [])
+            .filter((t: any) => String(t?.name) === String(name))
+            .map((t: any) => String(t?.category || '').toUpperCase())
+            .filter(Boolean)
+        )] as string[];
+      } catch (preErr) {
+        console.warn('[TEMPLATE-PRECHECK-FAILED]', String(preErr));
+      }
+
+      const conflictingCategory = existingTemplateCategories.find((c) => c !== requestedCategory);
+      if (conflictingCategory) {
+        const suggestion = `${String(name).slice(0, 500)}_${requestedCategory.toLowerCase().slice(0, 4)}2`;
+        console.error('[TEMPLATE-CATEGORY-CONFLICT]', {
+          template_name: name,
+          requested_category: requestedCategory,
+          existing_categories: existingTemplateCategories,
+          suggested_name: suggestion,
+        });
+        return new Response(JSON.stringify({
+          success: false,
+          error: `O nome "${name}" já existe na sua conta Meta com a categoria ${conflictingCategory}. A Meta não permite trocar a categoria de um nome já usado (nem depois de excluir, por ~4 semanas). Use outro nome, por exemplo: "${suggestion}".`,
+          details: { existing_categories: existingTemplateCategories, suggested_name: suggestion },
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+
       // 1. Process components to get Meta handles for media examples
       const processedComponents = [...components];
       

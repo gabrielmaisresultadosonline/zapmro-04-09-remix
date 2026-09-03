@@ -538,6 +538,88 @@ async function organizeContactInAiKanban(supabase: any, contact: any, userId: st
 }
 
 /**
+ * Aplica uma etiqueta livre criada pelo próprio agente. Idempotente: cria o
+ * status no Kanban do usuário apenas quando ele ainda não existe (por valor ou
+ * por nome) e depois move somente o contato desta conversa.
+ */
+async function applyAiCustomLabel(supabase: any, contact: any, userId: string, label: string) {
+  const value = slugifyLabelValue(label);
+  if (!value) return;
+
+  const { data: existing, error: readError } = await supabase
+    .from('crm_statuses')
+    .select('value,label')
+    .eq('user_id', userId);
+  if (readError) throw new Error(`Não foi possível consultar as etiquetas: ${readError.message}`);
+
+  const normalized = label.toLowerCase();
+  const match = (existing || []).find((s: any) =>
+    String(s.value) === value || String(s.label || '').toLowerCase() === normalized);
+
+  if (!match) {
+    const { error: insertError } = await supabase.from('crm_statuses').insert({
+      user_id: userId,
+      label,
+      value,
+      color: 'slate',
+      sort_order: 50 + (existing?.length || 0),
+    });
+    // Corrida entre duas mensagens simultâneas não deve virar erro visível.
+    if (insertError && !/duplicate|unique/i.test(insertError.message || '')) {
+      throw new Error(`Não foi possível criar a etiqueta: ${insertError.message}`);
+    }
+  }
+
+  const finalValue = match?.value || value;
+  const { error: contactError } = await supabase
+    .from('crm_contacts')
+    .update({ status: finalValue })
+    .eq('id', contact.id)
+    .eq('user_id', userId);
+  if (contactError) throw new Error(`Não foi possível aplicar a etiqueta: ${contactError.message}`);
+}
+
+/**
+ * Rede de segurança do organizador: quando o modelo esquece de emitir a
+ * etiqueta interna, classificamos a conversa em uma chamada curta e barata.
+ * Uma falha aqui nunca interrompe a resposta ao cliente.
+ */
+async function classifyConversationForKanban(
+  apiKey: string,
+  history: string,
+  lastMessage: string,
+): Promise<AiKanbanCategory | null> {
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        max_tokens: 5,
+        messages: [
+          {
+            role: 'system',
+            content: 'Classifique a conversa de vendas em UMA palavra, sem pontuação: frio, quente, cliente ou humano. frio=pouco interesse; quente=intenção de compra clara; cliente=compra confirmada; humano=pediu atendimento humano.',
+          },
+          { role: 'user', content: `Histórico:\n${history}\n\nÚltima mensagem do cliente: ${lastMessage || '(vazia)'}` },
+        ],
+      }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const raw = String(data?.choices?.[0]?.message?.content || '').toLowerCase().trim();
+    if (raw.includes('humano')) return 'humano';
+    if (raw.includes('cliente')) return 'cliente';
+    if (raw.includes('quente')) return 'quente';
+    if (raw.includes('frio')) return 'frio';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolve o texto real de uma mensagem recebida. Se for áudio, transcreve
  * internamente (Whisper) e persiste, para a I.A responder direto ao conteúdo
  * sem nunca anunciar que está "ouvindo" ou "aguardando transcrição".

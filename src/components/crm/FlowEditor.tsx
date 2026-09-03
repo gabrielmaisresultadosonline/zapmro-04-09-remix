@@ -599,20 +599,17 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
         throw new Error('Vídeo ainda acima do limite de 16MB da Meta. Corte ou comprima mais um pouco.');
       }
       const fileExt = type === 'video' ? 'mp4' : file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-      const filePath = `flow-media/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('crm-media')
-        .upload(filePath, file, {
-          contentType: type === 'video' ? 'video/mp4' : file.type || undefined,
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('crm-media')
-        .getPublicUrl(filePath);
+      // Caminho por hash: o mesmo arquivo usado em vários fluxos não duplica.
+      const uploaded = await uploadDedupedMedia({
+        bucket: 'crm-media',
+        folder: 'flow-media',
+        file,
+        contentType: type === 'video' ? 'video/mp4' : file.type || undefined,
+        extension: fileExt,
+      });
+      const publicUrl = uploaded.url;
+      console.log('[FlowEditor] mídia pronta', { path: uploaded.path, reused: uploaded.reused });
 
       const updateData: any = { fileName: file.name };
       if (type === 'audio') updateData.audioUrl = publicUrl;
@@ -620,7 +617,8 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
       if (type === 'image') updateData.imageUrl = publicUrl;
 
       updateNodeData(nodeId, updateData);
-      toast({ title: "Arquivo enviado com sucesso!" });
+      toast({ title: uploaded.reused ? "Arquivo reaproveitado (já existia)!" : "Arquivo enviado com sucesso!" });
+
     } finally {
       setUploading(false);
     }

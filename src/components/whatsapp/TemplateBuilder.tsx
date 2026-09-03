@@ -349,6 +349,18 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
       return;
     }
 
+    // Regra da Meta: o corpo não pode começar nem terminar com uma variável
+    // ("Variables can't be at the start or end of the template").
+    if (templateType === 'STANDARD' && bodyStartsOrEndsWithVariable) {
+      toast({
+        title: "Variável no início ou fim",
+        description: "A Meta não aceita o corpo começando ou terminando com {{n}}. Ex.: use \"Olá {{1}}, tudo bem?\" em vez de \"{{1}}\" no fim.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+
     const invalidButton = buttons.find(button => !String(button.text || '').trim() || (button.type === 'URL' && !/^https?:\/\//i.test(String(button.url || '').trim())));
     if (templateType === 'STANDARD' && invalidButton) {
       toast({ title: "Botão incompleto", description: "Preencha o texto e use uma URL completa iniciando com https://.", variant: "destructive" });

@@ -1,4 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
+import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from '@/lib/mediaStorage';
+
 import {
   ReactFlow,
   MiniMap,
@@ -597,20 +599,17 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
         throw new Error('Vídeo ainda acima do limite de 16MB da Meta. Corte ou comprima mais um pouco.');
       }
       const fileExt = type === 'video' ? 'mp4' : file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-      const filePath = `flow-media/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('crm-media')
-        .upload(filePath, file, {
-          contentType: type === 'video' ? 'video/mp4' : file.type || undefined,
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('crm-media')
-        .getPublicUrl(filePath);
+      // Caminho por hash: o mesmo arquivo usado em vários fluxos não duplica.
+      const uploaded = await uploadDedupedMedia({
+        bucket: 'crm-media',
+        folder: 'flow-media',
+        file,
+        contentType: type === 'video' ? 'video/mp4' : file.type || undefined,
+        extension: fileExt,
+      });
+      const publicUrl = uploaded.url;
+      console.log('[FlowEditor] mídia pronta', { path: uploaded.path, reused: uploaded.reused });
 
       const updateData: any = { fileName: file.name };
       if (type === 'audio') updateData.audioUrl = publicUrl;
@@ -618,7 +617,8 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
       if (type === 'image') updateData.imageUrl = publicUrl;
 
       updateNodeData(nodeId, updateData);
-      toast({ title: "Arquivo enviado com sucesso!" });
+      toast({ title: uploaded.reused ? "Arquivo reaproveitado (já existia)!" : "Arquivo enviado com sucesso!" });
+
     } finally {
       setUploading(false);
     }
@@ -728,13 +728,26 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
     }
   };
 
+  // Mídia de blocos apagados: só pode sair do bucket DEPOIS que o fluxo for
+  // salvo, senão a versão gravada no banco ainda referencia a URL.
+  const pendingMediaCleanupRef = React.useRef<Set<string>>(new Set());
+
   const deleteNode = (nodeId: string) => {
+    const removed = nodes.find((n) => n.id === nodeId);
     setNodes((nds) => nds.filter((n) => n.id !== nodeId));
     setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
     setSelectedNode(null);
+
+    collectStorageUrls(removed?.data ?? null).forEach((url) => pendingMediaCleanupRef.current.add(url));
   };
 
+
   const handleSave = () => {
+    const pending = Array.from(pendingMediaCleanupRef.current);
+    // As URLs ainda presentes nos blocos atuais nunca devem ser apagadas.
+    const stillUsed = collectStorageUrls(nodes);
+    const toPurge = pending.filter((url) => !stillUsed.has(url));
+
     onSave({
       ...flow,
       name: flowName,
@@ -747,7 +760,25 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
       nodes,
       edges,
     });
+
+    pendingMediaCleanupRef.current = new Set();
+    if (toPurge.length) {
+      // Aguarda a gravação propagar antes de checar referências no banco.
+      window.setTimeout(() => {
+        void deleteMediaUrlsIfUnused(toPurge)
+          .then((result) => {
+            if (result.removed) {
+              toast({
+                title: 'Armazenamento liberado',
+                description: `${result.removed} arquivo(s) sem uso foram apagados.`,
+              });
+            }
+          })
+          .catch((error) => console.error('[FlowEditor] falha na limpeza de mídia', error));
+      }, 2500);
+    }
   };
+
 
   return (
     <div className="fixed inset-0 bg-background z-50 flex flex-col">
@@ -1940,13 +1971,15 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
               setUploading(true);
               try {
                 const fileExt = type === 'video' ? 'mp4' : (file.name.split('.').pop() || 'jpg');
-                const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-                const filePath = `flow-media/carousel/${fileName}`;
-                const { error: uploadError } = await supabase.storage
-                  .from('crm-media')
-                  .upload(filePath, file, { contentType: type === 'video' ? 'video/mp4' : file.type || undefined });
-                if (uploadError) throw uploadError;
-                const { data: { publicUrl } } = supabase.storage.from('crm-media').getPublicUrl(filePath);
+                const uploaded = await uploadDedupedMedia({
+                  bucket: 'crm-media',
+                  folder: 'flow-media/carousel',
+                  file,
+                  contentType: type === 'video' ? 'video/mp4' : file.type || undefined,
+                  extension: fileExt,
+                });
+                const publicUrl = uploaded.url;
+
                 const next = [...cards];
                 next[cardIdx] = { ...next[cardIdx], mediaType: type, mediaUrl: publicUrl, fileName: file.name };
                 updateCards(next);

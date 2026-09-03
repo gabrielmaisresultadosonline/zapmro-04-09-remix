@@ -1,3 +1,4 @@
+import { uploadDedupedMedia } from '@/lib/mediaStorage';
 import React, { useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -300,18 +301,17 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
     setIsUploading(true);
     try {
       const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-      const filePath = `${fileName}`;
 
-      const { data, error: uploadError } = await supabase.storage
-        .from('crm-media')
-        .upload(filePath, file);
+      // Caminho derivado do hash: a mesma mídia de cabeçalho não duplica.
+      const uploaded = await uploadDedupedMedia({
+        bucket: 'crm-media',
+        folder: 'template-media',
+        file,
+        contentType: file.type || undefined,
+        extension: fileExt,
+      });
+      const publicUrl = uploaded.url;
 
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('crm-media')
-        .getPublicUrl(filePath);
 
       if (cardIndex !== undefined) {
         updateCard(cardIndex, { headerUrl: publicUrl });

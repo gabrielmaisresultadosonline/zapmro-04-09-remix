@@ -254,8 +254,10 @@ export async function runMediaDedupeScan(
 
       for (const duplicate of duplicates) {
         if (duplicate === keep) continue;
-        const parsed = parseStorageUrl(duplicate);
+        const duplicateNet = netOf.get(duplicate) || duplicate;
+        const parsed = parseStorageUrl(duplicateNet);
         if (!parsed) continue;
+
 
         try {
           // 1) Reaponta as mensagens para o arquivo mantido.

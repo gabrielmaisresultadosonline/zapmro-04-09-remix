@@ -5,7 +5,7 @@
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-admin-token, x-supabase-api-version",
+    "authorization, x-client-info, apikey, content-type, x-admin-token, x-acessor-admin-token, x-supabase-api-version",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 };
 

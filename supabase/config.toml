@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.exportar-tabela-vps]
 verify_jwt = false
+
+[functions.acessor-admin]
+verify_jwt = false
+
+[functions.acessor-webhook]
+verify_jwt = false

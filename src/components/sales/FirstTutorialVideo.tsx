@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { resolveMediaUrl } from "@/lib/mediaUrl";
 import { prefetchVideo, videoPrefetchHandlers } from "@/lib/videoPrefetch";
 import { BadgeCheck, PlayCircle, X, Loader2 } from "lucide-react";
+import SmoothVideo from "@/components/media/SmoothVideo";
 
 type Tutorial = {
   id: string;

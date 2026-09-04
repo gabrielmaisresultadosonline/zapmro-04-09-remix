@@ -3384,23 +3384,49 @@ async function pushPendingContactsToGoogle(supabase: any, userId: string, settin
     );
     if (alreadyOnGoogle.length > 0) {
       const nowIso = new Date().toISOString();
-      await Promise.all(alreadyOnGoogle.map(async (contact: any) => {
-        const canonicalPhone = canonicalBrazilianWaId(contact.wa_id);
-        const resourceName = googleContactsByPhone.get(canonicalPhone) || null;
-        const nextMeta = { ...((contact as any).metadata || {}), google_resource_name: resourceName };
-        delete nextMeta.google_dirty;
-        const { error: updateError } = await supabase.from('crm_contacts').update({
-          google_sync_account_id: account.id,
-          google_synced_at: nowIso,
-          metadata: nextMeta,
-          google_sync_claim_token: null,
-          google_sync_claimed_at: null,
-        })
-          .eq('id', contact.id)
-          .eq('google_sync_claim_token', claimToken);
-        if (updateError) failed++; else pushed++;
-      }));
+      // Processa em lotes pequenos: cada renomeação é uma chamada extra à
+      // People API e não queremos estourar limite de requisições.
+      for (let i = 0; i < alreadyOnGoogle.length; i += 20) {
+        const batch = alreadyOnGoogle.slice(i, i + 20);
+        await Promise.all(batch.map(async (contact: any) => {
+          const canonicalPhone = canonicalBrazilianWaId(contact.wa_id);
+          const ref = googleContactsByPhone.get(canonicalPhone) || null;
+          const resourceName = ref?.resourceName || null;
+          const crmName = String(contact.name || '').trim();
+          const isRealName = crmName.length > 0 && crmName !== String(contact.wa_id || '').trim();
+
+          // Renomeou no CRM? O nome sobe para a mesma conta Google, sempre —
+          // inclusive quando o contato já havia sido exportado antes.
+          let nameSynced = true;
+          if (ref && isRealName && ref.name !== crmName) {
+            nameSynced = await updateGoogleContactName(accessToken, ref, crmName);
+            if (nameSynced) {
+              console.log(`[GOOGLE-SYNC] Nome atualizado no Google (${account.email}): ${ref.resourceName}`);
+            } else {
+              lastError = `Não foi possível atualizar o nome no Google (${account.email}).`;
+            }
+          }
+
+          const nextMeta = { ...((contact as any).metadata || {}), google_resource_name: resourceName };
+          // Só limpa a marcação quando o Google realmente aceitou o nome novo;
+          // assim o contato continua pendente e tenta de novo no próximo ciclo.
+          if (nameSynced) delete nextMeta.google_dirty;
+          else nextMeta.google_dirty = true;
+
+          const { error: updateError } = await supabase.from('crm_contacts').update({
+            google_sync_account_id: account.id,
+            google_synced_at: nowIso,
+            metadata: nextMeta,
+            google_sync_claim_token: null,
+            google_sync_claimed_at: null,
+          })
+            .eq('id', contact.id)
+            .eq('google_sync_claim_token', claimToken);
+          if (updateError || !nameSynced) failed++; else pushed++;
+        }));
+      }
     }
+
 
     const contactsToCreate = forThisAccount.filter((contact: any) =>
       !googleContactsByPhone.has(canonicalBrazilianWaId(contact.wa_id))

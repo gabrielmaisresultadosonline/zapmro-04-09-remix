@@ -25,6 +25,11 @@ const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const TermsOfService = lazy(() => import("./pages/TermsOfService"));
 const ConverterVideo = lazy(() => import("./pages/ConverterVideo"));
 const ShortLinkRedirect = lazy(() => import("./pages/ShortLinkRedirect"));
+// Módulo /acessor (projeto separado: agendamentos + organização financeira).
+const AcessorLanding = lazy(() => import("./pages/acessor/AcessorLanding"));
+const AcessorLogin = lazy(() => import("./pages/acessor/AcessorLogin"));
+const AcessorDashboard = lazy(() => import("./pages/acessor/AcessorDashboard"));
+const AcessorAdmin = lazy(() => import("./pages/acessor/AcessorAdmin"));
 
 const queryClient = new QueryClient({
   defaultOptions: {

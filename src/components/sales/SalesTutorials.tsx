@@ -186,31 +186,17 @@ export default function SalesTutorials({ variant = "light" }: SalesTutorialsProp
               </button>
               <div className="relative bg-black w-full flex items-center justify-center" style={{ maxHeight: "75vh" }}>
                 {active.video_url ? (
-                  <>
-                    {videoLoading && (
-                      <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-                        <Loader2 className="h-10 w-10 animate-spin text-white/80" />
-                      </div>
-                    )}
-                    <video
-                      key={active.id}
-                      src={resolveMediaUrl(active.video_url)}
-                      poster={resolveMediaUrl(active.cover_url) || undefined}
-                      controls
-                      autoPlay
-                      playsInline
-                      // "auto" pede o buffer inicial de imediato; com o prefetch do card
-                      // o começo do arquivo normalmente já está em cache HTTP.
-                      preload="auto"
-                      controlsList="nodownload"
-                      onLoadedMetadata={() => setVideoLoading(false)}
-                      onLoadedData={() => setVideoLoading(false)}
-                      onCanPlay={() => setVideoLoading(false)}
-                      onWaiting={() => setVideoLoading(true)}
-                      onPlaying={() => setVideoLoading(false)}
-                      className="w-full h-auto max-h-[75vh] object-contain bg-black"
-                    />
-                  </>
+                  <SmoothVideo
+                    key={active.id}
+                    src={resolveMediaUrl(active.video_url)}
+                    poster={resolveMediaUrl(active.cover_url) || undefined}
+                    controls
+                    autoPlay
+                    controlsList="nodownload"
+                    containerClassName="flex items-center justify-center"
+                    className="w-full h-auto max-h-[75vh] object-contain bg-black"
+                    onPlaying={() => setVideoLoading(false)}
+                  />
                 ) : (
                   <div className="w-full aspect-video flex items-center justify-center text-white/60">
                     Vídeo não disponível

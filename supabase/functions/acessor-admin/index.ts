@@ -79,7 +79,10 @@ Deno.serve(async (req) => {
   }
 
   // ---------- daqui para baixo exige token ----------
-  const token = req.headers.get("x-acessor-admin-token");
+  // Aceita o token pelo corpo (preferido, evita CORS) ou pelo cabeçalho antigo.
+  const token =
+    (typeof payload.admin_token === "string" && payload.admin_token) ||
+    req.headers.get("x-acessor-admin-token");
   if (!(await verifyToken(token))) {
     return json({ success: false, error: "Sessão expirada. Entre novamente." }, 401);
   }

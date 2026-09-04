@@ -1518,7 +1518,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                         type="file" 
                         ref={fileInputRef} 
                         className="hidden" 
-                        accept={parsingType === 'vcard' ? '.vcf' : '.csv,.txt'} 
+                        accept={parsingType === 'vcard' ? '.vcf' : '.csv,.txt,.xlsx,.xls'} 
                         onChange={onFileChange} 
                       />
                       <Button variant="outline" size="sm" className="text-[9px] md:text-[10px] h-7 flex-1 sm:flex-none" onClick={() => handleFileUpload('vcard')}>

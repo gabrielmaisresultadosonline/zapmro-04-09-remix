@@ -3344,7 +3344,7 @@ async function pushPendingContactsToGoogle(supabase: any, userId: string, settin
     // Idempotência real no destino: antes de criar, confira os telefones que já
     // existem nesta conta Google. Isso também protege instalações antigas nas
     // quais o contato foi criado, mas o resourceName não chegou a ser salvo.
-    let googleContactsByPhone: Map<string, string>;
+    let googleContactsByPhone: Map<string, GoogleContactRef>;
     try {
       googleContactsByPhone = await loadGoogleContactsByCanonicalPhone(accessToken);
     } catch (error: any) {

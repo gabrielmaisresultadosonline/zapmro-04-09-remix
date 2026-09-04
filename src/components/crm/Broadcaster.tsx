@@ -1512,7 +1512,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
               {targetType === 'uploaded' && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                    <Label className="text-xs md:text-sm">Lista de Números (Um por linha)</Label>
+                    <Label className="text-xs md:text-sm">Lista de contatos (um por linha: Nome, número)</Label>
                     <div className="flex gap-2 w-full sm:w-auto">
                       <input 
                         type="file" 

@@ -4377,31 +4377,41 @@ const CRM = () => {
       }
 
       toast({ title: "Fluxo Iniciado!" });
-      
-      // Atualização imediata do estado local para refletir no chat e na lista
-      const { data: updatedContact } = await supabase
-        .from('crm_contacts')
-        .select('*')
-        .eq('id', targetContactId)
-        .single();
-        
-      if (updatedContact) {
-        console.log('[CRM] Contato atualizado após startFlow:', updatedContact.flow_state);
-        setContacts(prev => prev.map(c => c.id === targetContactId ? updatedContact : c));
-        // Use ref para não "puxar" o usuário de volta caso ele tenha aberto outra conversa
-        // enquanto o envio do fluxo estava em andamento.
-        if (selectedContactRef.current?.id === targetContactId) {
-          setSelectedContact((prev: any) => prev && prev.id === targetContactId ? { ...prev, ...updatedContact } : prev);
-        }
-      }
 
-      await fetchMessages(targetContactId, true);
+      // Libera os botões imediatamente após o sucesso: as atualizações abaixo
+      // são só de exibição e, se travarem na rede, não podem deixar a conversa
+      // bloqueada até o usuário recarregar a página.
+      setContactSending(targetContactId, false);
+
+      // Atualização do estado local para refletir no chat e na lista (sem travar a UI)
+      void (async () => {
+        try {
+          const { data: updatedContact } = await supabase
+            .from('crm_contacts')
+            .select('*')
+            .eq('id', targetContactId)
+            .single();
+
+          if (updatedContact) {
+            setContacts(prev => prev.map(c => c.id === targetContactId ? updatedContact : c));
+            // Use ref para não "puxar" o usuário de volta caso ele tenha aberto outra conversa
+            // enquanto o envio do fluxo estava em andamento.
+            if (selectedContactRef.current?.id === targetContactId) {
+              setSelectedContact((prev: any) => prev && prev.id === targetContactId ? { ...prev, ...updatedContact } : prev);
+            }
+          }
+          await fetchMessages(targetContactId, true);
+        } catch (refreshError) {
+          console.warn('[CRM] Falha ao atualizar a conversa após o fluxo (envio ocorreu):', refreshError);
+        }
+      })();
     } catch (err: any) {
       toast({ title: "Erro ao iniciar fluxo", description: err.message, variant: "destructive" });
     } finally {
       setContactSending(targetContactId, false);
     }
   };
+
 
   const handleStopFlow = async (contactId: string) => {
     setContactSending(contactId, true);
@@ -10494,9 +10504,10 @@ const CRM = () => {
                   const original = contacts.find((c: any) => c.id === id);
                   const nameChanged = (original?.name || '') !== (contactToView.name || '');
                   const phoneChanged = (original?.wa_id || '') !== (contactToView.wa_id || '');
-                  const isSyncedToGoogle = !!(original?.google_sync_account_id || original?.metadata?.google_resource_name);
                   const nextMetadata: any = { ...(contactToView.metadata || {}) };
-                  if (isSyncedToGoogle && (nameChanged || phoneChanged)) {
+                  // Qualquer renomeação/troca de número precisa subir de novo
+                  // para o Google, mesmo que o contato já tenha sido exportado.
+                  if (nameChanged || phoneChanged) {
                     nextMetadata.google_dirty = true;
                   }
                   await supabase.from('crm_contacts').update({
@@ -10504,8 +10515,8 @@ const CRM = () => {
                     metadata: nextMetadata,
                     updated_at: new Date().toISOString(),
                   }).eq('id', id);
-                  // Trigger an immediate silent push so Google is updated in <1min.
-                  if (isSyncedToGoogle && (nameChanged || phoneChanged) && anyAutoSync) {
+                  // Empurra na hora para o Google não esperar o cron.
+                  if ((nameChanged || phoneChanged) && googleContactsEnabled) {
                     supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'syncPendingToGoogle' } }).catch(() => {});
                   }
                 } else {

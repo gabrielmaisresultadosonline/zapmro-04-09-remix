@@ -145,6 +145,55 @@ export function normalizeBrWhatsappNumber(input: string): string | null {
   return `55${ddd}${subscriber}`;
 }
 
+export type UploadedEntry = { wa_id: string; name: string; rawNumber: string };
+
+/**
+ * Interpreta a lista importada aceitando "Nome, número", "Nome;número",
+ * "Nome<TAB>número" ou apenas o número. O nome é preservado para que as
+ * variáveis do template (ex.: {{nome}}) funcionem em listas de Excel/CSV.
+ * Duplicados e números inválidos são descartados.
+ */
+export function parseUploadedEntries(source: string): UploadedEntry[] {
+  const seen = new Set<string>();
+  const entries: UploadedEntry[] = [];
+
+  for (const rawLine of String(source || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const parts = line.split(/[,;\t|]/).map(p => p.trim()).filter(Boolean);
+    let rawNumber = '';
+    const nameParts: string[] = [];
+
+    for (const part of parts) {
+      const digits = part.replace(/\D/g, '');
+      const looksLikeNumber = !rawNumber && digits.length >= 8 && digits.length <= 15 && !/[A-Za-zÀ-ÿ]{2}/.test(part);
+      if (looksLikeNumber) rawNumber = part;
+      else nameParts.push(part);
+    }
+
+    // Linha sem separador: "João 5511999999999"
+    if (!rawNumber) {
+      const match = line.match(/[+\d][\d\s\-().]{7,}\d/);
+      if (match) {
+        rawNumber = match[0];
+        const rest = line.replace(match[0], ' ').trim();
+        if (rest) nameParts.push(rest);
+      }
+    }
+
+    const wa_id = rawNumber ? normalizeBrWhatsappNumber(rawNumber) : null;
+    if (!wa_id || seen.has(wa_id)) continue;
+    seen.add(wa_id);
+
+    const name = nameParts.join(' ').replace(/["']/g, '').replace(/\s+/g, ' ').trim();
+    entries.push({ wa_id, name: name === wa_id ? '' : name, rawNumber });
+  }
+
+  return entries;
+}
+
+
 const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -258,51 +307,48 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         .map(c => ({ wa_id: c.wa_id, name: c.name || c.wa_id }));
     }
     if (targetType === 'uploaded') {
-      const seen = new Set<string>();
-      return uploadedNumbers
-        .split(/[\n,;]+/)
-        .map(n => normalizeBrWhatsappNumber(n))
-        .filter((wa): wa is string => !!wa)
-        .filter(wa => (seen.has(wa) ? false : (seen.add(wa), true)))
-        .map(wa => ({ wa_id: wa, name: wa }));
+      return parseUploadedEntries(uploadedNumbers).map(e => ({ wa_id: e.wa_id, name: e.name || e.wa_id }));
     }
     return [];
   }, [targetType, selectedStatuses, contacts, uploadedNumbers, conversationTagFilter, selectedTags24h]);
 
-  /** Reescreve a caixa de números já corrigidos (55 + 9º dígito), sem duplicados. */
+  /** Nome informado na lista importada, usado nas variáveis do template. */
+  const uploadedNamesByWaId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of parseUploadedEntries(uploadedNumbers)) {
+      if (entry.name) map.set(entry.wa_id, entry.name);
+    }
+    return map;
+  }, [uploadedNumbers]);
+
   const normalizeUploadedList = async (raw?: string) => {
     const source = raw ?? uploadedNumbers;
-    const entries = source.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
-    if (entries.length === 0) return;
+    const rawLines = source.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (rawLines.length === 0) return;
 
-    const seen = new Set<string>();
-    const valid: string[] = [];
-    let invalid = 0;
+    const entries = parseUploadedEntries(source);
     let fixed = 0;
-
     for (const entry of entries) {
-      const normalized = normalizeBrWhatsappNumber(entry);
-      if (!normalized) { invalid++; continue; }
-      if (normalized !== entry.replace(/\D/g, '')) fixed++;
-      if (seen.has(normalized)) continue;
-      seen.add(normalized);
-      valid.push(normalized);
+      const originalDigits = entry.rawNumber.replace(/\D/g, '');
+      if (entry.wa_id !== originalDigits) fixed++;
     }
 
-    setUploadedNumbers(valid.join('\n'));
+    // Mantém "Nome, número" quando o nome veio na lista; assim a variável
+    // {{nome}} continua disponível depois da correção dos números.
+    setUploadedNumbers(entries.map(e => (e.name ? `${e.name}, ${e.wa_id}` : e.wa_id)).join('\n'));
 
-    const duplicates = entries.length - invalid - valid.length;
-    if (fixed || invalid || duplicates) {
+    const invalid = Math.max(0, rawLines.length - entries.length);
+    if (fixed || invalid) {
       toast({
-        title: `${valid.length} números prontos`,
+        title: `${entries.length} números prontos`,
         description: [
           fixed ? `${fixed} corrigidos (DDI 55 / 9º dígito)` : null,
-          duplicates ? `${duplicates} duplicados removidos` : null,
-          invalid ? `${invalid} inválidos descartados (DDD incorreto)` : null,
+          invalid ? `${invalid} linhas descartadas (número inválido ou duplicado)` : null,
         ].filter(Boolean).join(' • '),
       });
     }
   };
+
 
   // Map wa_id -> minutes left in the 24h window (null when outside/unknown)
   const windowInfo = useMemo(() => {
@@ -466,8 +512,21 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   /** Localiza o contato do CRM pelo número para resolver {{nome}}, {{pedido}} etc. */
   const findContactForNumber = (number: string) => {
     const variants = new Set(waIdVariants(number));
-    return contacts.find(c => variants.has(String(c?.wa_id || '').replace(/\D/g, ''))) || { wa_id: canonicalWaId(number), name: '', metadata: {} };
+    const found = contacts.find(c => variants.has(String(c?.wa_id || '').replace(/\D/g, '')));
+    const canonical = canonicalWaId(number);
+    // Nome da lista importada: usado quando o número ainda não existe no CRM
+    // ou quando o contato salvo está sem nome.
+    const uploadedName = uploadedNamesByWaId.get(canonical)
+      || uploadedNamesByWaId.get(String(number).replace(/\D/g, ''))
+      || '';
+    if (found) {
+      const savedName = String(found.name || '').trim();
+      if (savedName && savedName !== String(found.wa_id || '')) return found;
+      return uploadedName ? { ...found, name: uploadedName } : found;
+    }
+    return { wa_id: canonical, name: uploadedName, metadata: {} };
   };
+
 
   /** Filtra pelo número de WhatsApp aberto: cada caixa tem sua própria base. */
   const scopeNumber = <T,>(query: T): T => {
@@ -843,40 +902,84 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
     fileInputRef.current?.click();
   };
 
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  /** Junta as linhas "Nome, número" ao que já estava na caixa de texto. */
+  const appendImportedLines = (lines: string[], origem: string) => {
+    if (lines.length === 0) {
+      toast({ title: `Nenhum número encontrado no ${origem}`, variant: 'destructive' });
+      return;
+    }
+    setUploadedNumbers(prev => (prev ? prev + '\n' : '') + lines.join('\n'));
+    const comNome = lines.filter(l => l.includes(',')).length;
+    toast({
+      title: `${lines.length} contatos importados do ${origem}`,
+      description: comNome ? `${comNome} com nome — a variável de nome já pode ser usada.` : undefined,
+    });
+  };
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (parsingType === 'vcard') {
-        // Extract numbers from VCard
-        // Typical VCard entry: TEL;CELL;PREF:+55 11 99999-9999
-        const telMatches = content.match(/TEL.*:([+\d\s\-()]+)/gi);
-        if (telMatches) {
-          const extracted = telMatches.map(m => {
-            const num = m.split(':')[1].replace(/\D/g, '');
-            return num;
-          }).filter(n => n.length >= 10);
-          setUploadedNumbers(prev => (prev ? prev + '\n' : '') + extracted.join('\n'));
-          toast({ title: `${extracted.length} números extraídos do VCard` });
+    const nomeArquivo = file.name.toLowerCase();
+    const isExcel = /\.(xlsx|xls)$/.test(nomeArquivo);
+
+    try {
+      // Planilha do Excel: lê nome e número das colunas, em qualquer ordem.
+      if (parsingType === 'csv' && isExcel) {
+        const XLSX = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const linhas: string[] = [];
+        for (const sheetName of workbook.SheetNames) {
+          const rows = XLSX.utils.sheet_to_json<any[]>(workbook.Sheets[sheetName], { header: 1, raw: false, defval: '' });
+          for (const row of rows) {
+            const cells = (row || []).map(cell => String(cell ?? '').trim()).filter(Boolean);
+            if (cells.length === 0) continue;
+            let numero = '';
+            const nomes: string[] = [];
+            for (const cell of cells) {
+              const digits = cell.replace(/\D/g, '');
+              if (!numero && digits.length >= 8 && digits.length <= 15 && !/[A-Za-zÀ-ÿ]{2}/.test(cell)) numero = cell;
+              else nomes.push(cell);
+            }
+            if (!numero) continue;
+            const wa = normalizeBrWhatsappNumber(numero);
+            if (!wa) continue;
+            const nome = nomes.join(' ').replace(/[,;|]/g, ' ').replace(/\s+/g, ' ').trim();
+            linhas.push(nome ? `${nome}, ${wa}` : wa);
+          }
         }
-      } else if (parsingType === 'csv') {
-        // Simple CSV/Excel export parser (just look for long numbers)
-        const lines = content.split('\n');
-        const extracted: string[] = [];
-        lines.forEach(line => {
-          const matches = line.match(/\d{10,14}/g);
-          if (matches) extracted.push(...matches);
-        });
-        setUploadedNumbers(prev => (prev ? prev + '\n' : '') + extracted.join('\n'));
-        toast({ title: `${extracted.length} números extraídos do arquivo` });
+        appendImportedLines(linhas, 'Excel');
+        return;
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+
+      const content = await file.text();
+
+      if (parsingType === 'vcard') {
+        // VCard: FN/N traz o nome e TEL o telefone.
+        const blocos = content.split(/BEGIN:VCARD/i).slice(1);
+        const linhas: string[] = [];
+        for (const bloco of blocos) {
+          const nome = (bloco.match(/^FN[^:]*:(.+)$/im)?.[1] || '').replace(/[,;|]/g, ' ').trim();
+          const tel = bloco.match(/^TEL[^:]*:([+\d\s\-()]+)$/im)?.[1] || '';
+          const wa = tel ? normalizeBrWhatsappNumber(tel) : null;
+          if (!wa) continue;
+          linhas.push(nome ? `${nome}, ${wa}` : wa);
+        }
+        appendImportedLines(linhas, 'VCard');
+        return;
+      }
+
+      // CSV / TXT: usa o mesmo leitor da caixa de texto (nome + número).
+      const linhas = parseUploadedEntries(content).map(entry => (entry.name ? `${entry.name}, ${entry.wa_id}` : entry.wa_id));
+      appendImportedLines(linhas, 'arquivo');
+    } catch (error: any) {
+      console.error('[Broadcaster] Falha ao ler o arquivo importado:', error);
+      toast({ title: 'Não foi possível ler o arquivo', description: error?.message || 'Formato não reconhecido', variant: 'destructive' });
+    }
   };
+
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-4 md:space-y-6 pb-24 md:pb-8 p-3 md:p-8 animate-in fade-in duration-500 overflow-x-hidden">
@@ -1409,13 +1512,13 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
               {targetType === 'uploaded' && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                    <Label className="text-xs md:text-sm">Lista de Números (Um por linha)</Label>
+                    <Label className="text-xs md:text-sm">Lista de contatos (um por linha: Nome, número)</Label>
                     <div className="flex gap-2 w-full sm:w-auto">
                       <input 
                         type="file" 
                         ref={fileInputRef} 
                         className="hidden" 
-                        accept={parsingType === 'vcard' ? '.vcf' : '.csv,.txt'} 
+                        accept={parsingType === 'vcard' ? '.vcf' : '.csv,.txt,.xlsx,.xls'} 
                         onChange={onFileChange} 
                       />
                       <Button variant="outline" size="sm" className="text-[9px] md:text-[10px] h-7 flex-1 sm:flex-none" onClick={() => handleFileUpload('vcard')}>
@@ -1427,7 +1530,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                     </div>
                   </div>
                   <Textarea 
-                    placeholder="5511999999999&#10;5521888888888"
+                    placeholder="João Silva, 5511999999999&#10;5521888888888"
                     className="min-h-[100px] md:min-h-[120px] rounded-xl bg-[#202c33] border-none resize-none font-mono text-xs md:text-sm text-[#e9edef]"
                     value={uploadedNumbers}
                     onChange={e => setUploadedNumbers(e.target.value)}
@@ -1747,7 +1850,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                       const sel = templates.find(t => t.id === selectedTemplate);
                       const cat = (sel?.category || 'MARKETING').toUpperCase();
                       const unit = cat === 'MARKETING' ? 0.33 : 0.04;
-                      const qty = targetType === 'contacts' ? contacts.length : uploadedNumbers.split('\n').filter(n => n.trim().length >= 10).length;
+                      const qty = targetType === 'contacts' ? contacts.length : finalRecipients.length;
                       return (
                         <Badge variant="outline" className="text-[8px] md:text-[10px] text-amber-500 border-amber-500/20 bg-amber-500/5">
                           Custo Estimado ({cat}): R$ {(unit * qty).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

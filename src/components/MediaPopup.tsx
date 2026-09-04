@@ -112,10 +112,11 @@ export const MediaPopup = ({ url, type, onClose }: MediaPopupProps) => {
             draggable={false}
           />
         ) : (
-          <video 
-            src={url} 
-            controls 
-            autoPlay 
+          <SmoothVideo
+            src={url}
+            controls
+            autoPlay
+            containerClassName="flex items-center justify-center"
             className="max-w-[90vw] max-h-[85vh] rounded-lg shadow-2xl"
           />
         )}

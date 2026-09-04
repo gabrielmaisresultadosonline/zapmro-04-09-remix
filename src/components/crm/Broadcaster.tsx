@@ -145,6 +145,55 @@ export function normalizeBrWhatsappNumber(input: string): string | null {
   return `55${ddd}${subscriber}`;
 }
 
+export type UploadedEntry = { wa_id: string; name: string; rawNumber: string };
+
+/**
+ * Interpreta a lista importada aceitando "Nome, número", "Nome;número",
+ * "Nome<TAB>número" ou apenas o número. O nome é preservado para que as
+ * variáveis do template (ex.: {{nome}}) funcionem em listas de Excel/CSV.
+ * Duplicados e números inválidos são descartados.
+ */
+export function parseUploadedEntries(source: string): UploadedEntry[] {
+  const seen = new Set<string>();
+  const entries: UploadedEntry[] = [];
+
+  for (const rawLine of String(source || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const parts = line.split(/[,;\t|]/).map(p => p.trim()).filter(Boolean);
+    let rawNumber = '';
+    const nameParts: string[] = [];
+
+    for (const part of parts) {
+      const digits = part.replace(/\D/g, '');
+      const looksLikeNumber = !rawNumber && digits.length >= 8 && digits.length <= 15 && !/[A-Za-zÀ-ÿ]{2}/.test(part);
+      if (looksLikeNumber) rawNumber = part;
+      else nameParts.push(part);
+    }
+
+    // Linha sem separador: "João 5511999999999"
+    if (!rawNumber) {
+      const match = line.match(/[+\d][\d\s\-().]{7,}\d/);
+      if (match) {
+        rawNumber = match[0];
+        const rest = line.replace(match[0], ' ').trim();
+        if (rest) nameParts.push(rest);
+      }
+    }
+
+    const wa_id = rawNumber ? normalizeBrWhatsappNumber(rawNumber) : null;
+    if (!wa_id || seen.has(wa_id)) continue;
+    seen.add(wa_id);
+
+    const name = nameParts.join(' ').replace(/["']/g, '').replace(/\s+/g, ' ').trim();
+    entries.push({ wa_id, name: name === wa_id ? '' : name, rawNumber });
+  }
+
+  return entries;
+}
+
+
 const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps) => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);

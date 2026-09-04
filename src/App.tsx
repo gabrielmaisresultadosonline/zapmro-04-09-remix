@@ -71,6 +71,10 @@ const App = () => (
             <Route path="/br/termosdoservico" element={<TermsOfService />} />
             <Route path="/converter-video" element={<ConverterVideo />} />
             <Route path="/l/:code" element={<ShortLinkRedirect />} />
+            <Route path="/acessor" element={<AcessorLanding />} />
+            <Route path="/acessor/login" element={<AcessorLogin />} />
+            <Route path="/acessor/dashboard" element={<AcessorDashboard />} />
+            <Route path="/acessor/admin" element={<AcessorAdmin />} />
             <Route path="*" element={<Sales />} />
           </Routes>
         </Suspense>

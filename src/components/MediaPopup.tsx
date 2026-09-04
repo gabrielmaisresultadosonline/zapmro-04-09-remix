@@ -2,6 +2,7 @@ import { X, ZoomIn, ZoomOut, RotateCcw, Download } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
+import SmoothVideo from "@/components/media/SmoothVideo";
 
 interface MediaPopupProps {
   url: string;

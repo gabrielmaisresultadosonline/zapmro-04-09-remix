@@ -902,40 +902,84 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
     fileInputRef.current?.click();
   };
 
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  /** Junta as linhas "Nome, número" ao que já estava na caixa de texto. */
+  const appendImportedLines = (lines: string[], origem: string) => {
+    if (lines.length === 0) {
+      toast({ title: `Nenhum número encontrado no ${origem}`, variant: 'destructive' });
+      return;
+    }
+    setUploadedNumbers(prev => (prev ? prev + '\n' : '') + lines.join('\n'));
+    const comNome = lines.filter(l => l.includes(',')).length;
+    toast({
+      title: `${lines.length} contatos importados do ${origem}`,
+      description: comNome ? `${comNome} com nome — a variável de nome já pode ser usada.` : undefined,
+    });
+  };
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (parsingType === 'vcard') {
-        // Extract numbers from VCard
-        // Typical VCard entry: TEL;CELL;PREF:+55 11 99999-9999
-        const telMatches = content.match(/TEL.*:([+\d\s\-()]+)/gi);
-        if (telMatches) {
-          const extracted = telMatches.map(m => {
-            const num = m.split(':')[1].replace(/\D/g, '');
-            return num;
-          }).filter(n => n.length >= 10);
-          setUploadedNumbers(prev => (prev ? prev + '\n' : '') + extracted.join('\n'));
-          toast({ title: `${extracted.length} números extraídos do VCard` });
+    const nomeArquivo = file.name.toLowerCase();
+    const isExcel = /\.(xlsx|xls)$/.test(nomeArquivo);
+
+    try {
+      // Planilha do Excel: lê nome e número das colunas, em qualquer ordem.
+      if (parsingType === 'csv' && isExcel) {
+        const XLSX = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const linhas: string[] = [];
+        for (const sheetName of workbook.SheetNames) {
+          const rows = XLSX.utils.sheet_to_json<any[]>(workbook.Sheets[sheetName], { header: 1, raw: false, defval: '' });
+          for (const row of rows) {
+            const cells = (row || []).map(cell => String(cell ?? '').trim()).filter(Boolean);
+            if (cells.length === 0) continue;
+            let numero = '';
+            const nomes: string[] = [];
+            for (const cell of cells) {
+              const digits = cell.replace(/\D/g, '');
+              if (!numero && digits.length >= 8 && digits.length <= 15 && !/[A-Za-zÀ-ÿ]{2}/.test(cell)) numero = cell;
+              else nomes.push(cell);
+            }
+            if (!numero) continue;
+            const wa = normalizeBrWhatsappNumber(numero);
+            if (!wa) continue;
+            const nome = nomes.join(' ').replace(/[,;|]/g, ' ').replace(/\s+/g, ' ').trim();
+            linhas.push(nome ? `${nome}, ${wa}` : wa);
+          }
         }
-      } else if (parsingType === 'csv') {
-        // Simple CSV/Excel export parser (just look for long numbers)
-        const lines = content.split('\n');
-        const extracted: string[] = [];
-        lines.forEach(line => {
-          const matches = line.match(/\d{10,14}/g);
-          if (matches) extracted.push(...matches);
-        });
-        setUploadedNumbers(prev => (prev ? prev + '\n' : '') + extracted.join('\n'));
-        toast({ title: `${extracted.length} números extraídos do arquivo` });
+        appendImportedLines(linhas, 'Excel');
+        return;
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+
+      const content = await file.text();
+
+      if (parsingType === 'vcard') {
+        // VCard: FN/N traz o nome e TEL o telefone.
+        const blocos = content.split(/BEGIN:VCARD/i).slice(1);
+        const linhas: string[] = [];
+        for (const bloco of blocos) {
+          const nome = (bloco.match(/^FN[^:]*:(.+)$/im)?.[1] || '').replace(/[,;|]/g, ' ').trim();
+          const tel = bloco.match(/^TEL[^:]*:([+\d\s\-()]+)$/im)?.[1] || '';
+          const wa = tel ? normalizeBrWhatsappNumber(tel) : null;
+          if (!wa) continue;
+          linhas.push(nome ? `${nome}, ${wa}` : wa);
+        }
+        appendImportedLines(linhas, 'VCard');
+        return;
+      }
+
+      // CSV / TXT: usa o mesmo leitor da caixa de texto (nome + número).
+      const linhas = parseUploadedEntries(content).map(entry => (entry.name ? `${entry.name}, ${entry.wa_id}` : entry.wa_id));
+      appendImportedLines(linhas, 'arquivo');
+    } catch (error: any) {
+      console.error('[Broadcaster] Falha ao ler o arquivo importado:', error);
+      toast({ title: 'Não foi possível ler o arquivo', description: error?.message || 'Formato não reconhecido', variant: 'destructive' });
+    }
   };
+
 
   return (
     <div className="w-full max-w-7xl mx-auto space-y-4 md:space-y-6 pb-24 md:pb-8 p-3 md:p-8 animate-in fade-in duration-500 overflow-x-hidden">

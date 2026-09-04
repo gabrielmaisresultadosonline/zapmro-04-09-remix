@@ -258,51 +258,48 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         .map(c => ({ wa_id: c.wa_id, name: c.name || c.wa_id }));
     }
     if (targetType === 'uploaded') {
-      const seen = new Set<string>();
-      return uploadedNumbers
-        .split(/[\n,;]+/)
-        .map(n => normalizeBrWhatsappNumber(n))
-        .filter((wa): wa is string => !!wa)
-        .filter(wa => (seen.has(wa) ? false : (seen.add(wa), true)))
-        .map(wa => ({ wa_id: wa, name: wa }));
+      return parseUploadedEntries(uploadedNumbers).map(e => ({ wa_id: e.wa_id, name: e.name || e.wa_id }));
     }
     return [];
   }, [targetType, selectedStatuses, contacts, uploadedNumbers, conversationTagFilter, selectedTags24h]);
 
-  /** Reescreve a caixa de números já corrigidos (55 + 9º dígito), sem duplicados. */
+  /** Nome informado na lista importada, usado nas variáveis do template. */
+  const uploadedNamesByWaId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of parseUploadedEntries(uploadedNumbers)) {
+      if (entry.name) map.set(entry.wa_id, entry.name);
+    }
+    return map;
+  }, [uploadedNumbers]);
+
   const normalizeUploadedList = async (raw?: string) => {
     const source = raw ?? uploadedNumbers;
-    const entries = source.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
-    if (entries.length === 0) return;
+    const rawLines = source.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (rawLines.length === 0) return;
 
-    const seen = new Set<string>();
-    const valid: string[] = [];
-    let invalid = 0;
+    const entries = parseUploadedEntries(source);
     let fixed = 0;
-
     for (const entry of entries) {
-      const normalized = normalizeBrWhatsappNumber(entry);
-      if (!normalized) { invalid++; continue; }
-      if (normalized !== entry.replace(/\D/g, '')) fixed++;
-      if (seen.has(normalized)) continue;
-      seen.add(normalized);
-      valid.push(normalized);
+      const originalDigits = entry.rawNumber.replace(/\D/g, '');
+      if (entry.wa_id !== originalDigits) fixed++;
     }
 
-    setUploadedNumbers(valid.join('\n'));
+    // Mantém "Nome, número" quando o nome veio na lista; assim a variável
+    // {{nome}} continua disponível depois da correção dos números.
+    setUploadedNumbers(entries.map(e => (e.name ? `${e.name}, ${e.wa_id}` : e.wa_id)).join('\n'));
 
-    const duplicates = entries.length - invalid - valid.length;
-    if (fixed || invalid || duplicates) {
+    const invalid = Math.max(0, rawLines.length - entries.length);
+    if (fixed || invalid) {
       toast({
-        title: `${valid.length} números prontos`,
+        title: `${entries.length} números prontos`,
         description: [
           fixed ? `${fixed} corrigidos (DDI 55 / 9º dígito)` : null,
-          duplicates ? `${duplicates} duplicados removidos` : null,
-          invalid ? `${invalid} inválidos descartados (DDD incorreto)` : null,
+          invalid ? `${invalid} linhas descartadas (número inválido ou duplicado)` : null,
         ].filter(Boolean).join(' • '),
       });
     }
   };
+
 
   // Map wa_id -> minutes left in the 24h window (null when outside/unknown)
   const windowInfo = useMemo(() => {

@@ -512,8 +512,21 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   /** Localiza o contato do CRM pelo número para resolver {{nome}}, {{pedido}} etc. */
   const findContactForNumber = (number: string) => {
     const variants = new Set(waIdVariants(number));
-    return contacts.find(c => variants.has(String(c?.wa_id || '').replace(/\D/g, ''))) || { wa_id: canonicalWaId(number), name: '', metadata: {} };
+    const found = contacts.find(c => variants.has(String(c?.wa_id || '').replace(/\D/g, '')));
+    const canonical = canonicalWaId(number);
+    // Nome da lista importada: usado quando o número ainda não existe no CRM
+    // ou quando o contato salvo está sem nome.
+    const uploadedName = uploadedNamesByWaId.get(canonical)
+      || uploadedNamesByWaId.get(String(number).replace(/\D/g, ''))
+      || '';
+    if (found) {
+      const savedName = String(found.name || '').trim();
+      if (savedName && savedName !== String(found.wa_id || '')) return found;
+      return uploadedName ? { ...found, name: uploadedName } : found;
+    }
+    return { wa_id: canonical, name: uploadedName, metadata: {} };
   };
+
 
   /** Filtra pelo número de WhatsApp aberto: cada caixa tem sua própria base. */
   const scopeNumber = <T,>(query: T): T => {

@@ -74,9 +74,10 @@ export async function callAcessorAdmin<T = Record<string, unknown>>(
   payload: Record<string, unknown> = {},
   token?: string | null,
 ): Promise<T> {
+  // O token vai no corpo (e não em um cabeçalho próprio) para evitar bloqueio
+  // de CORS na etapa de verificação prévia do navegador.
   const { data, error } = await supabase.functions.invoke("acessor-admin", {
-    body: { action, ...payload },
-    headers: token ? { "x-acessor-admin-token": token } : undefined,
+    body: { action, ...payload, admin_token: token ?? undefined },
   });
   if (error) {
     const details = typeof (error as { context?: { text?: () => Promise<string> } }).context?.text === "function"

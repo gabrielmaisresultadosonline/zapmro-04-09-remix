@@ -1530,7 +1530,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                     </div>
                   </div>
                   <Textarea 
-                    placeholder="5511999999999&#10;5521888888888"
+                    placeholder="João Silva, 5511999999999&#10;5521888888888"
                     className="min-h-[100px] md:min-h-[120px] rounded-xl bg-[#202c33] border-none resize-none font-mono text-xs md:text-sm text-[#e9edef]"
                     value={uploadedNumbers}
                     onChange={e => setUploadedNumbers(e.target.value)}

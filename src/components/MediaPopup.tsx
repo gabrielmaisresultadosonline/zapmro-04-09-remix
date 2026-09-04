@@ -2,6 +2,7 @@ import { X, ZoomIn, ZoomOut, RotateCcw, Download } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
+import SmoothVideo from "@/components/media/SmoothVideo";
 
 interface MediaPopupProps {
   url: string;
@@ -112,10 +113,11 @@ export const MediaPopup = ({ url, type, onClose }: MediaPopupProps) => {
             draggable={false}
           />
         ) : (
-          <video 
-            src={url} 
-            controls 
-            autoPlay 
+          <SmoothVideo
+            src={url}
+            controls
+            autoPlay
+            containerClassName="flex items-center justify-center"
             className="max-w-[90vw] max-h-[85vh] rounded-lg shadow-2xl"
           />
         )}

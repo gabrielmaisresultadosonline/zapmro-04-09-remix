@@ -38,7 +38,7 @@ sudo apt install -y nodejs
 
 ```bash
 cd /var/www
-git clone https://github.com/gabrielmaisresultadosonline/zapmro-remix-03-09-2026.git ia-mro
+git clone https://github.com/gabrielmaisresultadosonline/zapmro-04-09-remix.git ia-mro
 cd ia-mro
 ```
 

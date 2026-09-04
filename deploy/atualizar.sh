@@ -38,7 +38,7 @@ STACK="$ROOT/deploy/postgres-stack"
 SQLDIR="$STACK/sql"
 NORMALIZER="$ROOT/deploy/normalizar-dump.py"
 SEM_BUILD="${SEM_BUILD:-0}"
-REPO_URL="https://github.com/gabrielmaisresultadosonline/zapmro-remix-03-09-2026.git"
+REPO_URL="https://github.com/gabrielmaisresultadosonline/zapmro-04-09-remix.git"
 
 sudo_() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
 

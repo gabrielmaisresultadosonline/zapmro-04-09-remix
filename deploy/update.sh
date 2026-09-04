@@ -15,7 +15,7 @@ APP_DIR="/var/www/$APP_NAME"
 NGINX_SITE="/etc/nginx/sites-available/$APP_NAME"
 DOMAIN="maisresultadosonline.com.br"
 WPP_BOT_DIR="$APP_DIR/whatsapp-bot"
-REPO_URL="https://github.com/gabrielmaisresultadosonline/zapmro-remix-03-09-2026.git"
+REPO_URL="https://github.com/gabrielmaisresultadosonline/zapmro-04-09-remix.git"
 
 # Sudo helper (permite rodar como root ou usuário normal)
 SUDO=""

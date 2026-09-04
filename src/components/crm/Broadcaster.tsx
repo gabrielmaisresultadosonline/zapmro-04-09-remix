@@ -1850,7 +1850,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                       const sel = templates.find(t => t.id === selectedTemplate);
                       const cat = (sel?.category || 'MARKETING').toUpperCase();
                       const unit = cat === 'MARKETING' ? 0.33 : 0.04;
-                      const qty = targetType === 'contacts' ? contacts.length : uploadedNumbers.split('\n').filter(n => n.trim().length >= 10).length;
+                      const qty = targetType === 'contacts' ? contacts.length : finalRecipients.length;
                       return (
                         <Badge variant="outline" className="text-[8px] md:text-[10px] text-amber-500 border-amber-500/20 bg-amber-500/5">
                           Custo Estimado ({cat}): R$ {(unit * qty).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

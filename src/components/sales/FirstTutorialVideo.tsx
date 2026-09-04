@@ -100,25 +100,15 @@ export default function FirstTutorialVideo({
             <X className="h-5 w-5" />
           </button>
           <div className="relative bg-black w-full flex items-center justify-center" style={{ maxHeight: "75vh" }}>
-            {videoLoading && (
-              <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-                <Loader2 className="h-10 w-10 animate-spin text-white/80" />
-              </div>
-            )}
-            <video
+            <SmoothVideo
               src={resolveMediaUrl(video.video_url)}
               poster={resolveMediaUrl(video.cover_url) || undefined}
               controls
               autoPlay
-              playsInline
-              preload="auto"
               controlsList="nodownload"
-              onLoadedMetadata={() => setVideoLoading(false)}
-              onLoadedData={() => setVideoLoading(false)}
-              onCanPlay={() => setVideoLoading(false)}
-              onWaiting={() => setVideoLoading(true)}
-              onPlaying={() => setVideoLoading(false)}
+              containerClassName="flex items-center justify-center"
               className="w-full h-auto max-h-[75vh] object-contain bg-black"
+              onPlaying={() => setVideoLoading(false)}
             />
           </div>
           <div className="p-4 md:p-6 bg-[#0b141a]">

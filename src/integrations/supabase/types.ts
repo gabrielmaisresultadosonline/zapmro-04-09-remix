@@ -1098,6 +1098,7 @@ export type Database = {
           trigger_type: string | null
           updated_at: string | null
           user_id: string | null
+          whatsapp_number_id: string | null
         }
         Insert: {
           created_at?: string | null
@@ -1113,6 +1114,7 @@ export type Database = {
           trigger_type?: string | null
           updated_at?: string | null
           user_id?: string | null
+          whatsapp_number_id?: string | null
         }
         Update: {
           created_at?: string | null
@@ -1128,6 +1130,7 @@ export type Database = {
           trigger_type?: string | null
           updated_at?: string | null
           user_id?: string | null
+          whatsapp_number_id?: string | null
         }
         Relationships: []
       }
@@ -1681,6 +1684,7 @@ export type Database = {
           status: string | null
           updated_at: string | null
           user_id: string | null
+          whatsapp_number_id: string | null
         }
         Insert: {
           category?: string | null
@@ -1696,6 +1700,7 @@ export type Database = {
           status?: string | null
           updated_at?: string | null
           user_id?: string | null
+          whatsapp_number_id?: string | null
         }
         Update: {
           category?: string | null
@@ -1711,6 +1716,7 @@ export type Database = {
           status?: string | null
           updated_at?: string | null
           user_id?: string | null
+          whatsapp_number_id?: string | null
         }
         Relationships: []
       }

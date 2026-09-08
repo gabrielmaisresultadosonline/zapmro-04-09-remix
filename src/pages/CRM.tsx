@@ -167,6 +167,26 @@ import {
   setActiveWhatsAppNumberId,
 } from "@/lib/activeNumberContext";
 
+/**
+ * Multi-WhatsApp: templates e fluxos são bancos de dados separados por
+ * número. O número aberto enxerga apenas os próprios registros; registros
+ * legados (whatsapp_number_id NULL) continuam visíveis para que nada suma
+ * de cadastros antigos.
+ */
+const scopeQueryToActiveNumber = <T,>(query: T): T => {
+  const numberId = getActiveWhatsAppNumberId();
+  if (!numberId) return query;
+  return (query as any).or(
+    `whatsapp_number_id.eq.${numberId},whatsapp_number_id.is.null`
+  ) as T;
+};
+
+/** Carimbo gravado em novos templates/fluxos para pertencerem ao número aberto. */
+const activeNumberOwnershipPatch = (): { whatsapp_number_id?: string } => {
+  const numberId = getActiveWhatsAppNumberId();
+  return numberId ? { whatsapp_number_id: numberId } : {};
+};
+
 const getCanonicalConversationPhone = (rawPhone: unknown): string => {
   const digits = String(rawPhone ?? '').replace(/\D/g, '');
   const normalized = digits.length === 10 || digits.length === 11 ? `55${digits}` : digits;
@@ -2422,7 +2442,7 @@ const CRM = () => {
       
       if (metricsData) setMetrics(metricsData);
 
-      const { data: flowsData } = await supabase.from('crm_flows').select('*, crm_flow_steps(*)');
+      const { data: flowsData } = await scopeQueryToActiveNumber(supabase.from('crm_flows').select('*, crm_flow_steps(*)'));
       setFlows(flowsData || []);
 
       // Paginated fetch to load ALL contacts (default cap is 1000)
@@ -2430,7 +2450,10 @@ const CRM = () => {
       fetchInboundTimestamps();
 
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      const { data: templatesData } = await supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id);
+      // Multi-WhatsApp: cada número tem seus próprios templates aprovados.
+      const { data: templatesData } = await scopeQueryToActiveNumber(
+        supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id)
+      );
       setTemplates(templatesData || []);
 
       // Auto-sync if there are pending templates to see if they were approved
@@ -2439,7 +2462,9 @@ const CRM = () => {
         supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } })
           .then(({ data, error }) => {
             if (!error && data?.success) {
-              supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id).then(({ data: updatedTemplates }) => {
+              scopeQueryToActiveNumber(
+                supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id)
+              ).then(({ data: updatedTemplates }) => {
                 if (updatedTemplates) setTemplates(updatedTemplates);
               });
             }
@@ -5021,6 +5046,8 @@ const CRM = () => {
         is_active: flowData.is_active !== false,
         nodes: flowData.nodes || [],
         edges: flowData.edges || [],
+        // Multi-WhatsApp: o fluxo pertence ao número aberto no momento.
+        ...activeNumberOwnershipPatch(),
         updated_at: new Date().toISOString()
       };
 
@@ -5043,9 +5070,9 @@ const CRM = () => {
 
       // Recarrega SOMENTE os fluxos (fetchData completo levava ~3s e o fluxo
       // reaberto vinha desatualizado).
-      const { data: freshFlows } = await supabase
-        .from('crm_flows')
-        .select('*, crm_flow_steps(*)');
+      const { data: freshFlows } = await scopeQueryToActiveNumber(
+        supabase.from('crm_flows').select('*, crm_flow_steps(*)')
+      );
       if (freshFlows) setFlows(freshFlows);
 
       setFlowSaveOverlay({ open: true, done: true });
@@ -5095,6 +5122,8 @@ const CRM = () => {
         is_active: false,
         nodes: newNodes,
         edges: newEdges,
+        // Multi-WhatsApp: a cópia nasce no número aberto no momento.
+        ...activeNumberOwnershipPatch(),
         updated_at: new Date().toISOString()
       };
 
@@ -5283,6 +5312,9 @@ const CRM = () => {
     setContacts([]);
     setSelectedContact(null);
     setChatMessages([]);
+    // Templates e fluxos também são separados por número.
+    setTemplates([]);
+    setFlows([]);
     messagesCacheRef.current = {};
     contactsSeededRef.current = false;
     lastContactsSyncRef.current = null;

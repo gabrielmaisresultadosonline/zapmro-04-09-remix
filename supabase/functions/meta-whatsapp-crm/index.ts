@@ -2062,12 +2062,18 @@ else if (message.type === "unsupported") {
     try {
       const allCandidateTexts = collectInboundTriggerTexts(message, text);
       console.log(`[TRIGGER-CTWA] (ad-priority) waId=${waId} msgType=${message?.type} aiActive=${isAiActive} candidates=${JSON.stringify(allCandidateTexts)}`);
-      const { data: triggeredFlows, error: triggeredFlowsError } = await supabase
+      let adPriorityFlowsQuery = supabase
         .from('crm_flows')
         .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id')
         .eq('user_id', userId)
         .eq('is_active', true)
         .in('trigger_type', ['exact_phrase', 'keyword']);
+      // Multi-número: gatilhos só disparam fluxos do número que recebeu a
+      // mensagem (fluxos legados sem número continuam valendo para todos).
+      if (inboundNumberId) {
+        adPriorityFlowsQuery = adPriorityFlowsQuery.or(`whatsapp_number_id.eq.${inboundNumberId},whatsapp_number_id.is.null`);
+      }
+      const { data: triggeredFlows, error: triggeredFlowsError } = await adPriorityFlowsQuery;
 
       if (triggeredFlowsError) throw triggeredFlowsError;
 
@@ -2129,13 +2135,17 @@ else if (message.type === "unsupported") {
       const allCandidateTexts = collectInboundTriggerTexts(message, text);
       const hasReferral = !!getReferralFromWebhookMessage(message);
       console.log(`[TRIGGER-CTWA] (waiting-flow) waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} candidates=${JSON.stringify(allCandidateTexts)}`);
-      const { data: triggeredFlows, error: triggeredFlowsError } = await supabase
+      let waitingFlowsQuery = supabase
         .from('crm_flows')
         .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id')
         .eq('user_id', userId)
         .eq('is_active', true)
         .in('trigger_type', ['exact_phrase', 'keyword'])
         .neq('id', contact.current_flow_id);
+      if (inboundNumberId) {
+        waitingFlowsQuery = waitingFlowsQuery.or(`whatsapp_number_id.eq.${inboundNumberId},whatsapp_number_id.is.null`);
+      }
+      const { data: triggeredFlows, error: triggeredFlowsError } = await waitingFlowsQuery;
 
       if (triggeredFlowsError) throw triggeredFlowsError;
 
@@ -2262,11 +2272,17 @@ else if (message.type === "unsupported") {
     let flowTriggered = false;
 
     try {
-      const { data: activeFlows } = await supabase
+      let autoFlowsQuery = supabase
         .from('crm_flows')
         .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id')
         .eq('user_id', userId)
         .eq('is_active', true);
+      // Multi-número: cada número só dispara seus próprios fluxos
+      // (fluxos legados sem número seguem valendo para todos).
+      if (inboundNumberId) {
+        autoFlowsQuery = autoFlowsQuery.or(`whatsapp_number_id.eq.${inboundNumberId},whatsapp_number_id.is.null`);
+      }
+      const { data: activeFlows } = await autoFlowsQuery;
 
       if (activeFlows && activeFlows.length > 0) {
         const allCandidateTexts = collectInboundTriggerTexts(message, text);
@@ -4368,12 +4384,19 @@ async function internalSendTemplate(
   // (code 10/100/132001) que eram interpretados como "saldo insuficiente".
   // Bloqueamos antes de chamar a Graph API e explicamos o motivo real.
   try {
-    const { data: statusRow } = await supabase
+    let statusQuery = supabase
       .from('crm_templates')
       .select('id, status, language, components, is_carousel')
       .eq('name', templateName)
-      .eq('user_id', contact?.user_id)
-      .maybeSingle();
+      .eq('user_id', contact?.user_id);
+    // Multi-número: o mesmo nome pode existir em 2 números do cadastro.
+    // Prefere a linha do número da conversa; aceita legadas (sem número).
+    if (contact?.whatsapp_number_id) {
+      statusQuery = statusQuery
+        .or(`whatsapp_number_id.eq.${contact.whatsapp_number_id},whatsapp_number_id.is.null`)
+        .order('whatsapp_number_id', { ascending: true, nullsFirst: false });
+    }
+    const { data: statusRow } = await statusQuery.limit(1).maybeSingle();
     approvedTemplateRow = statusRow || null;
 
     const tplStatus = String(statusRow?.status || '').toUpperCase();
@@ -4415,12 +4438,17 @@ async function internalSendTemplate(
   // Se não houver componentes manuais, tentamos buscar no banco de dados para ver se há mídia salva (HEADER ou CAROUSEL)
 
   if (!manualComponents || manualComponents.length === 0) {
-    const { data: templateData } = await supabase
+    let componentsQuery = supabase
       .from('crm_templates')
       .select('components, is_carousel')
       .eq('name', templateName)
-      .eq('user_id', contact?.user_id)
-      .single();
+      .eq('user_id', contact?.user_id);
+    if (contact?.whatsapp_number_id) {
+      componentsQuery = componentsQuery
+        .or(`whatsapp_number_id.eq.${contact.whatsapp_number_id},whatsapp_number_id.is.null`)
+        .order('whatsapp_number_id', { ascending: true, nullsFirst: false });
+    }
+    const { data: templateData } = await componentsQuery.limit(1).maybeSingle();
     
     dbTemplate = templateData;
 
@@ -5932,6 +5960,9 @@ async function fetchAndStoreIncomingMedia(
           // pelo usuário (ex.: UTILITY). Só após APPROVED a Meta vira fonte de
           // verdade, pois aí a reclassificação final já foi concluída.
 
+          // Multi-número: o template sincronizado pertence ao número cujas
+          // credenciais foram usadas nesta chamada (scopedNumberId). Assim
+          // cada número do cadastro tem seus próprios templates aprovados.
           await supabase.from('crm_templates').upsert({
             id: template.id,
             name: template.name,
@@ -5940,13 +5971,20 @@ async function fetchAndStoreIncomingMedia(
             status: template.status,
             components: processedComponents,
             user_id: userId,
+            ...(scopedNumberId ? { whatsapp_number_id: scopedNumberId } : {}),
             updated_at: new Date().toISOString()
           })
         }
         
-        // Remove local templates that are no longer on Meta
+        // Remove local templates that are no longer on Meta.
+        // Multi-número: a limpeza é restrita ao número sincronizado — antes
+        // ela apagava os templates dos OUTROS números do mesmo cadastro.
         if (metaTemplateIds.length > 0) {
-          await supabase.from('crm_templates').delete().eq('user_id', userId).not('id', 'in', metaTemplateIds)
+          let cleanupQuery = supabase.from('crm_templates').delete().eq('user_id', userId).not('id', 'in', metaTemplateIds);
+          cleanupQuery = scopedNumberId
+            ? cleanupQuery.eq('whatsapp_number_id', scopedNumberId)
+            : cleanupQuery.is('whatsapp_number_id', null);
+          await cleanupQuery;
         }
       }
       
@@ -6192,6 +6230,7 @@ async function fetchAndStoreIncomingMedia(
           status: 'PENDING',
           components: processedComponents,
           user_id: userId,
+          ...(scopedNumberId ? { whatsapp_number_id: scopedNumberId } : {}),
           is_pix: is_pix || false,
           pix_code: pix_code || null,
           is_carousel: is_carousel || false,
@@ -6235,14 +6274,20 @@ async function fetchAndStoreIncomingMedia(
 
       if (isDeletedOrNotFound) {
         console.log(`Template ${name} confirmed deleted from Meta or not found. Removing from local database...`);
-        const { error: dbError } = await supabase.from('crm_templates').delete().eq('name', name).eq('user_id', userId);
+        // Multi-número: remove só a linha deste número — o mesmo nome pode
+        // existir aprovado em outro número do cadastro.
+        let deleteQuery = supabase.from('crm_templates').delete().eq('name', name).eq('user_id', userId);
+        if (scopedNumberId) deleteQuery = deleteQuery.eq('whatsapp_number_id', scopedNumberId);
+        const { error: dbError } = await deleteQuery;
         if (dbError) console.error('Local DB Deletion Error:', dbError);
       } else if (result.error) {
         // If there's an error and it's NOT a "not found" error, we shouldn't delete locally yet
         // but the user wants it gone, so we force local deletion if Meta fails for other reasons
         // to keep UI in sync, but log it.
         console.warn(`Meta deletion failed for ${name}, but forcing local deletion as requested:`, result.error);
-        await supabase.from('crm_templates').delete().eq('name', name).eq('user_id', userId);
+        let forceDeleteQuery = supabase.from('crm_templates').delete().eq('name', name).eq('user_id', userId);
+        if (scopedNumberId) forceDeleteQuery = forceDeleteQuery.eq('whatsapp_number_id', scopedNumberId);
+        await forceDeleteQuery;
       }
       
       return new Response(JSON.stringify({ 
@@ -6339,12 +6384,17 @@ async function fetchAndStoreIncomingMedia(
       // das variáveis com campos do contato). Montamos os componentes aqui,
       // já resolvidos para o contato real do envio.
       if ((!manualComponents || manualComponents.length === 0) && params.templateConfig && typeof params.templateConfig === 'object') {
-        const { data: templateRowForConfig } = await supabase
+        let configTemplateQuery = supabase
           .from('crm_templates')
           .select('components, is_carousel, language')
           .eq('name', templateName)
-          .eq('user_id', contact.user_id || userId)
-          .maybeSingle();
+          .eq('user_id', contact.user_id || userId);
+        if (templateNumberId) {
+          configTemplateQuery = configTemplateQuery
+            .or(`whatsapp_number_id.eq.${templateNumberId},whatsapp_number_id.is.null`)
+            .order('whatsapp_number_id', { ascending: true, nullsFirst: false });
+        }
+        const { data: templateRowForConfig } = await configTemplateQuery.limit(1).maybeSingle();
         if (templateRowForConfig?.components && !templateRowForConfig.is_carousel) {
           const schema = parseServerTemplateSchema(templateRowForConfig.components);
           manualComponents = buildServerTemplateComponents(schema, params.templateConfig, contact);

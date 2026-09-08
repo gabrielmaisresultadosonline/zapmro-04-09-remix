@@ -24,6 +24,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { supabase } from "@/integrations/supabase/client";
+import { getActiveWhatsAppNumberId } from "@/lib/activeNumberContext";
 import { FlowMedia } from "./FlowMedia";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
@@ -68,6 +69,19 @@ import { compressVideoForWhatsApp, WHATSAPP_VIDEO_MAX_BYTES } from "@/lib/videoC
 import { VideoCompressDialog } from "./VideoCompressDialog";
 import WhatsAppFlowPreview from "./WhatsAppFlowPreview";
 import { Smartphone } from "lucide-react";
+
+/**
+ * Multi-WhatsApp: dentro do editor de fluxo, templates e fluxos de destino
+ * ("Pular p/ Fluxo") são os do número aberto. Registros legados (sem
+ * número) continuam visíveis para não quebrar cadastros antigos.
+ */
+const scopeToActiveNumber = <T,>(query: T): T => {
+  const numberId = getActiveWhatsAppNumberId();
+  if (!numberId) return query;
+  return (query as any).or(
+    `whatsapp_number_id.eq.${numberId},whatsapp_number_id.is.null`
+  ) as T;
+};
 
 // Custom Node Types
 const PixNode = ({ data }: any) => (
@@ -532,8 +546,8 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
   useEffect(() => {
     const fetchData = async () => {
       const [templatesRes, flowsRes, statusesRes] = await Promise.all([
-        supabase.from('crm_templates').select('*'),
-        supabase.from('crm_flows').select('id, name').order('created_at', { ascending: false }),
+        scopeToActiveNumber(supabase.from('crm_templates').select('*')),
+        scopeToActiveNumber(supabase.from('crm_flows').select('id, name').order('created_at', { ascending: false })),
         supabase.from('crm_statuses').select('*').order('sort_order', { ascending: true })
       ]);
       
@@ -827,7 +841,7 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={async () => {
                 const { error } = await supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } });
                 if (!error) {
-                  const { data } = await supabase.from('crm_templates').select('*');
+                  const { data } = await scopeToActiveNumber(supabase.from('crm_templates').select('*'));
                   if (data) setAvailableTemplates(data);
                   toast({ title: "Templates sincronizados!" });
                 }

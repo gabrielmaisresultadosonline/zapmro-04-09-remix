@@ -7526,8 +7526,26 @@ const CRM = () => {
                                           </div>
                                         </div>
                                       )}
-                                      <div className={cn(
-                                        "text-[10px] mt-0.5 mb-[-2px] float-right ml-2 opacity-70 flex items-center gap-1 leading-none select-none",
+                                       {m.isOptimistic && typeof mediaUploadProgress[m.contact_id] === 'number' && (
+                                         <div className="mt-1.5">
+                                           <div className="flex items-center justify-between mb-1 gap-2">
+                                             <span className="text-[10px] font-medium truncate opacity-80">
+                                               {m.metadata?.fileName || 'Enviando arquivo...'}
+                                             </span>
+                                             <span className="text-[10px] font-bold opacity-80">
+                                               {mediaUploadProgress[m.contact_id]}%
+                                             </span>
+                                           </div>
+                                           <div className="h-1.5 w-full bg-foreground/10 rounded-full overflow-hidden">
+                                             <div
+                                               className="h-full bg-primary transition-all duration-200"
+                                               style={{ width: `${mediaUploadProgress[m.contact_id]}%` }}
+                                             />
+                                           </div>
+                                         </div>
+                                       )}
+                                       <div className={cn(
+                                         "text-[10px] mt-0.5 mb-[-2px] float-right ml-2 opacity-70 flex items-center gap-1 leading-none select-none",
                                         m.direction === 'inbound' ? 'text-muted-foreground' : 'text-[#303030]/60 dark:text-white/60',
                                         m.status === 'failed' && 'text-destructive opacity-100'
                                       )}>

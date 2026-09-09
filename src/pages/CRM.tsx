@@ -3204,6 +3204,33 @@ const CRM = () => {
         // Só remove do bucket o que nenhuma outra conversa/fluxo referencia.
         await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current });
       }
+      // Limpar a conversa inicia um histórico novo para os gatilhos, mas
+      // preserva o contato e todos os demais dados do CRM.
+      const { error: resetContactError } = await supabase
+        .from('crm_contacts')
+        .update({
+          total_messages_received: 0,
+          last_message_received_at: null,
+          current_flow_id: null,
+          current_node_id: null,
+          flow_state: 'idle',
+          next_execution_time: null,
+        })
+        .eq('id', contactId);
+      if (resetContactError) throw resetContactError;
+
+      setContacts(prev => prev.map(contact => contact.id === contactId
+        ? {
+            ...contact,
+            total_messages_received: 0,
+            last_message_received_at: null,
+            current_flow_id: null,
+            current_node_id: null,
+            flow_state: 'idle',
+            next_execution_time: null,
+          }
+        : contact
+      ));
       if (selectedContactRef.current?.id === contactId) {
         setChatMessages([]);
       }

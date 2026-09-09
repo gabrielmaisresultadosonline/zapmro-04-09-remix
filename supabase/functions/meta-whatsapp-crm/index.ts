@@ -2348,6 +2348,9 @@ else if (message.type === "unsupported") {
           .select('id, created_at', { count: 'exact' })
           .eq('contact_id', contact.id)
           .eq('direction', 'inbound')
+          // O histórico preservado depois de "Limpar conversa" não pode
+          // impedir os gatilhos da conversa atual.
+          .or('is_deleted.is.null,is_deleted.eq.false')
           .order('created_at', { ascending: false });
 
         console.log(`[TRIGGER-AUTO] histórico inbound: count=${inboundCount ?? 0} ultimas=${JSON.stringify((inboundMessages || []).slice(0, 2).map((m: any) => m.created_at))} prevLast=${prevLast || 'null'} prevTotal=${prevTotal ?? 'null'}`);
@@ -2432,6 +2435,13 @@ else if (message.type === "unsupported") {
 
         // Priority order: mais específico primeiro
         const priority = ['exact_phrase', 'keyword', 'first_message', 'first_message_day', 'after_24h', '24h_inactivity', 'inactivity_2h', 'inactivity_1h', 'inactivity_30m'];
+
+        const automaticTriggerFlows = activeFlows.filter((flow: any) =>
+          priority.includes(flow.trigger_type) && !['exact_phrase', 'keyword'].includes(flow.trigger_type)
+        );
+        if (automaticTriggerFlows.length === 0) {
+          console.warn('[TRIGGER-AUTO] nenhum fluxo de primeira mensagem/inatividade está salvo como automático; abra o fluxo, selecione o gatilho e salve novamente');
+        }
 
         let chosen: any = null;
         for (const p of priority) {

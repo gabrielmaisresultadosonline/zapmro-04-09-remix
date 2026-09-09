@@ -9657,7 +9657,7 @@ const CRM = () => {
                                   try {
                                     const { data: { user } } = await supabase.auth.getUser();
                                     if (!user) return;
-                                    const disconnectedPhoneId = metaSettings.meta_phone_number_id || null;
+                                    const disconnectedNumberId = activeNumberId || getActiveNumberId(user.id);
                                     const cleared = {
                                       meta_access_token: '',
                                       meta_phone_number_id: '',
@@ -9665,24 +9665,23 @@ const CRM = () => {
                                       meta_display_phone_number: '',
                                       meta_verified_name: '',
                                     };
-                                    const { error } = await supabase
-                                      .from('crm_settings')
-                                      .update({ ...cleared, updated_at: new Date().toISOString() })
-                                      .eq('user_id', user.id);
-                                    if (error) throw error;
-                                    // Desconectar remove SOMENTE a caixa atual da lista de números.
-                                    // Os outros números do cadastro continuam disponíveis no seletor.
                                     let remaining = 0;
-                                    if (disconnectedPhoneId) {
-                                      const { error: numberError } = await supabase
-                                        .from('crm_whatsapp_numbers' as any)
-                                        .delete()
-                                        .eq('user_id', user.id)
-                                        .eq('meta_phone_number_id', disconnectedPhoneId);
-                                      if (numberError) {
-                                        console.warn('[CRM] não foi possível remover o número desconectado:', numberError.message);
-                                      }
+                                    if (disconnectedNumberId) {
+                                      const { data, error } = await (supabase as any).rpc(
+                                        'crm_delete_whatsapp_number',
+                                        { p_number_id: disconnectedNumberId, p_user_id: user.id }
+                                      );
+                                      if (error) throw error;
+                                      remaining = Number(data?.remaining ?? 0);
+                                    } else {
+                                      const { error } = await supabase
+                                        .from('crm_settings')
+                                        .update({ ...cleared, updated_at: new Date().toISOString() })
+                                        .eq('user_id', user.id);
+                                      if (error) throw error;
                                     }
+                                    // A operação atômica remove somente a caixa atual.
+                                    // Os outros números do cadastro continuam disponíveis no seletor.
                                     try {
                                       const numbers = await fetchUserNumbers(user.id);
                                       remaining = numbers.length;
@@ -9691,6 +9690,7 @@ const CRM = () => {
                                       /* lista indisponível — segue com o gate padrão */
                                     }
                                     setMetaSettings((prev: any) => ({ ...prev, ...cleared }));
+                                    persistActiveNumberId(user.id, null);
                                     setWhatsAppConnectionConfirmed(false);
                                     // Volta ao seletor: o usuário escolhe outro número já salvo
                                     // ou conecta um novo, sem ser forçado ao Embedded Signup.

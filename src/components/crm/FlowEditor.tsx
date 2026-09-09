@@ -779,12 +779,13 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
     if (toPurge.length) {
       // Aguarda a gravação propagar antes de checar referências no banco.
       window.setTimeout(() => {
-        void deleteMediaUrlsIfUnused(toPurge)
+        void deleteMediaUrlsIfUnused(toPurge, { reason: 'fluxo-editado' })
           .then((result) => {
-            if (result.removed) {
+            const total = result.queued || result.removed;
+            if (total) {
               toast({
-                title: 'Armazenamento liberado',
-                description: `${result.removed} arquivo(s) sem uso foram apagados.`,
+                title: 'Armazenamento agendado para limpeza',
+                description: `${total} arquivo(s) sem uso serão apagados em 7 dias.`,
               });
             }
           })

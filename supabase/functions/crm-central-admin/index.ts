@@ -742,7 +742,7 @@ serve(async (req) => {
       if (numberError) throw numberError;
 
       if (number?.id) {
-        const { data, error } = await supabase.rpc("crm_delete_whatsapp_number", {
+        const { data, error } = await supabase.rpc("crm_admin_delete_whatsapp_number", {
           p_number_id: number.id,
           p_user_id: userId,
         });
@@ -833,7 +833,7 @@ serve(async (req) => {
     if (action === "delete_user_number") {
       const { numberId, userId } = body as any;
       if (!numberId) return json({ success: false, error: "numberId obrigatório" });
-      const { data, error } = await supabase.rpc("crm_delete_whatsapp_number", {
+      const { data, error } = await supabase.rpc("crm_admin_delete_whatsapp_number", {
         p_number_id: numberId,
         p_user_id: userId || null,
       });

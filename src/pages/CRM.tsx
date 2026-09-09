@@ -806,7 +806,7 @@ const CRM = () => {
     language?: string;
   } | null>(null);
    const [previewTemplate, setPreviewTemplate] = useState<any>(null);
-  const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'image' | 'video'; fileName?: string; mimeType?: string } | null>(null);
   const [previewDocument, setPreviewDocument] = useState<{ url: string; fileName?: string } | null>(null);
   // Busca de mensagens dentro da conversa aberta
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -4149,6 +4149,13 @@ const CRM = () => {
         file,
         contentType: contentType || 'application/octet-stream',
         extension: fileExt,
+        // Barra real: 30%..80% acompanha os bytes efetivamente enviados.
+        onProgress: (percent) => {
+          setMediaUploadProgress(prev => ({
+            ...prev,
+            [targetContactId]: 30 + Math.round((percent / 100) * 50),
+          }));
+        },
       });
       console.log('[CRM][sendMedia] mídia pronta', { path: uploaded.path, reused: uploaded.reused });
       setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 60 }));
@@ -4240,8 +4247,11 @@ const CRM = () => {
           imageUrl: type === 'image' ? publicUrl : undefined,
           videoUrl: type === 'video' ? publicUrl : undefined,
           documentUrl: type === 'document' ? publicUrl : undefined,
-          fileName: type === 'document' ? originalFileName : undefined,
+          // O nome original vai para a Meta (documentos) e para o histórico,
+          // garantindo que o download devolva exatamente o arquivo enviado.
+          fileName: originalFileName,
           mimeType: contentType,
+          metadata: { fileName: originalFileName, mime_type: contentType },
           isVoice: type === 'audio',
           skipLocalSave: type === 'audio' ? true : undefined,
           meta_phone_number_id: metaSettings.meta_phone_number_id,
@@ -7259,7 +7269,7 @@ const CRM = () => {
                                                 src={resolveMediaUrl(m.media_url)} 
                                                 alt="Mídia" 
                                                 className="max-h-[180px] w-auto object-cover cursor-zoom-in transition-transform hover:scale-[1.02] duration-300" 
-                                                onClick={() => setPreviewMedia({ url: resolveMediaUrl(m.media_url), type: 'image' })} 
+                                                onClick={() => setPreviewMedia({ url: resolveMediaUrl(m.media_url), type: 'image', fileName: m.metadata?.fileName || m.metadata?.filename, mimeType: m.metadata?.mime_type })} 
                                               />
                                             </div>
                                           )}
@@ -7269,7 +7279,7 @@ const CRM = () => {
                                                 src={resolveMediaUrl(m.media_url)} 
                                                 alt="Sticker" 
                                                 className="w-full h-auto cursor-zoom-in" 
-                                                onClick={() => setPreviewMedia({ url: resolveMediaUrl(m.media_url), type: 'image' })}
+                                                onClick={() => setPreviewMedia({ url: resolveMediaUrl(m.media_url), type: 'image', fileName: m.metadata?.fileName || m.metadata?.filename, mimeType: m.metadata?.mime_type })}
                                               />
                                             </div>
                                           )}
@@ -7282,7 +7292,7 @@ const CRM = () => {
                                           {m.message_type === 'video' && m.media_url && (
                                             <div 
                                               className="mb-2 overflow-hidden rounded-lg border border-border/20 shadow-sm bg-muted/20 relative group cursor-pointer max-w-fit"
-                                              onClick={() => setPreviewMedia({ url: resolveMediaUrl(m.media_url), type: 'video' })}
+                                              onClick={() => setPreviewMedia({ url: resolveMediaUrl(m.media_url), type: 'video', fileName: m.metadata?.fileName || m.metadata?.filename, mimeType: m.metadata?.mime_type })}
                                             >
                                               <video src={resolveMediaUrl(m.media_url)} className="max-h-[180px] w-auto object-cover rounded-lg shadow-inner" preload="metadata" />
                                               <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
@@ -10473,6 +10483,8 @@ const CRM = () => {
         <MediaPopup 
           url={previewMedia.url} 
           type={previewMedia.type} 
+          fileName={previewMedia.fileName}
+          mimeType={previewMedia.mimeType}
           onClose={() => setPreviewMedia(null)} 
         />
       )}

@@ -79,7 +79,70 @@ export async function uploadDedupedMedia(options: {
   if (error && !/exists|duplicate/i.test(error.message)) throw error;
 
   console.log("[mediaStorage] arquivo enviado", { bucket, path, reused: false });
+  await registerMediaAsset({
+    bucket,
+    path,
+    url,
+    hash,
+    mimeType: contentType || (file as File).type || null,
+    sizeBytes: (file as Blob).size ?? null,
+  });
   return { url, path, reused: false, hash };
+}
+
+/**
+ * Registra o arquivo físico no catálogo (crm_media_assets).
+ * Best-effort: se o catálogo ainda não existir no banco, o upload continua
+ * funcionando exatamente como antes.
+ */
+export async function registerMediaAsset(input: {
+  bucket: string;
+  path: string;
+  url: string;
+  hash?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+}): Promise<void> {
+  try {
+    const { error } = await supabase.rpc("crm_media_register", {
+      p_bucket: input.bucket,
+      p_path: input.path,
+      p_public_url: input.url,
+      p_sha256: input.hash ?? null,
+      p_mime_type: input.mimeType ?? null,
+      p_size_bytes: input.sizeBytes ?? null,
+    } as never);
+    if (error) console.warn("[mediaStorage] catálogo indisponível", error.message);
+  } catch (e) {
+    console.warn("[mediaStorage] catálogo indisponível", e);
+  }
+}
+
+/** Ajusta o contador de referências de uma URL (best-effort). */
+async function addMediaReference(url: string, delta: number, reason?: string): Promise<void> {
+  try {
+    await supabase.rpc("crm_media_addref", {
+      p_public_url: url,
+      p_delta: delta,
+      p_reason: reason ?? null,
+    } as never);
+  } catch {
+    /* catálogo opcional */
+  }
+}
+
+/** Marca URLs como usadas por uma mensagem/fluxo/template. */
+export async function retainMediaUrls(urls: Iterable<string>, reason?: string): Promise<void> {
+  for (const url of new Set(Array.from(urls).filter(Boolean))) {
+    await addMediaReference(url, 1, reason);
+  }
+}
+
+/** Libera referências (não apaga nada de imediato). */
+export async function releaseMediaUrls(urls: Iterable<string>, reason?: string): Promise<void> {
+  for (const url of new Set(Array.from(urls).filter(Boolean))) {
+    await addMediaReference(url, -1, reason);
+  }
 }
 
 /** Extrai bucket + path de uma URL pública do Storage. */

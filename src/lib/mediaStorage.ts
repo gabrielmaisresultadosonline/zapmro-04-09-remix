@@ -80,14 +80,27 @@ export async function uploadDedupedMedia(options: {
     return { url, path, reused: true, hash };
   }
 
-  const { error } = await supabase.storage.from(bucket).upload(path, file, {
-    contentType: contentType || (file as File).type || "application/octet-stream",
-    upsert: true,
-    cacheControl: "31536000",
-  });
+  const resolvedType = contentType || (file as File).type || "application/octet-stream";
 
-  // Corrida entre dois uploads do mesmo hash não é erro: o conteúdo é igual.
-  if (error && !/exists|duplicate/i.test(error.message)) throw error;
+  if (onProgress) {
+    // Envio com progresso real: o SDK não expõe eventos de upload, então
+    // usamos XHR direto no endpoint do Storage (mesma autenticação).
+    try {
+      await uploadWithProgress({ bucket, path, file, contentType: resolvedType, onProgress });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (!/exists|duplicate/i.test(message)) throw e;
+    }
+  } else {
+    const { error } = await supabase.storage.from(bucket).upload(path, file, {
+      contentType: resolvedType,
+      upsert: true,
+      cacheControl: "31536000",
+    });
+
+    // Corrida entre dois uploads do mesmo hash não é erro: o conteúdo é igual.
+    if (error && !/exists|duplicate/i.test(error.message)) throw error;
+  }
 
   console.log("[mediaStorage] arquivo enviado", { bucket, path, reused: false });
   await registerMediaAsset({

@@ -1941,11 +1941,12 @@ else if (message.type === "unsupported") {
   }
 
 
+  let savedInboundMessageId: string | null = null;
   if (contactForSave && !skipSave) {
     // Capture state BEFORE update so we can evaluate triggers (first message, day, 24h)
     var __previousTotalReceived = contactForSave.total_messages_received || 0;
     var __previousLastReceivedAt: string | null = contactForSave.last_message_received_at || null;
-     const { error: insertMessageError } = await supabase.from('crm_messages').insert({
+     const { data: insertedInboundMessage, error: insertMessageError } = await supabase.from('crm_messages').insert({
        contact_id: contactForSave.id,
        direction: 'inbound',
        message_type: message.type === 'ptv' ? 'video' : message.type,
@@ -1954,7 +1955,8 @@ else if (message.type === "unsupported") {
        meta_message_id: message.id,
        media_url: mediaUrlForSave,
       metadata: { raw: message, referral: getReferralFromWebhookMessage(message), ...(templateButtonMeta || {}) },
-       user_id: userId,
+        user_id: userId,
+        ...numberPatch,
        // Preserve real send order: webhook batches may arrive out-of-order, so
        // we honor Meta's per-message timestamp instead of the DB insertion time.
        created_at: message?.timestamp
@@ -2102,7 +2104,7 @@ else if (message.type === "unsupported") {
       console.log(`[TRIGGER-CTWA] (ad-priority) waId=${waId} msgType=${message?.type} aiActive=${isAiActive} candidates=${JSON.stringify(allCandidateTexts)}`);
       let adPriorityFlowsQuery = supabase
         .from('crm_flows')
-        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id')
+        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id')
         .eq('user_id', userId)
         .eq('is_active', true)
         .in('trigger_type', ['exact_phrase', 'keyword']);
@@ -2261,7 +2263,7 @@ else if (message.type === "unsupported") {
 
   // CRITICAL: Ensure we capture messages for AI processing
   // Check if contact is in an AI node or AI state
-  if (contact && (isAiHandling || isAiActive || (hasActiveFlow && isInAiNode))) {
+  if (contact && (isAiHandling || (hasActiveFlow && isInAiNode))) {
     webhookAiLog('dispatch_existing_ai_state', {
       is_ai_handling: isAiHandling,
       is_ai_active: isAiActive,
@@ -2331,7 +2333,23 @@ else if (message.type === "unsupported") {
       if (activeFlowsError) {
         console.error('[TRIGGER-AUTO] Erro ao carregar fluxos ativos:', activeFlowsError);
       }
-      console.log(`[TRIGGER-AUTO] fluxos ativos carregados=${activeFlows?.length || 0} tipos=${JSON.stringify((activeFlows || []).map((f: any) => `${f.name}:${f.trigger_type}`))}`);
+      console.log(`[TRIGGER-AUTO] fluxos ativos carregados=${activeFlows?.length || 0} numberId=${inboundNumberId || 'none'} tipos=${JSON.stringify((activeFlows || []).map((f: any) => `${f.name}:${f.trigger_type}:${f.whatsapp_number_id || 'legacy'}`))}`);
+
+      const { data: allUserFlows, error: allUserFlowsError } = await supabase
+        .from('crm_flows')
+        .select('name, trigger_type, is_active, whatsapp_number_id')
+        .eq('user_id', userId);
+      if (allUserFlowsError) {
+        console.error('[TRIGGER-SCOPE] erro ao carregar diagnóstico de fluxos:', allUserFlowsError.message);
+      } else {
+        const excludedFlows = (allUserFlows || []).filter((flow: any) =>
+          flow.is_active === true
+          && inboundNumberId
+          && flow.whatsapp_number_id
+          && flow.whatsapp_number_id !== inboundNumberId
+        );
+        console.log(`[TRIGGER-SCOPE] userId=${userId} inboundNumberId=${inboundNumberId || 'none'} total=${allUserFlows?.length || 0} excluidosOutraCaixa=${JSON.stringify(excludedFlows.map((f: any) => `${f.name}:${f.trigger_type}:${f.whatsapp_number_id}`))}`);
+      }
 
       if (activeFlows && activeFlows.length > 0) {
         const allCandidateTexts = collectInboundTriggerTexts(message, text);
@@ -2342,27 +2360,43 @@ else if (message.type === "unsupported") {
 
         const now = new Date();
         
-        // Verifica se existem mensagens inbound no histórico para este contato
-        const { data: inboundMessages, count: inboundCount } = await supabase
+        // A mensagem atual já foi persistida; procuramos explicitamente a
+        // mensagem inbound anterior. Isso evita depender da ordem de inserção.
+        let previousInboundQuery = supabase
           .from('crm_messages')
-          .select('id, created_at', { count: 'exact' })
+          .select('id, created_at, meta_message_id')
           .eq('contact_id', contact.id)
           .eq('direction', 'inbound')
-          // O histórico preservado depois de "Limpar conversa" não pode
-          // impedir os gatilhos da conversa atual.
-          .or('is_deleted.is.null,is_deleted.eq.false')
-          .order('created_at', { ascending: false });
+          .or('is_deleted.is.null,is_deleted.eq.false');
+        if (savedInboundMessageId) {
+          previousInboundQuery = previousInboundQuery.neq('id', savedInboundMessageId);
+        } else if (message?.id) {
+          previousInboundQuery = previousInboundQuery.neq('meta_message_id', message.id);
+        }
+        const { data: previousInboundMessages, error: historyError } = await previousInboundQuery
+          .order('created_at', { ascending: false })
+          .limit(2);
 
-        console.log(`[TRIGGER-AUTO] histórico inbound: count=${inboundCount ?? 0} ultimas=${JSON.stringify((inboundMessages || []).slice(0, 2).map((m: any) => m.created_at))} prevLast=${prevLast || 'null'} prevTotal=${prevTotal ?? 'null'}`);
+        if (historyError) {
+          console.error('[TRIGGER-HISTORY] falha ao consultar mensagens anteriores:', {
+            contactId: contact.id,
+            currentMessageId: savedInboundMessageId,
+            error: historyError.message,
+          });
+          throw historyError;
+        }
+
+        const previousInbound = previousInboundMessages?.[0] ?? null;
+        console.log(`[TRIGGER-HISTORY] contactId=${contact.id} currentMessageId=${savedInboundMessageId || message?.id || 'none'} previousId=${previousInbound?.id || 'none'} previousAt=${previousInbound?.created_at || 'none'} contactPrevLast=${prevLast || 'null'} contactPrevTotal=${prevTotal ?? 'null'}`);
 
         // Se o usuário limpou o histórico, inboundCount será 0 ou 1, 
         // e prevLast pode ser nulo ou antigo.
-        const effectiveIsFirstEver = (inboundCount || 0) <= 1;
+        const effectiveIsFirstEver = !previousInbound;
 
         
         // Se o contato foi criado nos últimos 5 minutos e tem poucas mensagens, reforça a chance de ser primeira mensagem
         const isVeryRecentContact = contact.created_at && (new Date().getTime() - new Date(contact.created_at).getTime()) < 300000;
-        const isNewAndFirst = isVeryRecentContact && (inboundCount || 0) <= 1;
+        const isNewAndFirst = isVeryRecentContact && !previousInbound;
 
         let isFirstEver = effectiveIsFirstEver || isNewAndFirst;
         let isFirstOfDay = isFirstEver || !prevLast;
@@ -2371,18 +2405,18 @@ else if (message.type === "unsupported") {
         let inactivityGapMs = isFirstEver ? Number.POSITIVE_INFINITY : 0;
 
         if (isFirstEver) {
-          console.log(`[TRIGGER] First message ever detected for contact ${contact.id} (inboundCount: ${inboundCount}, recent: ${isVeryRecentContact})`);
-        } else if (prevLast || (inboundMessages && inboundMessages.length > 1)) {
-          // Usa a data da mensagem anterior (a que veio ANTES da atual) se disponível, senão usa prevLast
-          const lastDateStr = (inboundMessages && inboundMessages.length > 1) 
-            ? inboundMessages[1].created_at 
-            : prevLast;
+          console.log(`[TRIGGER] First message ever detected for contact ${contact.id} (previousInbound: none, recent: ${isVeryRecentContact})`);
+        } else if (previousInbound?.created_at || prevLast) {
+          const lastDateStr = previousInbound?.created_at || prevLast;
             
           const lastDate = new Date(lastDateStr);
-          const nowInSameTZ = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-          const lastInSameTZ = new Date(lastDate.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-          
-          isFirstOfDay = lastInSameTZ.toLocaleDateString('pt-BR') !== nowInSameTZ.toLocaleDateString('pt-BR');
+          const dayFormatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Sao_Paulo',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          });
+          isFirstOfDay = dayFormatter.format(lastDate) !== dayFormatter.format(now);
           isAfter24h = (now.getTime() - lastDate.getTime()) >= 24 * 60 * 60 * 1000;
           inactivityGapMs = now.getTime() - lastDate.getTime();
           
@@ -2394,7 +2428,7 @@ else if (message.type === "unsupported") {
         const inactivityMinutes = inactivityGapMs === Number.POSITIVE_INFINITY
           ? Number.POSITIVE_INFINITY
           : Math.round(inactivityGapMs / 60000);
-        console.log(`[TRIGGER-AUTO] firstEver=${isFirstEver} firstOfDay=${isFirstOfDay} after24h=${isAfter24h} inactivityMin=${inactivityMinutes}`);
+        console.log(`[TRIGGER-DECISION] firstEver=${isFirstEver} firstOfDay=${isFirstOfDay} after24h=${isAfter24h} inactivityMin=${inactivityMinutes} previousAt=${previousInbound?.created_at || 'none'}`);
 
         const inactivityThresholds: Record<string, number> = {
           inactivity_30m: 30 * 60 * 1000,
@@ -2419,12 +2453,22 @@ else if (message.type === "unsupported") {
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=keyword kws=${JSON.stringify(kws)} => matched=${m}`);
             return m;
           }
-          if (t === 'first_message') return isFirstEver;
+          if (t === 'first_message' || t === 'new_contact') {
+            console.log(`[TRIGGER-EVAL] flow="${flow.name}" type=${t} matched=${isFirstEver}`);
+            return isFirstEver;
+          }
           if (t === 'first_message_day') {
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=first_message_day => matched=${isFirstOfDay}`);
             return isFirstOfDay;
           }
-          if (t === 'after_24h') return isAfter24h;
+          if (t === 'after_24h') {
+            console.log(`[TRIGGER-EVAL] flow="${flow.name}" type=after_24h matched=${isAfter24h}`);
+            return isAfter24h;
+          }
+          if (t === 'all_messages') {
+            console.log(`[TRIGGER-EVAL] flow="${flow.name}" type=all_messages matched=true`);
+            return true;
+          }
           if (inactivityThresholds[t] !== undefined) {
             const m = inactivityGapMs >= inactivityThresholds[t];
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=${t} inactivityMin=${inactivityMinutes} => matched=${m}`);
@@ -2434,7 +2478,7 @@ else if (message.type === "unsupported") {
         };
 
         // Priority order: mais específico primeiro
-        const priority = ['exact_phrase', 'keyword', 'first_message', 'first_message_day', 'after_24h', '24h_inactivity', 'inactivity_2h', 'inactivity_1h', 'inactivity_30m'];
+        const priority = ['exact_phrase', 'keyword', 'first_message', 'new_contact', 'first_message_day', 'after_24h', '24h_inactivity', 'inactivity_2h', 'inactivity_1h', 'inactivity_30m', 'all_messages'];
 
         const automaticTriggerFlows = activeFlows.filter((flow: any) =>
           priority.includes(flow.trigger_type) && !['exact_phrase', 'keyword'].includes(flow.trigger_type)
@@ -2463,7 +2507,7 @@ else if (message.type === "unsupported") {
 
           if (startNode) {
             // Garante que o estado do contato seja atualizado ANTES da execução
-            await supabase.from('crm_contacts').update({
+            const { error: contactFlowUpdateError } = await supabase.from('crm_contacts').update({
               current_flow_id: chosen.id,
               current_node_id: startNode.id,
               flow_state: 'running',
@@ -2472,12 +2516,22 @@ else if (message.type === "unsupported") {
               next_execution_time: null,
               last_flow_interaction: new Date().toISOString()
             }).eq('id', contact.id);
+            if (contactFlowUpdateError) {
+              console.error('[TRIGGER-START] falha ao reservar contato para o fluxo:', {
+                contactId: contact.id,
+                flowId: chosen.id,
+                error: contactFlowUpdateError.message,
+              });
+              throw contactFlowUpdateError;
+            }
             
             // Re-fetch contact to ensure we have the most up-to-date object for executeVisualNode
             const { data: updatedContactTrigger } = await supabase.from('crm_contacts').select('*').eq('id', contact.id).single();
 
             // Trigger actual execution of the start node (usually message node)
+            console.log(`[TRIGGER-START] executando flowId=${chosen.id} startNode=${startNode.id} type=${startNode.type}`);
             const executeRes = await executeVisualNode(supabase, chosen, startNode, contact.id, waId);
+            console.log(`[TRIGGER-START] primeiro nó terminou flowId=${chosen.id} result=${JSON.stringify(executeRes)}`);
             
             // Loop de execução sequencial se o nó executado retornou nextNodeId (ex: após Delay ou nó de Mensagem simples)
             let currentRes = executeRes;
@@ -2519,7 +2573,14 @@ else if (message.type === "unsupported") {
       }
 
     } catch (trigErr) {
-      console.error('[TRIGGER] Error evaluating triggers:', trigErr);
+      console.error('[TRIGGER-ERROR] Error evaluating triggers:', {
+        waId,
+        userId,
+        numberId: inboundNumberId,
+        contactId: contact?.id || null,
+        message: trigErr instanceof Error ? trigErr.message : String(trigErr),
+        stack: trigErr instanceof Error ? trigErr.stack : null,
+      });
     }
   }
 
@@ -2630,7 +2691,7 @@ async function processCountdownTriggers(supabase: any) {
       console.error('[COUNTDOWN] Failed to load eligible contacts:', {
         userId: settings.user_id,
         error: contactsError.message,
-      });
+      }).select('id').maybeSingle();
       summary.failed += 1;
       continue;
     }
@@ -5319,6 +5380,7 @@ async function fetchAndStoreIncomingMedia(
          console.warn('[WEBHOOK-SETUP] Hub verification failed or token mismatch', { webhookIdentifier, hubVerifyToken });
        }
      }
+     savedInboundMessageId = insertedInboundMessage?.id ?? null;
 
      return new Response('Forbidden', { status: 403 });
    }
@@ -7823,6 +7885,7 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
+    console.log(`[TRIGGER-GATE] desviado para IA existente waId=${waId} isAiHandling=${isAiHandling} isAiNode=${isInAiNode}`);
   }
 });
 

@@ -100,6 +100,18 @@ export async function uploadDedupedMedia(options: {
 }
 
 /**
+ * As funções do catálogo (102-catalogo-de-midias.sql) ainda não constam nos
+ * tipos gerados do banco. Este alias mantém a chamada tipada sem `any` e sem
+ * quebrar quando o catálogo ainda não foi aplicado na VPS.
+ */
+type CatalogRpc = (
+  fn: string,
+  args: Record<string, unknown>,
+) => Promise<{ error: { message: string } | null }>;
+
+const catalogRpc = supabase.rpc.bind(supabase) as unknown as CatalogRpc;
+
+/**
  * Registra o arquivo físico no catálogo (crm_media_assets).
  * Best-effort: se o catálogo ainda não existir no banco, o upload continua
  * funcionando exatamente como antes.

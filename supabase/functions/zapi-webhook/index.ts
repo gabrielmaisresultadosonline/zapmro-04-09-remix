@@ -398,7 +398,7 @@ serve(async (req) => {
                 .from('zapi_flows')
                 .select('id, trigger_type')
                 .eq('is_active', true)
-                .in('trigger_type', ['first_message', 'first_message_day', '24h_inactivity']);
+                .in('trigger_type', ['first_message', 'first_message_day', '24h_inactivity', 'inactivity_30m', 'inactivity_1h', 'inactivity_2h']);
 
               if (triggerFlows && triggerFlows.length > 0) {
                 // Get most recent incoming message BEFORE the one we just saved

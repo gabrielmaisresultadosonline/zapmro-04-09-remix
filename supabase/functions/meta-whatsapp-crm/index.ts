@@ -2321,7 +2321,7 @@ else if (message.type === "unsupported") {
     try {
       let autoFlowsQuery = supabase
         .from('crm_flows')
-        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id')
+        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id')
         .eq('user_id', userId)
         .eq('is_active', true);
       // Multi-número: cada número só dispara seus próprios fluxos

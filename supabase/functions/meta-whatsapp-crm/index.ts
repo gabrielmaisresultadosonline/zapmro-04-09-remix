@@ -2038,7 +2038,7 @@ else if (message.type === "unsupported") {
     || _flowState === 'ended'
     || _flowState === 'finished';
   // SE O MODO GLOBAL ESTIVER ATIVO, consideramos que não há fluxo impedindo a IA, a menos que esteja no meio de um fluxo rodando
-  const hasActiveFlow = !!contact?.current_flow_id && !_isFlowEnded && (!isGlobalAiEnabled || _flowState === 'running');
+  let hasActiveFlow = !!contact?.current_flow_id && !_isFlowEnded && (!isGlobalAiEnabled || _flowState === 'running');
 
   if (contact?.current_flow_id && _isFlowEnded) {
 
@@ -2053,6 +2053,44 @@ else if (message.type === "unsupported") {
     contact.current_flow_id = null;
     contact.current_node_id = null;
   }
+
+  // Libera fluxos "presos" (waiting_response/running) quando o contato ficou muito tempo
+  // sem falar. Sem isso, o gatilho "primeira mensagem do dia" (e os de inatividade)
+  // nunca disparam de novo, porque o contato segue marcado dentro do fluxo antigo.
+  if (contact && hasActiveFlow) {
+    const lastInteractionRaw = contact.last_flow_interaction
+      || __previousLastReceivedAt
+      || contact.last_message_received_at
+      || null;
+    if (lastInteractionRaw) {
+      const lastInteraction = new Date(lastInteractionRaw);
+      if (!Number.isNaN(lastInteraction.getTime())) {
+        const nowMs = Date.now();
+        const gapMs = nowMs - lastInteraction.getTime();
+        const tz = 'America/Sao_Paulo';
+        const dayOfLast = new Date(lastInteraction.toLocaleString('en-US', { timeZone: tz })).toLocaleDateString('pt-BR');
+        const dayOfNow = new Date(new Date().toLocaleString('en-US', { timeZone: tz })).toLocaleDateString('pt-BR');
+        const isNewDay = dayOfLast !== dayOfNow;
+        const isLongGap = gapMs >= 6 * 60 * 60 * 1000;
+        if (isNewDay || isLongGap) {
+          console.log(`[TRIGGER-GUARD] Releasing stale running flow for contact ${contact.id} (gapMs=${gapMs}, newDay=${isNewDay}). Allowing re-trigger.`);
+          await supabase.from('crm_contacts').update({
+            current_flow_id: null,
+            current_node_id: null,
+            flow_state: 'idle',
+            flow_timeout_node_id: null,
+            flow_timeout_minutes: null,
+            next_execution_time: null,
+          }).eq('id', contact.id);
+          contact.current_flow_id = null;
+          contact.current_node_id = null;
+          contact.flow_state = 'idle';
+          hasActiveFlow = false;
+        }
+      }
+    }
+  }
+
 
   // Gatilhos exact_phrase/keyword devem ter prioridade sobre IA ativa (ai_active=true),
   // mesmo sem referral. Mensagens de anúncio (CTWA) podem chegar como "unsupported" (code 131060)
@@ -2312,6 +2350,8 @@ else if (message.type === "unsupported") {
         let isFirstEver = effectiveIsFirstEver || isNewAndFirst;
         let isFirstOfDay = isFirstEver || !prevLast;
         let isAfter24h = isFirstEver || !prevLast;
+        // Tempo (em ms) desde a mensagem recebida anterior — base dos gatilhos de inatividade.
+        let inactivityGapMs = isFirstEver ? Number.POSITIVE_INFINITY : 0;
 
         if (isFirstEver) {
           console.log(`[TRIGGER] First message ever detected for contact ${contact.id} (inboundCount: ${inboundCount}, recent: ${isVeryRecentContact})`);
@@ -2327,9 +2367,24 @@ else if (message.type === "unsupported") {
           
           isFirstOfDay = lastInSameTZ.toLocaleDateString('pt-BR') !== nowInSameTZ.toLocaleDateString('pt-BR');
           isAfter24h = (now.getTime() - lastDate.getTime()) >= 24 * 60 * 60 * 1000;
+          inactivityGapMs = now.getTime() - lastDate.getTime();
           
           if (isAfter24h) isFirstOfDay = true;
+        } else {
+          inactivityGapMs = Number.POSITIVE_INFINITY;
         }
+
+        const inactivityMinutes = inactivityGapMs === Number.POSITIVE_INFINITY
+          ? Number.POSITIVE_INFINITY
+          : Math.round(inactivityGapMs / 60000);
+        console.log(`[TRIGGER-AUTO] firstEver=${isFirstEver} firstOfDay=${isFirstOfDay} after24h=${isAfter24h} inactivityMin=${inactivityMinutes}`);
+
+        const inactivityThresholds: Record<string, number> = {
+          inactivity_30m: 30 * 60 * 1000,
+          inactivity_1h: 60 * 60 * 1000,
+          inactivity_2h: 2 * 60 * 60 * 1000,
+          '24h_inactivity': 24 * 60 * 60 * 1000,
+        };
 
         const flowMatches = (flow: any): boolean => {
           const t = flow.trigger_type;
@@ -2348,13 +2403,22 @@ else if (message.type === "unsupported") {
             return m;
           }
           if (t === 'first_message') return isFirstEver;
-          if (t === 'first_message_day') return isFirstOfDay;
+          if (t === 'first_message_day') {
+            console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=first_message_day => matched=${isFirstOfDay}`);
+            return isFirstOfDay;
+          }
           if (t === 'after_24h') return isAfter24h;
+          if (inactivityThresholds[t] !== undefined) {
+            const m = inactivityGapMs >= inactivityThresholds[t];
+            console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=${t} inactivityMin=${inactivityMinutes} => matched=${m}`);
+            return m;
+          }
           return false;
         };
 
-        // Priority order: exact_phrase > keyword > first_message > first_message_day > after_24h
-        const priority = ['exact_phrase', 'keyword', 'first_message', 'first_message_day', 'after_24h'];
+        // Priority order: mais específico primeiro
+        const priority = ['exact_phrase', 'keyword', 'first_message', 'first_message_day', 'after_24h', '24h_inactivity', 'inactivity_2h', 'inactivity_1h', 'inactivity_30m'];
+
         let chosen: any = null;
         for (const p of priority) {
           chosen = activeFlows.find((f: any) => f.trigger_type === p && flowMatches(f));

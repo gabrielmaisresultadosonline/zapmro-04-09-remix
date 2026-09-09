@@ -398,7 +398,7 @@ serve(async (req) => {
                 .from('zapi_flows')
                 .select('id, trigger_type')
                 .eq('is_active', true)
-                .in('trigger_type', ['first_message', 'first_message_day', '24h_inactivity']);
+                .in('trigger_type', ['first_message', 'first_message_day', '24h_inactivity', 'inactivity_30m', 'inactivity_1h', 'inactivity_2h']);
 
               if (triggerFlows && triggerFlows.length > 0) {
                 // Get most recent incoming message BEFORE the one we just saved
@@ -452,6 +452,25 @@ serve(async (req) => {
                     }
                   }
                 }
+
+                // Inatividade curta (30min / 1h / 2h)
+                if (!matchedFlowId && previousMsg) {
+                  const diffMs = new Date().getTime() - new Date(previousMsg.created_at).getTime();
+                  const shortThresholds: Array<[string, number]> = [
+                    ['inactivity_2h', 2 * 60 * 60 * 1000],
+                    ['inactivity_1h', 60 * 60 * 1000],
+                    ['inactivity_30m', 30 * 60 * 1000],
+                  ];
+                  for (const [type, ms] of shortThresholds) {
+                    const f = triggerFlows.find(tf => tf.trigger_type === type);
+                    if (f && diffMs >= ms) {
+                      matchedFlowId = f.id;
+                      console.log(`[Webhook] Inactivity ${type} detected! Flow: ${matchedFlowId}`);
+                      break;
+                    }
+                  }
+                }
+
               }
             }
 

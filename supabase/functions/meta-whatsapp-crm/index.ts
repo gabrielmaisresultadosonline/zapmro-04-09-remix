@@ -2038,7 +2038,7 @@ else if (message.type === "unsupported") {
     || _flowState === 'ended'
     || _flowState === 'finished';
   // SE O MODO GLOBAL ESTIVER ATIVO, consideramos que não há fluxo impedindo a IA, a menos que esteja no meio de um fluxo rodando
-  const hasActiveFlow = !!contact?.current_flow_id && !_isFlowEnded && (!isGlobalAiEnabled || _flowState === 'running');
+  let hasActiveFlow = !!contact?.current_flow_id && !_isFlowEnded && (!isGlobalAiEnabled || _flowState === 'running');
 
   if (contact?.current_flow_id && _isFlowEnded) {
 
@@ -2053,6 +2053,44 @@ else if (message.type === "unsupported") {
     contact.current_flow_id = null;
     contact.current_node_id = null;
   }
+
+  // Libera fluxos "presos" (waiting_response/running) quando o contato ficou muito tempo
+  // sem falar. Sem isso, o gatilho "primeira mensagem do dia" (e os de inatividade)
+  // nunca disparam de novo, porque o contato segue marcado dentro do fluxo antigo.
+  if (contact && hasActiveFlow) {
+    const lastInteractionRaw = contact.last_flow_interaction
+      || __previousLastReceivedAt
+      || contact.last_message_received_at
+      || null;
+    if (lastInteractionRaw) {
+      const lastInteraction = new Date(lastInteractionRaw);
+      if (!Number.isNaN(lastInteraction.getTime())) {
+        const nowMs = Date.now();
+        const gapMs = nowMs - lastInteraction.getTime();
+        const tz = 'America/Sao_Paulo';
+        const dayOfLast = new Date(lastInteraction.toLocaleString('en-US', { timeZone: tz })).toLocaleDateString('pt-BR');
+        const dayOfNow = new Date(new Date().toLocaleString('en-US', { timeZone: tz })).toLocaleDateString('pt-BR');
+        const isNewDay = dayOfLast !== dayOfNow;
+        const isLongGap = gapMs >= 6 * 60 * 60 * 1000;
+        if (isNewDay || isLongGap) {
+          console.log(`[TRIGGER-GUARD] Releasing stale running flow for contact ${contact.id} (gapMs=${gapMs}, newDay=${isNewDay}). Allowing re-trigger.`);
+          await supabase.from('crm_contacts').update({
+            current_flow_id: null,
+            current_node_id: null,
+            flow_state: 'idle',
+            flow_timeout_node_id: null,
+            flow_timeout_minutes: null,
+            next_execution_time: null,
+          }).eq('id', contact.id);
+          contact.current_flow_id = null;
+          contact.current_node_id = null;
+          contact.flow_state = 'idle';
+          hasActiveFlow = false;
+        }
+      }
+    }
+  }
+
 
   // Gatilhos exact_phrase/keyword devem ter prioridade sobre IA ativa (ai_active=true),
   // mesmo sem referral. Mensagens de anúncio (CTWA) podem chegar como "unsupported" (code 131060)

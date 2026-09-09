@@ -18,4 +18,4 @@
 - [x] Templates Meta: variáveis/imagem/botões editáveis no envio (disparador, agendamento, conversa), presets salvos (migration 096), validação estrutural na Edge Function, registro de cliques em resposta rápida e tutorial Utility no criador.
 
 - [x] Módulo /acessor: landing, login/cadastro com 2 dias de teste, dashboard do cliente, admin (OpenAI + WhatsApp oficial/coexistência), webhook com transcrição de áudio e migration 097.
-- [x] Corrigir remoção/desconexão de números WhatsApp sem colisão entre contatos e preservando as demais caixas.
+- [x] Corrigir remoção/desconexão de números WhatsApp sem colisão entre contatos, com autorização própria do AdminCentral e preservando as demais caixas.

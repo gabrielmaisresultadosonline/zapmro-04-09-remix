@@ -49,8 +49,10 @@ export async function uploadDedupedMedia(options: {
   file: Blob;
   contentType?: string;
   extension?: string;
+  /** Progresso real do envio (0-100). Opcional: sem ele o comportamento é o de antes. */
+  onProgress?: (percent: number) => void;
 }): Promise<DedupedUploadResult> {
-  const { bucket, folder, file, contentType, extension } = options;
+  const { bucket, folder, file, contentType, extension, onProgress } = options;
   const hash = await hashBlob(file);
   const ext = sanitizeExtension(extension);
   const fileName = `${hash}.${ext}`;

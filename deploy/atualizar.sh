@@ -280,6 +280,9 @@ else
     if [ "$nome" = "096-template-variable-presets.sql" ]; then
       graves="${erros:-0}"
     fi
+    if [ "$nome" = "100-gatilhos-inatividade-fluxos.sql" ] || [ "$nome" = "101-corrigir-gatilhos-primeira-mensagem.sql" ]; then
+      graves="${erros:-0}"
+    fi
     if [ "${erros:-0}" -gt 0 ]; then
       warn "  ${erros} aviso(s)/erro(s) em $nome → /tmp/zapmro-sql-$nome.log"
       grep -iE '^psql:.*(ERROR|FATAL)' "/tmp/zapmro-sql-$nome.log" | sort -u | head -3 | sed 's/^/      /' || true

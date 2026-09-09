@@ -2304,8 +2304,11 @@ else if (message.type === "unsupported") {
   }
 
   // ====== AUTO-TRIGGER FLOWS ON INBOUND MESSAGES ======
-  // Only try to start a flow if there's no active flow and contact is not in AI handling
-  if (contact && !hasActiveFlow && !isAiHandling && !isAiActive) {
+  // Só inicia fluxo se o contato estiver ocioso (sem fluxo ativo) e sem processamento de IA em andamento.
+  // OBS: `isAiActive` NÃO bloqueia mais os gatilhos automáticos — antes, contatos com o Agente IA
+  // ligado nunca disparavam "primeira mensagem do dia"/inatividade. Se um fluxo casar, ele assume
+  // e desliga a IA para esse contato; se nada casar, o fluxo de IA continua normalmente abaixo.
+  if (contact && !hasActiveFlow && !isAiHandling) {
     // Check if Global AI is enabled - it should trigger if no specific flow matches
     let flowTriggered = false;
 
@@ -2443,6 +2446,9 @@ else if (message.type === "unsupported") {
               current_flow_id: chosen.id,
               current_node_id: startNode.id,
               flow_state: 'running',
+              // O fluxo assume a conversa: desliga a IA para não responder por cima.
+              ai_active: false,
+              next_execution_time: null,
               last_flow_interaction: new Date().toISOString()
             }).eq('id', contact.id);
             

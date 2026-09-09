@@ -113,6 +113,10 @@ export default function TrialsPanel({ creds }: Props) {
 
   const approve = async (t: Trial) => {
     const plan = selectedPlan[t.id] || "mensal";
+    const willResetPassword = resetPw[t.id] === true;
+    const senhaAviso = willResetPassword
+      ? "Será enviado um email de liberação com email e uma NOVA senha de acesso."
+      : "Será enviado um email de liberação SEM trocar a senha — o cliente continua com a senha dele.";
     let days: number | undefined;
     let planToSend = plan;
     if (plan === "custom") {
@@ -124,9 +128,9 @@ export default function TrialsPanel({ creds }: Props) {
       }
       // backend requires a valid plan key; use "mensal" as label placeholder for custom durations
       planToSend = "mensal";
-      if (!confirm(`Liberar ${days} dia(s) para ${t.email}?\n\nSerá enviado um email de liberação com email e uma NOVA senha de acesso.`)) return;
+      if (!confirm(`Liberar ${days} dia(s) para ${t.email}?\n\n${senhaAviso}`)) return;
     } else {
-      if (!confirm(`Liberar ${plan.toUpperCase()} para ${t.email}?\n\nSerá enviado um email de liberação com email e uma NOVA senha de acesso.`)) return;
+      if (!confirm(`Liberar ${plan.toUpperCase()} para ${t.email}?\n\n${senhaAviso}`)) return;
     }
     setBusyId(t.id);
     // requestId estável: se o navegador desistir da resposta, repetir a ação

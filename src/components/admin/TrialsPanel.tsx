@@ -144,8 +144,8 @@ export default function TrialsPanel({ creds }: Props) {
           email: t.email,
           plan: planToSend,
           days,
-          // envia junto no email de liberação uma senha nova de acesso
-          resetPassword: true,
+          // só troca a senha (e envia a nova no email) se o admin marcar
+          resetPassword: willResetPassword,
           requestId,
         }
       );

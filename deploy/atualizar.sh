@@ -303,6 +303,7 @@ ok "banco atualizado — ${aplicados} arquivo(s) aplicado(s), ${tabelas} tabelas
 # 5.1 — cron das Edge Functions apontando SEMPRE para esta VPS (nunca Supabase)
 info "reagendando cron das functions para a API local…"
 CRON_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/meta-whatsapp-crm"
+MEDIA_GC_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/media-gc"
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.functions_url = '${PUBLIC_API_URL:-http://gateway}'" >/dev/null 2>&1 || true
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.service_role_key = '${SERVICE_ROLE_KEY}'" >/dev/null 2>&1 || true
 psql "$DB" -v ON_ERROR_STOP=0 -q >/tmp/zapmro-cron.log 2>&1 <<SQLCRON || true

@@ -72,6 +72,11 @@ export default function TrialsPanel({ creds }: Props) {
 
   const [selectedPlan, setSelectedPlan] = useState<Record<string, string>>({});
   const [customDays, setCustomDays] = useState<Record<string, string>>({});
+  /**
+   * Porquê: por padrão liberar o plano NÃO mexe na senha do cliente — ele já tem
+   * a dele. Só troca quando o admin marcar explicitamente nesta linha.
+   */
+  const [resetPw, setResetPw] = useState<Record<string, boolean>>({});
 
   const mountedRef = useRef(true);
   const loadingRef = useRef(false);
@@ -108,6 +113,10 @@ export default function TrialsPanel({ creds }: Props) {
 
   const approve = async (t: Trial) => {
     const plan = selectedPlan[t.id] || "mensal";
+    const willResetPassword = resetPw[t.id] === true;
+    const senhaAviso = willResetPassword
+      ? "Será enviado um email de liberação com email e uma NOVA senha de acesso."
+      : "Será enviado um email de liberação SEM trocar a senha — o cliente continua com a senha dele.";
     let days: number | undefined;
     let planToSend = plan;
     if (plan === "custom") {
@@ -119,9 +128,9 @@ export default function TrialsPanel({ creds }: Props) {
       }
       // backend requires a valid plan key; use "mensal" as label placeholder for custom durations
       planToSend = "mensal";
-      if (!confirm(`Liberar ${days} dia(s) para ${t.email}?\n\nSerá enviado um email de liberação com email e uma NOVA senha de acesso.`)) return;
+      if (!confirm(`Liberar ${days} dia(s) para ${t.email}?\n\n${senhaAviso}`)) return;
     } else {
-      if (!confirm(`Liberar ${plan.toUpperCase()} para ${t.email}?\n\nSerá enviado um email de liberação com email e uma NOVA senha de acesso.`)) return;
+      if (!confirm(`Liberar ${plan.toUpperCase()} para ${t.email}?\n\n${senhaAviso}`)) return;
     }
     setBusyId(t.id);
     // requestId estável: se o navegador desistir da resposta, repetir a ação
@@ -135,8 +144,8 @@ export default function TrialsPanel({ creds }: Props) {
           email: t.email,
           plan: planToSend,
           days,
-          // envia junto no email de liberação uma senha nova de acesso
-          resetPassword: true,
+          // só troca a senha (e envia a nova no email) se o admin marcar
+          resetPassword: willResetPassword,
           requestId,
         }
       );
@@ -364,6 +373,20 @@ export default function TrialsPanel({ creds }: Props) {
                           className="w-20 h-8 text-xs"
                         />
                       )}
+                      <label
+                        className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer select-none"
+                        title="Se desmarcado, o cliente mantém a senha atual e recebe apenas o email de liberação"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-[#25D366]"
+                          checked={resetPw[t.id] === true}
+                          onChange={(e) =>
+                            setResetPw((p) => ({ ...p, [t.id]: e.target.checked }))
+                          }
+                        />
+                        Trocar senha
+                      </label>
                       <Button
                         size="sm"
                         onClick={() => approve(t)}

@@ -60,12 +60,8 @@ export const MediaPopup = ({ url, type, fileName, mimeType, onClose }: MediaPopu
 
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `media_${Date.now()}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Mantém o nome e o formato originais do arquivo enviado.
+    void downloadMediaFile(url, fileName, mimeType);
   };
 
   return (

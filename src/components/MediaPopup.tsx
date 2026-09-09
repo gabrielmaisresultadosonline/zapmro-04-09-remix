@@ -7,10 +7,14 @@ import SmoothVideo from "@/components/media/SmoothVideo";
 interface MediaPopupProps {
   url: string;
   type: 'image' | 'video';
+  /** Nome original do arquivo enviado (mantido no download). */
+  fileName?: string;
+  /** Tipo MIME original, usado só para completar a extensão quando faltar. */
+  mimeType?: string;
   onClose: () => void;
 }
 
-export const MediaPopup = ({ url, type, onClose }: MediaPopupProps) => {
+export const MediaPopup = ({ url, type, fileName, mimeType, onClose }: MediaPopupProps) => {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);

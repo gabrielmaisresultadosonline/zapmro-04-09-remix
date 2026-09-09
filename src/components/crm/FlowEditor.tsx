@@ -1798,6 +1798,9 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
                       <SelectItem value="inactivity_2h">🕑 1ª mensagem após 2 horas inativo</SelectItem>
                       <SelectItem value="24h_inactivity">🌙 1ª mensagem após 24 horas inativo</SelectItem>
                       <SelectItem value="exact_phrase">📝 Frase Completa Exata</SelectItem>
+                    </SelectContent>
+                  </Select>
+
 
                 </div>
 

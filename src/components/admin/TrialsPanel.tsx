@@ -72,6 +72,11 @@ export default function TrialsPanel({ creds }: Props) {
 
   const [selectedPlan, setSelectedPlan] = useState<Record<string, string>>({});
   const [customDays, setCustomDays] = useState<Record<string, string>>({});
+  /**
+   * Porquê: por padrão liberar o plano NÃO mexe na senha do cliente — ele já tem
+   * a dele. Só troca quando o admin marcar explicitamente nesta linha.
+   */
+  const [resetPw, setResetPw] = useState<Record<string, boolean>>({});
 
   const mountedRef = useRef(true);
   const loadingRef = useRef(false);

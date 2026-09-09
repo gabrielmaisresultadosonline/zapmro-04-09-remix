@@ -5056,7 +5056,8 @@ const CRM = () => {
         result = await supabase
           .from('crm_flows')
           .update(payload)
-          .eq('id', id);
+          .eq('id', id)
+          .select();
       } else {
         result = await supabase
           .from('crm_flows')
@@ -5067,6 +5068,20 @@ const CRM = () => {
       if (result.error) {
         throw result.error;
       }
+
+      const savedRow = (result.data as any[] | null)?.[0];
+      if (!savedRow) {
+        throw new Error(
+          'O fluxo não pôde ser gravado (nenhuma linha atualizada). Verifique se ele pertence ao número de WhatsApp aberto no momento.'
+        );
+      }
+      if (savedRow.trigger_type !== payload.trigger_type) {
+        throw new Error(
+          `O gatilho não foi salvo (o banco manteve "${savedRow.trigger_type}"). Atualize o banco na VPS para aceitar "${payload.trigger_type}".`
+        );
+      }
+      console.log('[FLOW-SAVE] gatilho gravado:', savedRow.id, savedRow.trigger_type);
+
 
       // Recarrega SOMENTE os fluxos (fetchData completo levava ~3s e o fluxo
       // reaberto vinha desatualizado).

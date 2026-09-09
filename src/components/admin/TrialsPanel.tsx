@@ -373,6 +373,20 @@ export default function TrialsPanel({ creds }: Props) {
                           className="w-20 h-8 text-xs"
                         />
                       )}
+                      <label
+                        className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer select-none"
+                        title="Se desmarcado, o cliente mantém a senha atual e recebe apenas o email de liberação"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-[#25D366]"
+                          checked={resetPw[t.id] === true}
+                          onChange={(e) =>
+                            setResetPw((p) => ({ ...p, [t.id]: e.target.checked }))
+                          }
+                        />
+                        Trocar senha
+                      </label>
                       <Button
                         size="sm"
                         onClick={() => approve(t)}

@@ -1962,11 +1962,12 @@ else if (message.type === "unsupported") {
        created_at: message?.timestamp
          ? new Date(Number(message.timestamp) * 1000).toISOString()
          : new Date().toISOString()
-     });
+     }).select('id').maybeSingle();
     if (insertMessageError) {
       console.error('[WEBHOOK] Failed to save inbound message', { waId, userId, error: insertMessageError.message });
       return jsonResponse({ success: false, error: insertMessageError.message }, 500);
     }
+     savedInboundMessageId = insertedInboundMessage?.id ?? null;
      const inboundMessageAt = message?.timestamp
        ? new Date(Number(message.timestamp) * 1000).toISOString()
        : new Date().toISOString();
@@ -2177,7 +2178,7 @@ else if (message.type === "unsupported") {
       console.log(`[TRIGGER-CTWA] (waiting-flow) waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} candidates=${JSON.stringify(allCandidateTexts)}`);
       let waitingFlowsQuery = supabase
         .from('crm_flows')
-        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id')
+        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id')
         .eq('user_id', userId)
         .eq('is_active', true)
         .in('trigger_type', ['exact_phrase', 'keyword'])
@@ -2358,7 +2359,9 @@ else if (message.type === "unsupported") {
         const prevTotal = __previousTotalReceived;
         const prevLast = __previousLastReceivedAt;
 
-        const now = new Date();
+        const now = message?.timestamp
+          ? new Date(Number(message.timestamp) * 1000)
+          : new Date();
         
         // A mensagem atual já foi persistida; procuramos explicitamente a
         // mensagem inbound anterior. Isso evita depender da ordem de inserção.
@@ -2389,8 +2392,7 @@ else if (message.type === "unsupported") {
         const previousInbound = previousInboundMessages?.[0] ?? null;
         console.log(`[TRIGGER-HISTORY] contactId=${contact.id} currentMessageId=${savedInboundMessageId || message?.id || 'none'} previousId=${previousInbound?.id || 'none'} previousAt=${previousInbound?.created_at || 'none'} contactPrevLast=${prevLast || 'null'} contactPrevTotal=${prevTotal ?? 'null'}`);
 
-        // Se o usuário limpou o histórico, inboundCount será 0 ou 1, 
-        // e prevLast pode ser nulo ou antigo.
+        // Se o usuário limpou o histórico, nenhuma mensagem anterior ativa será encontrada.
         const effectiveIsFirstEver = !previousInbound;
 
         
@@ -5380,8 +5382,6 @@ async function fetchAndStoreIncomingMedia(
          console.warn('[WEBHOOK-SETUP] Hub verification failed or token mismatch', { webhookIdentifier, hubVerifyToken });
        }
      }
-     savedInboundMessageId = insertedInboundMessage?.id ?? null;
-
      return new Response('Forbidden', { status: 403 });
    }
  

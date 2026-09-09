@@ -303,6 +303,7 @@ ok "banco atualizado — ${aplicados} arquivo(s) aplicado(s), ${tabelas} tabelas
 # 5.1 — cron das Edge Functions apontando SEMPRE para esta VPS (nunca Supabase)
 info "reagendando cron das functions para a API local…"
 CRON_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/meta-whatsapp-crm"
+MEDIA_GC_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/media-gc"
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.functions_url = '${PUBLIC_API_URL:-http://gateway}'" >/dev/null 2>&1 || true
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.service_role_key = '${SERVICE_ROLE_KEY}'" >/dev/null 2>&1 || true
 psql "$DB" -v ON_ERROR_STOP=0 -q >/tmp/zapmro-cron.log 2>&1 <<SQLCRON || true
@@ -341,6 +342,17 @@ SELECT cron.schedule('ai-recovery-every-10min', '*/10 * * * *', \$job\$
     url := '${CRON_URL}',
     headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
     body := '{"action": "processAiRecovery"}'::jsonb,
+    timeout_milliseconds := 300000
+  );
+\$job\$);
+
+-- Lixeira de mídias: apaga do disco apenas o que venceu o prazo de 7 dias e
+-- que nenhuma mensagem, fluxo ou template usa mais.
+SELECT cron.schedule('media-gc-daily', '25 4 * * *', \$job\$
+  SELECT net.http_post(
+    url := '${MEDIA_GC_URL}',
+    headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
+    body := '{"limit": 500}'::jsonb,
     timeout_milliseconds := 300000
   );
 \$job\$);

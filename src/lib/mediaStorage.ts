@@ -66,6 +66,15 @@ export async function uploadDedupedMedia(options: {
 
   if (existing?.some((item) => item.name === fileName)) {
     console.log("[mediaStorage] reaproveitando arquivo existente", { bucket, path });
+    // Reaproveitar também tira o arquivo da lixeira, se ele estiver lá.
+    await registerMediaAsset({
+      bucket,
+      path,
+      url,
+      hash,
+      mimeType: contentType || (file as File).type || null,
+      sizeBytes: (file as Blob).size ?? null,
+    });
     return { url, path, reused: true, hash };
   }
 
@@ -79,7 +88,82 @@ export async function uploadDedupedMedia(options: {
   if (error && !/exists|duplicate/i.test(error.message)) throw error;
 
   console.log("[mediaStorage] arquivo enviado", { bucket, path, reused: false });
+  await registerMediaAsset({
+    bucket,
+    path,
+    url,
+    hash,
+    mimeType: contentType || (file as File).type || null,
+    sizeBytes: (file as Blob).size ?? null,
+  });
   return { url, path, reused: false, hash };
+}
+
+/**
+ * As funções do catálogo (102-catalogo-de-midias.sql) ainda não constam nos
+ * tipos gerados do banco. Este alias mantém a chamada tipada sem `any` e sem
+ * quebrar quando o catálogo ainda não foi aplicado na VPS.
+ */
+type CatalogRpc = (
+  fn: string,
+  args: Record<string, unknown>,
+) => Promise<{ error: { message: string } | null }>;
+
+const catalogRpc = supabase.rpc.bind(supabase) as unknown as CatalogRpc;
+
+/**
+ * Registra o arquivo físico no catálogo (crm_media_assets).
+ * Best-effort: se o catálogo ainda não existir no banco, o upload continua
+ * funcionando exatamente como antes.
+ */
+export async function registerMediaAsset(input: {
+  bucket: string;
+  path: string;
+  url: string;
+  hash?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+}): Promise<void> {
+  try {
+    const { error } = await catalogRpc("crm_media_register", {
+      p_bucket: input.bucket,
+      p_path: input.path,
+      p_public_url: input.url,
+      p_sha256: input.hash ?? null,
+      p_mime_type: input.mimeType ?? null,
+      p_size_bytes: input.sizeBytes ?? null,
+    });
+    if (error) console.warn("[mediaStorage] catálogo indisponível", error.message);
+  } catch (e) {
+    console.warn("[mediaStorage] catálogo indisponível", e);
+  }
+}
+
+/** Ajusta o contador de referências de uma URL (best-effort). */
+async function addMediaReference(url: string, delta: number, reason?: string): Promise<void> {
+  try {
+    await catalogRpc("crm_media_addref", {
+      p_public_url: url,
+      p_delta: delta,
+      p_reason: reason ?? null,
+    });
+  } catch {
+    /* catálogo opcional */
+  }
+}
+
+/** Marca URLs como usadas por uma mensagem/fluxo/template. */
+export async function retainMediaUrls(urls: Iterable<string>, reason?: string): Promise<void> {
+  for (const url of new Set(Array.from(urls).filter(Boolean))) {
+    await addMediaReference(url, 1, reason);
+  }
+}
+
+/** Libera referências (não apaga nada de imediato). */
+export async function releaseMediaUrls(urls: Iterable<string>, reason?: string): Promise<void> {
+  for (const url of new Set(Array.from(urls).filter(Boolean))) {
+    await addMediaReference(url, -1, reason);
+  }
 }
 
 /** Extrai bucket + path de uma URL pública do Storage. */
@@ -148,22 +232,44 @@ async function findUrlsStillInUse(urls: string[], userId?: string | null): Promi
     });
   }
 
+  // Templates (inclusive aprovados na Meta): a mídia do cabeçalho não pode sumir.
+  let templateQuery = supabase.from("crm_templates").select("components");
+  if (userId) templateQuery = templateQuery.eq("user_id", userId);
+  const { data: templates } = await templateQuery;
+  if (templates?.length) {
+    const templateUrls = collectStorageUrls(templates);
+    urls.forEach((url) => {
+      if (templateUrls.has(url)) inUse.add(url);
+    });
+  }
+
   return inUse;
 }
 
 /**
- * Apaga do Storage apenas as URLs que não são mais referenciadas.
- * Retorna quantos objetos foram removidos.
+ * Agenda a remoção das URLs que não são mais referenciadas.
+ *
+ * Importante: NADA é apagado na hora. O arquivo entra na lixeira
+ * (crm_media_gc_queue) e só sai do disco depois do prazo (7 dias por padrão),
+ * e mesmo assim o worker confere de novo se alguém voltou a usar o arquivo.
+ * Com `immediate: true` o comportamento antigo (apagar já) é preservado.
  */
 export async function deleteMediaUrlsIfUnused(
   urls: Iterable<string>,
-  options: { userId?: string | null; force?: boolean } = {},
-): Promise<{ removed: number; kept: number }> {
+  options: {
+    userId?: string | null;
+    force?: boolean;
+    immediate?: boolean;
+    reason?: string;
+    delayDays?: number;
+  } = {},
+): Promise<{ removed: number; kept: number; queued: number }> {
   const unique = Array.from(new Set(Array.from(urls).filter(Boolean)));
-  if (!unique.length) return { removed: 0, kept: 0 };
+  if (!unique.length) return { removed: 0, kept: 0, queued: 0 };
 
   const inUse = options.force ? new Set<string>() : await findUrlsStillInUse(unique, options.userId);
   const byBucket = new Map<string, string[]>();
+  const unused: Array<{ url: string; bucket: string; path: string }> = [];
   let kept = 0;
 
   for (const url of unique) {
@@ -173,9 +279,36 @@ export async function deleteMediaUrlsIfUnused(
     }
     const parsed = parseStorageUrl(url);
     if (!parsed) continue;
+    unused.push({ url, bucket: parsed.bucket, path: parsed.path });
     const list = byBucket.get(parsed.bucket) || [];
     list.push(parsed.path);
     byBucket.set(parsed.bucket, list);
+  }
+
+  // Caminho padrão: lixeira de 7 dias.
+  if (!options.immediate) {
+    let queued = 0;
+    for (const item of unused) {
+      try {
+        const { error } = await catalogRpc("crm_media_enqueue_delete", {
+          p_bucket: item.bucket,
+          p_path: item.path,
+          p_public_url: item.url,
+          p_reason: options.reason ?? null,
+          p_delay_days: options.delayDays ?? 7,
+        });
+        if (!error) queued += 1;
+        else console.warn("[mediaStorage] lixeira indisponível", error.message);
+      } catch (e) {
+        console.warn("[mediaStorage] lixeira indisponível", e);
+      }
+    }
+    console.log("[mediaStorage] arquivos agendados para remoção", {
+      queued,
+      kept,
+      prazoDias: options.delayDays ?? 7,
+    });
+    return { removed: 0, kept, queued };
   }
 
   let removed = 0;
@@ -192,5 +325,5 @@ export async function deleteMediaUrlsIfUnused(
   }
 
   console.log("[mediaStorage] limpeza concluída", { removed, kept });
-  return { removed, kept };
+  return { removed, kept, queued: 0 };
 }

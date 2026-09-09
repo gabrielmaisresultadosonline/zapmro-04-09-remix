@@ -62,6 +62,17 @@ psql_q "select bucket_id, count(*) from storage.objects group by 1 order by 2 de
   | awk -F'|' '{printf "  %-28s %s objetos\n", $1, $2}'
 info "Tamanho do banco: $(psql_q "select pg_size_pretty(pg_database_size(current_database()));")"
 
+sec "3.1) Catálogo de mídias e lixeira de 7 dias"
+if [ "$(psql_q "select to_regclass('public.crm_media_assets') is not null;")" = "t" ]; then
+  info "arquivos catalogados: $(psql_q "select count(*) from public.crm_media_assets;")"
+  info "sem nenhuma referência: $(psql_q "select count(*) from public.crm_media_assets where reference_count = 0;")"
+  info "na lixeira (aguardando prazo): $(psql_q "select count(*) from public.crm_media_gc_queue where status='pending';")"
+  info "já vencidos (serão apagados no próximo ciclo): $(psql_q "select count(*) from public.crm_media_gc_queue where status='pending' and purge_after <= now();")"
+  info "espaço a liberar quando vencer: $(psql_q "select pg_size_pretty(coalesce(sum(a.size_bytes),0)) from public.crm_media_gc_queue q join public.crm_media_assets a on a.id = q.media_asset_id where q.status='pending';")"
+else
+  warn "catálogo de mídias ainda não aplicado (rode deploy/atualizar.sh)"
+fi
+
 sec "4) Arquivos órfãos no disco (sem registro no banco)"
 # Lista relativa ao STORAGE_ROOT: <bucket>/<caminho...>
 mapfile -t DISK_FILES < <(docker exec "$ST_CONT" find "$STORAGE_ROOT" -type f -mmin "+$IDADE_MIN" -printf '%P\n' 2>/dev/null || true)

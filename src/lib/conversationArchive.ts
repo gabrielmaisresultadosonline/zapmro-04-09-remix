@@ -234,8 +234,12 @@ export async function clearConversationHistory(options: {
   let removedFiles = 0;
   let keptFiles = 0;
   if (options.purgeStorage !== false) {
-    const result = await deleteMediaUrlsIfUnused(urls, { userId: options.userId });
-    removedFiles = result.removed;
+    // Não apaga na hora: entra na lixeira e só sai do disco depois de 7 dias.
+    const result = await deleteMediaUrlsIfUnused(urls, {
+      userId: options.userId,
+      reason: "conversa-limpa",
+    });
+    removedFiles = result.removed + result.queued;
     keptFiles = result.kept;
   }
 

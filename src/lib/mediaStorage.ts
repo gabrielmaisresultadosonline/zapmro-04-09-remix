@@ -220,22 +220,44 @@ async function findUrlsStillInUse(urls: string[], userId?: string | null): Promi
     });
   }
 
+  // Templates (inclusive aprovados na Meta): a mídia do cabeçalho não pode sumir.
+  let templateQuery = supabase.from("crm_templates").select("components");
+  if (userId) templateQuery = templateQuery.eq("user_id", userId);
+  const { data: templates } = await templateQuery;
+  if (templates?.length) {
+    const templateUrls = collectStorageUrls(templates);
+    urls.forEach((url) => {
+      if (templateUrls.has(url)) inUse.add(url);
+    });
+  }
+
   return inUse;
 }
 
 /**
- * Apaga do Storage apenas as URLs que não são mais referenciadas.
- * Retorna quantos objetos foram removidos.
+ * Agenda a remoção das URLs que não são mais referenciadas.
+ *
+ * Importante: NADA é apagado na hora. O arquivo entra na lixeira
+ * (crm_media_gc_queue) e só sai do disco depois do prazo (7 dias por padrão),
+ * e mesmo assim o worker confere de novo se alguém voltou a usar o arquivo.
+ * Com `immediate: true` o comportamento antigo (apagar já) é preservado.
  */
 export async function deleteMediaUrlsIfUnused(
   urls: Iterable<string>,
-  options: { userId?: string | null; force?: boolean } = {},
-): Promise<{ removed: number; kept: number }> {
+  options: {
+    userId?: string | null;
+    force?: boolean;
+    immediate?: boolean;
+    reason?: string;
+    delayDays?: number;
+  } = {},
+): Promise<{ removed: number; kept: number; queued: number }> {
   const unique = Array.from(new Set(Array.from(urls).filter(Boolean)));
-  if (!unique.length) return { removed: 0, kept: 0 };
+  if (!unique.length) return { removed: 0, kept: 0, queued: 0 };
 
   const inUse = options.force ? new Set<string>() : await findUrlsStillInUse(unique, options.userId);
   const byBucket = new Map<string, string[]>();
+  const unused: Array<{ url: string; bucket: string; path: string }> = [];
   let kept = 0;
 
   for (const url of unique) {
@@ -245,9 +267,36 @@ export async function deleteMediaUrlsIfUnused(
     }
     const parsed = parseStorageUrl(url);
     if (!parsed) continue;
+    unused.push({ url, bucket: parsed.bucket, path: parsed.path });
     const list = byBucket.get(parsed.bucket) || [];
     list.push(parsed.path);
     byBucket.set(parsed.bucket, list);
+  }
+
+  // Caminho padrão: lixeira de 7 dias.
+  if (!options.immediate) {
+    let queued = 0;
+    for (const item of unused) {
+      try {
+        const { error } = await supabase.rpc("crm_media_enqueue_delete", {
+          p_bucket: item.bucket,
+          p_path: item.path,
+          p_public_url: item.url,
+          p_reason: options.reason ?? null,
+          p_delay_days: options.delayDays ?? 7,
+        } as never);
+        if (!error) queued += 1;
+        else console.warn("[mediaStorage] lixeira indisponível", error.message);
+      } catch (e) {
+        console.warn("[mediaStorage] lixeira indisponível", e);
+      }
+    }
+    console.log("[mediaStorage] arquivos agendados para remoção", {
+      queued,
+      kept,
+      prazoDias: options.delayDays ?? 7,
+    });
+    return { removed: 0, kept, queued };
   }
 
   let removed = 0;
@@ -264,5 +313,5 @@ export async function deleteMediaUrlsIfUnused(
   }
 
   console.log("[mediaStorage] limpeza concluída", { removed, kept });
-  return { removed, kept };
+  return { removed, kept, queued: 0 };
 }

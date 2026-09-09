@@ -2446,6 +2446,9 @@ else if (message.type === "unsupported") {
               current_flow_id: chosen.id,
               current_node_id: startNode.id,
               flow_state: 'running',
+              // O fluxo assume a conversa: desliga a IA para não responder por cima.
+              ai_active: false,
+              next_execution_time: null,
               last_flow_interaction: new Date().toISOString()
             }).eq('id', contact.id);
             

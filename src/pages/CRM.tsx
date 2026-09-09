@@ -173,7 +173,23 @@ import {
  * legados (whatsapp_number_id NULL) continuam visíveis para que nada suma
  * de cadastros antigos.
  */
+const FLOW_TRIGGER_LABELS: Record<string, string> = {
+  manual: 'Manual',
+  keyword: 'Palavra-chave',
+  exact_phrase: 'Frase exata',
+  first_message: 'Primeira mensagem',
+  first_message_day: 'Primeira mensagem do dia',
+  after_24h: 'Após 24 horas',
+  '24h_inactivity': '24 horas inativo',
+  inactivity_30m: '1ª mensagem após 30 min inativo',
+  inactivity_1h: '1ª mensagem após 1 hora inativo',
+  inactivity_2h: '1ª mensagem após 2 horas inativo',
+  all_messages: 'Todas as mensagens',
+  new_contact: 'Novo contato',
+};
+
 const scopeQueryToActiveNumber = <T,>(query: T): T => {
+
   const numberId = getActiveWhatsAppNumberId();
   if (!numberId) return query;
   return (query as any).or(

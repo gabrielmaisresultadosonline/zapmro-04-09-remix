@@ -125,14 +125,14 @@ export async function registerMediaAsset(input: {
   sizeBytes?: number | null;
 }): Promise<void> {
   try {
-    const { error } = await supabase.rpc("crm_media_register", {
+    const { error } = await catalogRpc("crm_media_register", {
       p_bucket: input.bucket,
       p_path: input.path,
       p_public_url: input.url,
       p_sha256: input.hash ?? null,
       p_mime_type: input.mimeType ?? null,
       p_size_bytes: input.sizeBytes ?? null,
-    } as never);
+    });
     if (error) console.warn("[mediaStorage] catálogo indisponível", error.message);
   } catch (e) {
     console.warn("[mediaStorage] catálogo indisponível", e);
@@ -142,11 +142,11 @@ export async function registerMediaAsset(input: {
 /** Ajusta o contador de referências de uma URL (best-effort). */
 async function addMediaReference(url: string, delta: number, reason?: string): Promise<void> {
   try {
-    await supabase.rpc("crm_media_addref", {
+    await catalogRpc("crm_media_addref", {
       p_public_url: url,
       p_delta: delta,
       p_reason: reason ?? null,
-    } as never);
+    });
   } catch {
     /* catálogo opcional */
   }
@@ -290,13 +290,13 @@ export async function deleteMediaUrlsIfUnused(
     let queued = 0;
     for (const item of unused) {
       try {
-        const { error } = await supabase.rpc("crm_media_enqueue_delete", {
+        const { error } = await catalogRpc("crm_media_enqueue_delete", {
           p_bucket: item.bucket,
           p_path: item.path,
           p_public_url: item.url,
           p_reason: options.reason ?? null,
           p_delay_days: options.delayDays ?? 7,
-        } as never);
+        });
         if (!error) queued += 1;
         else console.warn("[mediaStorage] lixeira indisponível", error.message);
       } catch (e) {

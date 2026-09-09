@@ -3202,7 +3202,7 @@ const CRM = () => {
         const { error } = await supabase.from('crm_messages').delete().eq('contact_id', contactId);
         if (error) throw error;
         // Só remove do bucket o que nenhuma outra conversa/fluxo referencia.
-        await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current });
+        await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current, reason: 'conversa-limpa' });
       }
       // Limpar a conversa inicia um histórico novo para os gatilhos, mas
       // preserva o contato e todos os demais dados do CRM.
@@ -3253,7 +3253,7 @@ const CRM = () => {
       if (msgErr) throw msgErr;
       const { error: contactErr } = await supabase.from('crm_contacts').delete().eq('id', contactId);
       if (contactErr) throw contactErr;
-      await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current });
+      await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current, reason: 'conversa-excluida' });
 
       setContacts(prev => prev.filter(c => c.id !== contactId));
       if (selectedContactRef.current?.id === contactId) {
@@ -8026,12 +8026,12 @@ const CRM = () => {
                                         <Copy className="h-3.5 w-3.5" />
                                       </Button>
                                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={async () => {
-                                        if (confirm('Deseja excluir este fluxo? Os arquivos enviados só neste fluxo também serão apagados do armazenamento.')) {
+                                        if (confirm('Deseja excluir este fluxo? Os arquivos usados só neste fluxo vão para a lixeira e serão apagados do armazenamento em 7 dias.')) {
                                           // Coleta a mídia antes de apagar: depois do delete
                                           // não há como saber quais arquivos ficaram órfãos.
                                           const flowMedia = Array.from(collectStorageUrls([flow.nodes, flow.edges]));
                                           await supabase.from('crm_flows').delete().eq('id', flow.id);
-                                          await deleteMediaUrlsIfUnused(flowMedia, { userId: currentUserIdRef.current });
+                                          await deleteMediaUrlsIfUnused(flowMedia, { userId: currentUserIdRef.current, reason: 'fluxo-excluido' });
                                           fetchData(false);
                                         }
                                       }}>

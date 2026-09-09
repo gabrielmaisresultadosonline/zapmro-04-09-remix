@@ -344,6 +344,17 @@ SELECT cron.schedule('ai-recovery-every-10min', '*/10 * * * *', \$job\$
     timeout_milliseconds := 300000
   );
 \$job\$);
+
+-- Lixeira de mídias: apaga do disco apenas o que venceu o prazo de 7 dias e
+-- que nenhuma mensagem, fluxo ou template usa mais.
+SELECT cron.schedule('media-gc-daily', '25 4 * * *', \$job\$
+  SELECT net.http_post(
+    url := '${MEDIA_GC_URL}',
+    headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
+    body := '{"limit": 500}'::jsonb,
+    timeout_milliseconds := 300000
+  );
+\$job\$);
 SQLCRON
 sobrou_supabase="$(psql "$DB" -tAc "select count(*) from cron.job where command ilike '%supabase.co%'" 2>/dev/null || echo '?')"
 ok "cron apontando para ${CRON_URL} (jobs com Supabase restantes: ${sobrou_supabase})"

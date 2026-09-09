@@ -3,14 +3,19 @@ import { useState } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import SmoothVideo from "@/components/media/SmoothVideo";
+import { downloadMediaFile } from "@/lib/mediaDownload";
 
 interface MediaPopupProps {
   url: string;
   type: 'image' | 'video';
+  /** Nome original do arquivo enviado (mantido no download). */
+  fileName?: string;
+  /** Tipo MIME original, usado só para completar a extensão quando faltar. */
+  mimeType?: string;
   onClose: () => void;
 }
 
-export const MediaPopup = ({ url, type, onClose }: MediaPopupProps) => {
+export const MediaPopup = ({ url, type, fileName, mimeType, onClose }: MediaPopupProps) => {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -56,12 +61,8 @@ export const MediaPopup = ({ url, type, onClose }: MediaPopupProps) => {
 
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `media_${Date.now()}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Mantém o nome e o formato originais do arquivo enviado.
+    void downloadMediaFile(url, fileName, mimeType);
   };
 
   return (

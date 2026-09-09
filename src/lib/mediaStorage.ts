@@ -49,8 +49,10 @@ export async function uploadDedupedMedia(options: {
   file: Blob;
   contentType?: string;
   extension?: string;
+  /** Progresso real do envio (0-100). Opcional: sem ele o comportamento é o de antes. */
+  onProgress?: (percent: number) => void;
 }): Promise<DedupedUploadResult> {
-  const { bucket, folder, file, contentType, extension } = options;
+  const { bucket, folder, file, contentType, extension, onProgress } = options;
   const hash = await hashBlob(file);
   const ext = sanitizeExtension(extension);
   const fileName = `${hash}.${ext}`;
@@ -78,14 +80,27 @@ export async function uploadDedupedMedia(options: {
     return { url, path, reused: true, hash };
   }
 
-  const { error } = await supabase.storage.from(bucket).upload(path, file, {
-    contentType: contentType || (file as File).type || "application/octet-stream",
-    upsert: true,
-    cacheControl: "31536000",
-  });
+  const resolvedType = contentType || (file as File).type || "application/octet-stream";
 
-  // Corrida entre dois uploads do mesmo hash não é erro: o conteúdo é igual.
-  if (error && !/exists|duplicate/i.test(error.message)) throw error;
+  if (onProgress) {
+    // Envio com progresso real: o SDK não expõe eventos de upload, então
+    // usamos XHR direto no endpoint do Storage (mesma autenticação).
+    try {
+      await uploadWithProgress({ bucket, path, file, contentType: resolvedType, onProgress });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (!/exists|duplicate/i.test(message)) throw e;
+    }
+  } else {
+    const { error } = await supabase.storage.from(bucket).upload(path, file, {
+      contentType: resolvedType,
+      upsert: true,
+      cacheControl: "31536000",
+    });
+
+    // Corrida entre dois uploads do mesmo hash não é erro: o conteúdo é igual.
+    if (error && !/exists|duplicate/i.test(error.message)) throw error;
+  }
 
   console.log("[mediaStorage] arquivo enviado", { bucket, path, reused: false });
   await registerMediaAsset({
@@ -98,6 +113,52 @@ export async function uploadDedupedMedia(options: {
   });
   return { url, path, reused: false, hash };
 }
+
+/**
+ * Upload via XHR para conseguir o progresso real (bytes enviados).
+ * Usa o mesmo endpoint e a mesma sessão do SDK do Supabase.
+ */
+async function uploadWithProgress(input: {
+  bucket: string;
+  path: string;
+  file: Blob;
+  contentType: string;
+  onProgress: (percent: number) => void;
+}): Promise<void> {
+  const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, "");
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+  if (!baseUrl || !anonKey) throw new Error("Storage não configurado");
+
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token || anonKey;
+  const endpoint = `${baseUrl}/storage/v1/object/${input.bucket}/${input.path}`;
+
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", endpoint, true);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.setRequestHeader("apikey", anonKey);
+    xhr.setRequestHeader("Content-Type", input.contentType);
+    xhr.setRequestHeader("cache-control", "max-age=31536000");
+    xhr.setRequestHeader("x-upsert", "true");
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      input.onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        input.onProgress(100);
+        resolve();
+        return;
+      }
+      reject(new Error(xhr.responseText || `Falha no upload (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error("Falha de rede durante o upload"));
+    xhr.send(input.file);
+  });
+}
+
 
 /**
  * As funções do catálogo (102-catalogo-de-midias.sql) ainda não constam nos

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { X, Download, Maximize2, Minimize2, ExternalLink, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { downloadMediaFile } from "@/lib/mediaDownload";
 
 export interface DocumentPopupProps {
   /** Public URL of the document */
@@ -44,21 +45,8 @@ export const DocumentPopup = ({ url, fileName, onClose }: DocumentPopupProps) =>
   const canPreview = ext !== "zip" && ext !== "rar" && ext !== "7z";
 
   const handleDownload = async () => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = displayName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      // Fallback: let the browser handle it in a new tab
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
+    // Preserva o nome original do documento (ex.: contrato.pdf).
+    await downloadMediaFile(url, displayName);
   };
 
   return (

@@ -452,6 +452,25 @@ serve(async (req) => {
                     }
                   }
                 }
+
+                // Inatividade curta (30min / 1h / 2h)
+                if (!matchedFlowId && previousMsg) {
+                  const diffMs = new Date().getTime() - new Date(previousMsg.created_at).getTime();
+                  const shortThresholds: Array<[string, number]> = [
+                    ['inactivity_2h', 2 * 60 * 60 * 1000],
+                    ['inactivity_1h', 60 * 60 * 1000],
+                    ['inactivity_30m', 30 * 60 * 1000],
+                  ];
+                  for (const [type, ms] of shortThresholds) {
+                    const f = triggerFlows.find(tf => tf.trigger_type === type);
+                    if (f && diffMs >= ms) {
+                      matchedFlowId = f.id;
+                      console.log(`[Webhook] Inactivity ${type} detected! Flow: ${matchedFlowId}`);
+                      break;
+                    }
+                  }
+                }
+
               }
             }
 

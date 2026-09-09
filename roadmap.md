@@ -21,3 +21,5 @@
 - [x] Corrigir remoção/desconexão de números WhatsApp sem colisão entre contatos, com autorização própria do AdminCentral e preservando as demais caixas.
 - [x] Corrigir gatilhos de primeira mensagem após limpar a conversa e validar sua persistência no banco.
 - [x] Tornar o diagnóstico dos gatilhos completo por caixa, histórico, decisão e execução do primeiro nó.
+- [x] Catálogo de mídias (crm_media_assets) com contador de referências.
+- [x] Lixeira de 7 dias (crm_media_gc_queue) + worker diário media-gc.

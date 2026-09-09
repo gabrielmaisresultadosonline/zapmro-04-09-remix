@@ -115,6 +115,52 @@ export async function uploadDedupedMedia(options: {
 }
 
 /**
+ * Upload via XHR para conseguir o progresso real (bytes enviados).
+ * Usa o mesmo endpoint e a mesma sessão do SDK do Supabase.
+ */
+async function uploadWithProgress(input: {
+  bucket: string;
+  path: string;
+  file: Blob;
+  contentType: string;
+  onProgress: (percent: number) => void;
+}): Promise<void> {
+  const baseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/+$/, "");
+  const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+  if (!baseUrl || !anonKey) throw new Error("Storage não configurado");
+
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token || anonKey;
+  const endpoint = `${baseUrl}/storage/v1/object/${input.bucket}/${input.path}`;
+
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", endpoint, true);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.setRequestHeader("apikey", anonKey);
+    xhr.setRequestHeader("Content-Type", input.contentType);
+    xhr.setRequestHeader("cache-control", "max-age=31536000");
+    xhr.setRequestHeader("x-upsert", "true");
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      input.onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        input.onProgress(100);
+        resolve();
+        return;
+      }
+      reject(new Error(xhr.responseText || `Falha no upload (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error("Falha de rede durante o upload"));
+    xhr.send(input.file);
+  });
+}
+
+
+/**
  * As funções do catálogo (102-catalogo-de-midias.sql) ainda não constam nos
  * tipos gerados do banco. Este alias mantém a chamada tipada sem `any` e sem
  * quebrar quando o catálogo ainda não foi aplicado na VPS.

@@ -66,6 +66,15 @@ export async function uploadDedupedMedia(options: {
 
   if (existing?.some((item) => item.name === fileName)) {
     console.log("[mediaStorage] reaproveitando arquivo existente", { bucket, path });
+    // Reaproveitar também tira o arquivo da lixeira, se ele estiver lá.
+    await registerMediaAsset({
+      bucket,
+      path,
+      url,
+      hash,
+      mimeType: contentType || (file as File).type || null,
+      sizeBytes: (file as Blob).size ?? null,
+    });
     return { url, path, reused: true, hash };
   }
 

@@ -832,10 +832,12 @@ serve(async (req) => {
 
     if (action === "delete_user_number") {
       const { numberId, userId } = body as any;
-      if (!numberId) return json({ success: false, error: "numberId obrigatório" });
+      if (!numberId || !userId) {
+        return json({ success: false, error: "numberId e userId são obrigatórios" });
+      }
       const { data, error } = await supabase.rpc("crm_admin_delete_whatsapp_number", {
         p_number_id: numberId,
-        p_user_id: userId || null,
+        p_user_id: userId,
       });
       if (error) return json({ success: false, error: error.message });
       console.log("[delete_user_number] caixa removida com segurança", { userId, numberId });

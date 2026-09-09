@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import SmoothVideo from "@/components/media/SmoothVideo";
+import { downloadMediaFile } from "@/lib/mediaDownload";
 
 interface MediaPopupProps {
   url: string;

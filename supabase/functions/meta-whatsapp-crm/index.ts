@@ -2349,10 +2349,13 @@ else if (message.type === "unsupported") {
           .eq('contact_id', contact.id)
           .eq('direction', 'inbound')
           .order('created_at', { ascending: false });
-        
+
+        console.log(`[TRIGGER-AUTO] histórico inbound: count=${inboundCount ?? 0} ultimas=${JSON.stringify((inboundMessages || []).slice(0, 2).map((m: any) => m.created_at))} prevLast=${prevLast || 'null'} prevTotal=${prevTotal ?? 'null'}`);
+
         // Se o usuário limpou o histórico, inboundCount será 0 ou 1, 
         // e prevLast pode ser nulo ou antigo.
         const effectiveIsFirstEver = (inboundCount || 0) <= 1;
+
         
         // Se o contato foi criado nos últimos 5 minutos e tem poucas mensagens, reforça a chance de ser primeira mensagem
         const isVeryRecentContact = contact.created_at && (new Date().getTime() - new Date(contact.created_at).getTime()) < 300000;

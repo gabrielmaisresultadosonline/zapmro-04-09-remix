@@ -723,20 +723,45 @@ serve(async (req) => {
     if (action === "disconnect_whatsapp") {
       const { userId } = body as any;
       if (!userId) return json({ success: false, error: "userId obrigatório" });
-      const { error } = await supabase
+      const { data: settings, error: settingsError } = await supabase
         .from("crm_settings")
-        .update({
-          meta_access_token: null,
-          meta_phone_number_id: null,
-          meta_waba_id: null,
-          meta_app_id: null,
-          meta_app_secret: null,
-          meta_display_phone_number: null,
-          meta_verified_name: null,
-        })
-        .eq("user_id", userId);
+        .select("meta_phone_number_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (settingsError) throw settingsError;
+
+      const phoneId = settings?.meta_phone_number_id;
+      const { data: number, error: numberError } = phoneId
+        ? await supabase
+            .from("crm_whatsapp_numbers")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("meta_phone_number_id", phoneId)
+            .maybeSingle()
+        : { data: null, error: null };
+      if (numberError) throw numberError;
+
+      if (number?.id) {
+        const { data, error } = await supabase.rpc("crm_delete_whatsapp_number", {
+          p_number_id: number.id,
+          p_user_id: userId,
+        });
+        if (error) throw error;
+        console.log("[disconnect_whatsapp] caixa removida com segurança", { userId, numberId: number.id });
+        return json({ success: true, result: data });
+      }
+
+      const { error } = await supabase.from("crm_settings").update({
+        meta_access_token: null,
+        meta_phone_number_id: null,
+        meta_waba_id: null,
+        meta_app_id: null,
+        meta_app_secret: null,
+        meta_display_phone_number: null,
+        meta_verified_name: null,
+      }).eq("user_id", userId);
       if (error) throw error;
-      return json({ success: true });
+      return json({ success: true, result: { remaining: 0 } });
     }
 
     /* ===================== Multi WhatsApp por cadastro ===================== */
@@ -806,14 +831,15 @@ serve(async (req) => {
     }
 
     if (action === "delete_user_number") {
-      const { numberId } = body as any;
+      const { numberId, userId } = body as any;
       if (!numberId) return json({ success: false, error: "numberId obrigatório" });
-      const { error } = await supabase
-        .from("crm_whatsapp_numbers")
-        .delete()
-        .eq("id", numberId);
+      const { data, error } = await supabase.rpc("crm_delete_whatsapp_number", {
+        p_number_id: numberId,
+        p_user_id: userId || null,
+      });
       if (error) return json({ success: false, error: error.message });
-      return json({ success: true });
+      console.log("[delete_user_number] caixa removida com segurança", { userId, numberId });
+      return json({ success: true, result: data });
     }
 
     if (action === "list_announcements") {

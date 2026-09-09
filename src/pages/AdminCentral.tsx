@@ -1058,7 +1058,10 @@ export default function AdminCentral() {
     if (!confirm("Remover este número do cadastro?")) return;
     setNumbersSaving(true);
     try {
-      await adminCall("delete_user_number", creds!, { numberId });
+      await adminCall("delete_user_number", creds!, {
+        numberId,
+        userId: numbersTarget?.id,
+      });
       toast.success("Número removido");
       if (numbersTarget) await openNumbersDialog(numbersTarget);
     } catch (err) {

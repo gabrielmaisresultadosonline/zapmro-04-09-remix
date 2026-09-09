@@ -20,3 +20,4 @@
 - [x] Módulo /acessor: landing, login/cadastro com 2 dias de teste, dashboard do cliente, admin (OpenAI + WhatsApp oficial/coexistência), webhook com transcrição de áudio e migration 097.
 - [x] Corrigir remoção/desconexão de números WhatsApp sem colisão entre contatos, com autorização própria do AdminCentral e preservando as demais caixas.
 - [x] Corrigir gatilhos de primeira mensagem após limpar a conversa e validar sua persistência no banco.
+- [x] Tornar o diagnóstico dos gatilhos completo por caixa, histórico, decisão e execução do primeiro nó.

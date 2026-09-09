@@ -5083,6 +5083,7 @@ const CRM = () => {
 
       const payload = {
         name: flowData.name,
+        user_id: currentUserIdRef.current,
         trigger_type: flowData.trigger_type || 'manual',
         trigger_keywords: flowData.trigger_keywords || [],
         trigger_tag: flowData.trigger_tag || null,
@@ -5090,7 +5091,7 @@ const CRM = () => {
         nodes: flowData.nodes || [],
         edges: flowData.edges || [],
         // Multi-WhatsApp: o fluxo pertence ao número aberto no momento.
-        ...activeNumberOwnershipPatch(),
+        ...(activeNumberIdRef.current ? { whatsapp_number_id: activeNumberIdRef.current } : activeNumberOwnershipPatch()),
         updated_at: new Date().toISOString()
       };
 
@@ -5123,7 +5124,16 @@ const CRM = () => {
           `O gatilho não foi salvo (o banco manteve "${savedRow.trigger_type}"). Atualize o banco na VPS para aceitar "${payload.trigger_type}".`
         );
       }
-      console.log('[FLOW-SAVE] gatilho gravado:', savedRow.id, savedRow.trigger_type);
+      if (activeNumberIdRef.current && savedRow.whatsapp_number_id !== activeNumberIdRef.current) {
+        throw new Error('O fluxo foi salvo em outra caixa de WhatsApp. Selecione novamente o número e salve o fluxo.');
+      }
+      console.log('[FLOW-SAVE] fluxo confirmado no banco:', {
+        id: savedRow.id,
+        trigger_type: savedRow.trigger_type,
+        whatsapp_number_id: savedRow.whatsapp_number_id || null,
+        active_number_id: activeNumberIdRef.current,
+        is_active: savedRow.is_active,
+      });
 
 
       // Recarrega SOMENTE os fluxos (fetchData completo levava ~3s e o fluxo

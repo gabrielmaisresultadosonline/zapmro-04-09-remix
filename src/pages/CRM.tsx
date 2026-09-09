@@ -4043,7 +4043,9 @@ const CRM = () => {
       message_type: type,
       created_at: new Date().toISOString(),
       isOptimistic: true,
-      media_url: localPreviewUrl
+      media_url: localPreviewUrl,
+      // Nome original exibido junto da barra de progresso.
+      metadata: { fileName: file instanceof File ? file.name : undefined },
     };
     
     setChatMessages(prev => {

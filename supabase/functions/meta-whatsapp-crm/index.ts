@@ -2308,6 +2308,9 @@ else if (message.type === "unsupported") {
   // OBS: `isAiActive` NÃO bloqueia mais os gatilhos automáticos — antes, contatos com o Agente IA
   // ligado nunca disparavam "primeira mensagem do dia"/inatividade. Se um fluxo casar, ele assume
   // e desliga a IA para esse contato; se nada casar, o fluxo de IA continua normalmente abaixo.
+  // Log de diagnóstico: mostra SEMPRE por que os gatilhos automáticos rodaram ou não.
+  console.log(`[TRIGGER-GATE] waId=${waId} hasContact=${!!contact} hasActiveFlow=${hasActiveFlow} isAiHandling=${isAiHandling} isAiActive=${isAiActive} flow_state=${contact?.flow_state} current_flow_id=${contact?.current_flow_id} numberId=${inboundNumberId || 'none'}`);
+
   if (contact && !hasActiveFlow && !isAiHandling) {
     // Check if Global AI is enabled - it should trigger if no specific flow matches
     let flowTriggered = false;
@@ -2323,7 +2326,12 @@ else if (message.type === "unsupported") {
       if (inboundNumberId) {
         autoFlowsQuery = autoFlowsQuery.or(`whatsapp_number_id.eq.${inboundNumberId},whatsapp_number_id.is.null`);
       }
-      const { data: activeFlows } = await autoFlowsQuery;
+      const { data: activeFlows, error: activeFlowsError } = await autoFlowsQuery;
+
+      if (activeFlowsError) {
+        console.error('[TRIGGER-AUTO] Erro ao carregar fluxos ativos:', activeFlowsError);
+      }
+      console.log(`[TRIGGER-AUTO] fluxos ativos carregados=${activeFlows?.length || 0} tipos=${JSON.stringify((activeFlows || []).map((f: any) => `${f.name}:${f.trigger_type}`))}`);
 
       if (activeFlows && activeFlows.length > 0) {
         const allCandidateTexts = collectInboundTriggerTexts(message, text);

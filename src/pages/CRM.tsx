@@ -2493,7 +2493,7 @@ const CRM = () => {
         supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } })
           .then(({ data, error }) => {
             if (!error && data?.success) {
-              scopeQueryToActiveNumber(
+              scopeQueryToActiveNumberStrict(
                 supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id)
               ).then(({ data: updatedTemplates }) => {
                 if (updatedTemplates) setTemplates(updatedTemplates);

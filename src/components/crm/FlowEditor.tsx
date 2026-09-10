@@ -83,6 +83,13 @@ const scopeToActiveNumber = <T,>(query: T): T => {
   ) as T;
 };
 
+/** Templates: escopo estrito — nunca mostrar os de outro número do cadastro. */
+const scopeTemplatesToActiveNumber = <T,>(query: T): T => {
+  const numberId = getActiveWhatsAppNumberId();
+  if (!numberId) return query;
+  return (query as any).eq('whatsapp_number_id', numberId) as T;
+};
+
 // Custom Node Types
 const PixNode = ({ data }: any) => (
   <Card className="min-w-[200px] border-cyan-500 shadow-md">

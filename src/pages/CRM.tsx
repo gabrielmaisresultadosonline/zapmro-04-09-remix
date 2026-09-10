@@ -197,6 +197,17 @@ const scopeQueryToActiveNumber = <T,>(query: T): T => {
   ) as T;
 };
 
+/**
+ * Escopo ESTRITO: usado em templates. Cadastros com 2+ números não podem ver
+ * os templates de outro número — nem os legados (sem número), que pertencem
+ * a um único número e são reatribuídos na próxima sincronização com a Meta.
+ */
+const scopeQueryToActiveNumberStrict = <T,>(query: T): T => {
+  const numberId = getActiveWhatsAppNumberId();
+  if (!numberId) return query;
+  return (query as any).eq('whatsapp_number_id', numberId) as T;
+};
+
 /** Carimbo gravado em novos templates/fluxos para pertencerem ao número aberto. */
 const activeNumberOwnershipPatch = (): { whatsapp_number_id?: string } => {
   const numberId = getActiveWhatsAppNumberId();

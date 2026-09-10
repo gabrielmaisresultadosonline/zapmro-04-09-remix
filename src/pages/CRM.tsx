@@ -5395,6 +5395,45 @@ const CRM = () => {
   // Gate: usuário precisa conectar o WhatsApp antes de acessar conversas/CRM
   const isWhatsAppConnected = whatsAppConnectionConfirmed || !!(metaSettings.meta_access_token && metaSettings.meta_phone_number_id && metaSettings.meta_waba_id);
 
+  /**
+   * Links da Meta SEMPRE com os identificadores do cadastro/número aberto.
+   * Antes havia IDs fixos de outra conta como "fallback": quem não tinha o
+   * business_id salvo era enviado para a conta errada e a Meta respondia
+   * "Não tens acesso à conta comercial ..." (erro 404 business_access).
+   * Sem ID próprio abrimos a página geral, que resolve pela conta logada.
+   */
+  const openMetaTemplatesManager = () => {
+    const businessId = String(metaSettings.meta_business_id || '').trim();
+    const wabaId = String(metaSettings.meta_waba_id || '').trim();
+    const params = new URLSearchParams();
+    if (businessId) params.set('business_id', businessId);
+    if (wabaId) params.set('asset_id', wabaId);
+    const qs = params.toString();
+    window.open(
+      `https://business.facebook.com/latest/whatsapp_manager/message_templates${qs ? `?${qs}` : ''}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  };
+
+  const openMetaBillingHub = () => {
+    const businessId = String(metaSettings.meta_business_id || '').trim();
+    const wabaId = String(metaSettings.meta_waba_id || '').trim();
+    if (!businessId && !wabaId) {
+      window.open('https://business.facebook.com/billing_hub/accounts', '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const params = new URLSearchParams();
+    if (wabaId) params.set('asset_id', wabaId);
+    if (businessId) params.set('business_id', businessId);
+    params.set('placement', 'whatsapp_ads');
+    window.open(
+      `https://business.facebook.com/latest/billing_hub/accounts?${params.toString()}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  };
+
   // Multi-WhatsApp habilitado: escolhe qual número abrir antes das conversas.
   // Seletor de WhatsApp: aparece para todos os cadastros (mesmo com 1 número liberado).
   const multiNumberEnabled = maxWhatsAppNumbers >= 1;

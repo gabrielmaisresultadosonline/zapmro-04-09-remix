@@ -2478,13 +2478,17 @@ const CRM = () => {
 
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       // Multi-WhatsApp: cada número tem seus próprios templates aprovados.
-      const { data: templatesData } = await scopeQueryToActiveNumber(
+      const { data: templatesData } = await scopeQueryToActiveNumberStrict(
         supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id)
       );
       setTemplates(templatesData || []);
 
-      // Auto-sync if there are pending templates to see if they were approved
-      if (templatesData?.some(t => t.status === 'PENDING' || t.status === 'pending')) {
+      // Auto-sync: pendentes OU lista vazia (templates legados ainda sem dono
+      // definido — a sincronização atribui cada um ao número correto).
+      if (
+        (templatesData?.length || 0) === 0 ||
+        templatesData?.some(t => t.status === 'PENDING' || t.status === 'pending')
+      ) {
         console.log('Detectados templates pendentes, iniciando sincronização automática...');
         supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } })
           .then(({ data, error }) => {

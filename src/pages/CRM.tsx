@@ -197,6 +197,17 @@ const scopeQueryToActiveNumber = <T,>(query: T): T => {
   ) as T;
 };
 
+/**
+ * Escopo ESTRITO: usado em templates. Cadastros com 2+ números não podem ver
+ * os templates de outro número — nem os legados (sem número), que pertencem
+ * a um único número e são reatribuídos na próxima sincronização com a Meta.
+ */
+const scopeQueryToActiveNumberStrict = <T,>(query: T): T => {
+  const numberId = getActiveWhatsAppNumberId();
+  if (!numberId) return query;
+  return (query as any).eq('whatsapp_number_id', numberId) as T;
+};
+
 /** Carimbo gravado em novos templates/fluxos para pertencerem ao número aberto. */
 const activeNumberOwnershipPatch = (): { whatsapp_number_id?: string } => {
   const numberId = getActiveWhatsAppNumberId();
@@ -2467,18 +2478,22 @@ const CRM = () => {
 
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       // Multi-WhatsApp: cada número tem seus próprios templates aprovados.
-      const { data: templatesData } = await scopeQueryToActiveNumber(
+      const { data: templatesData } = await scopeQueryToActiveNumberStrict(
         supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id)
       );
       setTemplates(templatesData || []);
 
-      // Auto-sync if there are pending templates to see if they were approved
-      if (templatesData?.some(t => t.status === 'PENDING' || t.status === 'pending')) {
+      // Auto-sync: pendentes OU lista vazia (templates legados ainda sem dono
+      // definido — a sincronização atribui cada um ao número correto).
+      if (
+        (templatesData?.length || 0) === 0 ||
+        templatesData?.some(t => t.status === 'PENDING' || t.status === 'pending')
+      ) {
         console.log('Detectados templates pendentes, iniciando sincronização automática...');
         supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } })
           .then(({ data, error }) => {
             if (!error && data?.success) {
-              scopeQueryToActiveNumber(
+              scopeQueryToActiveNumberStrict(
                 supabase.from('crm_templates').select('*').eq('user_id', currentUser?.id)
               ).then(({ data: updatedTemplates }) => {
                 if (updatedTemplates) setTemplates(updatedTemplates);

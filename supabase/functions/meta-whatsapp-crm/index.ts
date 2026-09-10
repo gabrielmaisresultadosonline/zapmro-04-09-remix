@@ -5495,6 +5495,30 @@ async function fetchAndStoreIncomingMedia(
         }
       }
 
+      // Sem número explícito: resolvemos o número dono das credenciais em uso
+      // (ou o principal do cadastro). Sem isso, templates sincronizados ficavam
+      // com whatsapp_number_id nulo e apareciam em TODOS os números do cliente.
+      if (!scopedNumberId && userId) {
+        const { data: ownerNumbers } = await supabase
+          .from('crm_whatsapp_numbers')
+          .select('id, meta_phone_number_id, is_primary, created_at')
+          .eq('user_id', userId)
+          .order('is_primary', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: true });
+        const list = Array.isArray(ownerNumbers) ? ownerNumbers : [];
+        const byCredentials = settings?.meta_phone_number_id
+          ? list.find((n: any) => n.meta_phone_number_id === settings.meta_phone_number_id)
+          : null;
+        const resolved = byCredentials || list[0] || null;
+        if (resolved?.id) {
+          scopedNumberId = resolved.id;
+          console.log('[NUMBER] escopo resolvido automaticamente', {
+            whatsapp_number_id: scopedNumberId,
+            by_credentials: !!byCredentials,
+          });
+        }
+      }
+
       // Se ainda não temos settings mas temos um contactId, tentamos buscar pelo user_id do contato
       if (!settings && trustedInternalRequest && params.contactId) {
         const { data: contactForId } = await supabase.from('crm_contacts').select('user_id').eq('id', params.contactId).maybeSingle();

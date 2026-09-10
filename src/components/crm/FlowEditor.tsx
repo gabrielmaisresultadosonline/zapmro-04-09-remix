@@ -553,7 +553,7 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
   useEffect(() => {
     const fetchData = async () => {
       const [templatesRes, flowsRes, statusesRes] = await Promise.all([
-        scopeToActiveNumber(supabase.from('crm_templates').select('*')),
+        scopeTemplatesToActiveNumber(supabase.from('crm_templates').select('*')),
         scopeToActiveNumber(supabase.from('crm_flows').select('id, name').order('created_at', { ascending: false })),
         supabase.from('crm_statuses').select('*').order('sort_order', { ascending: true })
       ]);
@@ -849,7 +849,7 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={async () => {
                 const { error } = await supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } });
                 if (!error) {
-                  const { data } = await scopeToActiveNumber(supabase.from('crm_templates').select('*'));
+                  const { data } = await scopeTemplatesToActiveNumber(supabase.from('crm_templates').select('*'));
                   if (data) setAvailableTemplates(data);
                   toast({ title: "Templates sincronizados!" });
                 }

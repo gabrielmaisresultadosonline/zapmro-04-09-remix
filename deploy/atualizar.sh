@@ -46,11 +46,11 @@ sudo_() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi; }
 sec "1/9 Código"
 cd "$ROOT"
 if [ -d .git ]; then
-  if [ -x "$ROOT/deploy/backup-antes-de-atualizar.sh" ] && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx zapmro-db; then
+  if [ -x "$ROOT/deploy/backup-antes-de-atualizar.sh" ] && [ -f "$STACK/.env" ]; then
     info "criando backup de segurança antes da atualização"
     "$ROOT/deploy/backup-antes-de-atualizar.sh"
   else
-    warn "backup automático não executado (banco ainda não está ativo ou script indisponível)"
+    warn "backup automático não executado (primeira instalação ou script indisponível)"
   fi
   origem_atual="$(git remote get-url origin 2>/dev/null || true)"
   if [ "$origem_atual" != "$REPO_URL" ]; then

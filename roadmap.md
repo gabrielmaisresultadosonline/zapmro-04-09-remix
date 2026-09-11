@@ -24,3 +24,4 @@
 - [x] Catálogo de mídias (crm_media_assets) com contador de referências.
 - [x] Lixeira de 7 dias (crm_media_gc_queue) + worker diário media-gc.
 - [x] Corrigir ownership/permissões do schema Auth e validar o caminho real de login após atualizações da VPS.
+- [x] Tornar o backup pré-atualização resiliente a reinícios transitórios do PostgreSQL, sem permitir atualização sem dump válido.

@@ -376,7 +376,7 @@ function extractInboundTextFromWebhookMessage(message: any) {
   return '';
 }
 
-function collectInboundTriggerTexts(message: any, resolvedText?: string) {
+function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTexts: string[] = []) {
   const node = message?.[message?.type] || {};
   const referral = getReferralFromWebhookMessage(message);
   // Se o contato enviou um texto real (digitado ou clique em botão), o gatilho

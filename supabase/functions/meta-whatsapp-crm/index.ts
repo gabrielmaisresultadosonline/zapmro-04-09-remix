@@ -376,7 +376,7 @@ function extractInboundTextFromWebhookMessage(message: any) {
   return '';
 }
 
-function collectInboundTriggerTexts(message: any, resolvedText?: string) {
+function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTexts: string[] = []) {
   const node = message?.[message?.type] || {};
   const referral = getReferralFromWebhookMessage(message);
   // Se o contato enviou um texto real (digitado ou clique em botão), o gatilho
@@ -412,6 +412,9 @@ function collectInboundTriggerTexts(message: any, resolvedText?: string) {
     // o usuário NÃO enviou um texto próprio — ex.: clique de anúncio que chega
     // como "unsupported" sem body.
     ...(hasUserTypedText ? [] : getReferralTextParts(referral)),
+    // Textos auxiliares (ex.: fallback de clique de anúncio) usados APENAS para
+    // casar gatilhos — nunca para gravar/mostrar o conteúdo da conversa.
+    ...(hasUserTypedText ? [] : extraTexts),
   ];
 
   const normalized = rawCandidates
@@ -1692,15 +1695,17 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   let buttonId = '';
   let mediaUrlForSave: string | null = null;
   let mediaCaption = '';
-  let extractedInboundText = extractInboundTextFromWebhookMessage(message);
+  const extractedInboundText = extractInboundTextFromWebhookMessage(message);
+  // Texto sintético do clique de anúncio: usado SOMENTE para casar gatilhos.
+  // Nunca pode virar o conteúdo gravado — isso trocava a mensagem real do
+  // cliente por uma frase padrão na conversa.
+  let ctwaTriggerFallbackText = '';
 
   if (!extractedInboundText && isUnavailableUnsupportedMessage(message)) {
     // CTWA fallback should ONLY apply to brand-new conversations coming from
     // Click-to-WhatsApp ads. If the contact already has prior interactions,
     // an "unsupported" event is almost certainly a real unsupported payload
     // (WhatsApp Business auto-reply / stickers / etc.) — NOT a CTWA click.
-    // Injecting the synthetic trigger text here caused active conversations
-    // to fire the wrong flow when the customer's auto-reply arrived.
     const hasReferral = !!getReferralFromWebhookMessage(message);
     const variants = getBrazilianPhoneVariants(waId);
     const { data: existingContactForCtwa } = await scopeNumber(
@@ -1718,7 +1723,7 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
       ((existingContactForCtwa.total_messages_received || 0) === 0 &&
         !existingContactForCtwa.last_message_received_at);
     if (hasReferral || isBrandNewContact) {
-      extractedInboundText = await getConfiguredCtwaFallbackText(supabase, userId);
+      ctwaTriggerFallbackText = await getConfiguredCtwaFallbackText(supabase, userId);
     } else {
       console.log('[WEBHOOK] Skipping CTWA fallback for existing contact', { waId, userId });
     }
@@ -1790,7 +1795,9 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   }
 else if (message.type === "unsupported") {
     const error = message.errors?.[0];
-    text = extractedInboundText || `[Formato não suportado pela Meta] ${error?.title || ""}: ${error?.message || ""}`.trim();
+    text = extractedInboundText
+      || (ctwaTriggerFallbackText ? '[Mensagem do anúncio]' : '')
+      || `[Formato não suportado pela Meta] ${error?.title || ""}: ${error?.message || ""}`.trim();
   } else if (message.type === "location") {
     text = `[Localização] Lat: ${message.location?.latitude}, Long: ${message.location?.longitude}`;
   } else if (message.type === "contacts") {
@@ -2101,7 +2108,7 @@ else if (message.type === "unsupported") {
   // fazendo o fluxo nunca iniciar. Agora avaliamos sempre que o contato está ocioso.
   if (contact && !hasActiveFlow && !isAiHandling) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
       console.log(`[TRIGGER-CTWA] (ad-priority) waId=${waId} msgType=${message?.type} aiActive=${isAiActive} candidates=${JSON.stringify(allCandidateTexts)}`);
       let adPriorityFlowsQuery = supabase
         .from('crm_flows')
@@ -2173,7 +2180,7 @@ else if (message.type === "unsupported") {
   // exato/palavra-chave configurado para esse texto, ele deve iniciar o novo fluxo.
   if (contact && hasActiveFlow && isWaitingResponse && !isAiHandling && !isAiActive) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
       const hasReferral = !!getReferralFromWebhookMessage(message);
       console.log(`[TRIGGER-CTWA] (waiting-flow) waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} candidates=${JSON.stringify(allCandidateTexts)}`);
       let waitingFlowsQuery = supabase
@@ -2353,7 +2360,7 @@ else if (message.type === "unsupported") {
       }
 
       if (activeFlows && activeFlows.length > 0) {
-        const allCandidateTexts = collectInboundTriggerTexts(message, text);
+        const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
         const hasReferral = !!getReferralFromWebhookMessage(message);
         console.log(`[TRIGGER-AUTO] waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} text="${(text || '').slice(0,80)}" candidates=${JSON.stringify(allCandidateTexts)} activeFlows=${activeFlows.length}`);
         const prevTotal = __previousTotalReceived;

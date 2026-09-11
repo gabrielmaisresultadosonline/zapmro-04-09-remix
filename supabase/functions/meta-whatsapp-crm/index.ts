@@ -1695,15 +1695,17 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   let buttonId = '';
   let mediaUrlForSave: string | null = null;
   let mediaCaption = '';
-  let extractedInboundText = extractInboundTextFromWebhookMessage(message);
+  const extractedInboundText = extractInboundTextFromWebhookMessage(message);
+  // Texto sintético do clique de anúncio: usado SOMENTE para casar gatilhos.
+  // Nunca pode virar o conteúdo gravado — isso trocava a mensagem real do
+  // cliente por uma frase padrão na conversa.
+  let ctwaTriggerFallbackText = '';
 
   if (!extractedInboundText && isUnavailableUnsupportedMessage(message)) {
     // CTWA fallback should ONLY apply to brand-new conversations coming from
     // Click-to-WhatsApp ads. If the contact already has prior interactions,
     // an "unsupported" event is almost certainly a real unsupported payload
     // (WhatsApp Business auto-reply / stickers / etc.) — NOT a CTWA click.
-    // Injecting the synthetic trigger text here caused active conversations
-    // to fire the wrong flow when the customer's auto-reply arrived.
     const hasReferral = !!getReferralFromWebhookMessage(message);
     const variants = getBrazilianPhoneVariants(waId);
     const { data: existingContactForCtwa } = await scopeNumber(
@@ -1721,7 +1723,7 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
       ((existingContactForCtwa.total_messages_received || 0) === 0 &&
         !existingContactForCtwa.last_message_received_at);
     if (hasReferral || isBrandNewContact) {
-      extractedInboundText = await getConfiguredCtwaFallbackText(supabase, userId);
+      ctwaTriggerFallbackText = await getConfiguredCtwaFallbackText(supabase, userId);
     } else {
       console.log('[WEBHOOK] Skipping CTWA fallback for existing contact', { waId, userId });
     }

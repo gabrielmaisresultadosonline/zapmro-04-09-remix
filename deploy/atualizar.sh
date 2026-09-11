@@ -297,6 +297,72 @@ else
   done
 fi
 shopt -u nullglob
+
+# 5.0.1 — o dump de Auth é aplicado como postgres. Em bancos já existentes isso
+# pode deixar auth.users, auth.identities ou auth.schema_migrations com o dono
+# errado. O /health continua respondendo 200, mas qualquer login falha com
+# "Database error querying schema". Corrigimos somente metadados/permissões;
+# nenhuma linha, senha, sessão ou identidade é alterada.
+info "validando donos e permissões internas do Auth…"
+psql "$DB" -v ON_ERROR_STOP=1 -q <<'SQLAUTH'
+ALTER SCHEMA auth OWNER TO supabase_auth_admin;
+GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
+
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT c.relkind, n.nspname AS schema_name, c.relname AS object_name
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'auth'
+       AND c.relkind IN ('r', 'p', 'S', 'v', 'm')
+  LOOP
+    IF r.relkind IN ('r', 'p') THEN
+      EXECUTE format('ALTER TABLE %I.%I OWNER TO supabase_auth_admin', r.schema_name, r.object_name);
+    ELSIF r.relkind = 'S' THEN
+      EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO supabase_auth_admin', r.schema_name, r.object_name);
+    ELSIF r.relkind = 'v' THEN
+      EXECUTE format('ALTER VIEW %I.%I OWNER TO supabase_auth_admin', r.schema_name, r.object_name);
+    ELSIF r.relkind = 'm' THEN
+      EXECUTE format('ALTER MATERIALIZED VIEW %I.%I OWNER TO supabase_auth_admin', r.schema_name, r.object_name);
+    END IF;
+  END LOOP;
+
+  FOR r IN
+    SELECT p.oid::regprocedure AS routine_name
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'auth'
+       AND p.prokind IN ('f', 'p')
+  LOOP
+    EXECUTE format('ALTER ROUTINE %s OWNER TO supabase_auth_admin', r.routine_name);
+  END LOOP;
+END $$;
+
+GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO supabase_auth_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth
+  GRANT ALL ON TABLES TO supabase_auth_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth
+  GRANT ALL ON SEQUENCES TO supabase_auth_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth
+  GRANT EXECUTE ON FUNCTIONS TO supabase_auth_admin;
+SQLAUTH
+
+# Executa as mesmas leituras usadas pelo GoTrue usando exatamente o usuário do
+# container Auth. Isso detecta a falha antes de publicar uma atualização falsa.
+if ! PGPASSWORD="$POSTGRES_PASSWORD" psql \
+  -h 127.0.0.1 -p "${PG_PORT:-5432}" -U supabase_auth_admin \
+  -d "${POSTGRES_DB:-postgres}" -v ON_ERROR_STOP=1 -qAt \
+  -c "select count(*) from auth.users; select count(*) from auth.identities; select count(*) from auth.schema_migrations;" \
+  >/tmp/zapmro-auth-schema-check.log 2>&1; then
+  cat /tmp/zapmro-auth-schema-check.log >&2
+  die "Auth não consegue consultar o próprio schema; nenhum usuário foi alterado"
+fi
+ok "schema Auth acessível pelo serviço (usuários, identidades e migrations)"
+
 tabelas="$(psql "$DB" -tAc "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null || echo '?')"
 ok "banco atualizado — ${aplicados} arquivo(s) aplicado(s), ${tabelas} tabelas públicas"
 
@@ -459,6 +525,24 @@ chk "auth"      "$G/auth/v1/health"
 chk "rest"      "$G/rest/v1/"    "apikey: ${ANON_KEY}"
 chk "storage"   "$G/storage/v1/bucket" "Authorization: Bearer ${SERVICE_ROLE_KEY}"
 chk "functions" "$G/functions/v1/"
+
+# /health não consulta o schema. Uma tentativa proposital com usuário inexistente
+# deve terminar em 400 (credenciais inválidas). HTTP 5xx indica Auth quebrado.
+AUTH_PROBE_BODY="/tmp/zapmro-auth-login-probe.json"
+auth_login_code=$(curl -sS -o "$AUTH_PROBE_BODY" -m 15 -w '%{http_code}' \
+  -X POST "$G/auth/v1/token?grant_type=password" \
+  -H "apikey: ${ANON_KEY}" \
+  -H "Content-Type: application/json" \
+  --data '{"email":"healthcheck-nao-existe@zapmro.invalid","password":"healthcheck-nao-e-login"}' \
+  2>/dev/null || echo 000)
+printf '  %-24s' "login + banco Auth"
+if [ "$auth_login_code" = "400" ]; then
+  echo -e "${C_G}OK${N} (credencial de teste recusada corretamente)"
+else
+  echo -e "${C_R}FALHOU${N} (HTTP $auth_login_code)"
+  docker logs --tail 80 zapmro-auth 2>&1 | sed 's/^/      /' >&2 || true
+  die "o login não passou no teste real; veja os logs do Auth acima"
+fi
 echo
 q() { psql "$DB" -tAc "$1" 2>/dev/null || echo '?'; }
 echo "  tabelas públicas : $(q "select count(*) from information_schema.tables where table_schema='public'")"

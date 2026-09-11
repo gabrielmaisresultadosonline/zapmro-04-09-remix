@@ -412,6 +412,9 @@ function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTe
     // o usuário NÃO enviou um texto próprio — ex.: clique de anúncio que chega
     // como "unsupported" sem body.
     ...(hasUserTypedText ? [] : getReferralTextParts(referral)),
+    // Textos auxiliares (ex.: fallback de clique de anúncio) usados APENAS para
+    // casar gatilhos — nunca para gravar/mostrar o conteúdo da conversa.
+    ...(hasUserTypedText ? [] : extraTexts),
   ];
 
   const normalized = rawCandidates

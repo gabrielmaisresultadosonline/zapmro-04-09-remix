@@ -1795,7 +1795,9 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   }
 else if (message.type === "unsupported") {
     const error = message.errors?.[0];
-    text = extractedInboundText || `[Formato não suportado pela Meta] ${error?.title || ""}: ${error?.message || ""}`.trim();
+    text = extractedInboundText
+      || (ctwaTriggerFallbackText ? '[Mensagem do anúncio]' : '')
+      || `[Formato não suportado pela Meta] ${error?.title || ""}: ${error?.message || ""}`.trim();
   } else if (message.type === "location") {
     text = `[Localização] Lat: ${message.location?.latitude}, Long: ${message.location?.longitude}`;
   } else if (message.type === "contacts") {

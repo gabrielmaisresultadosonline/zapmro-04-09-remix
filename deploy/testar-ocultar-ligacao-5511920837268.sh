@@ -40,8 +40,7 @@ section "1) Localizando o número no banco"
 
 # A busca é fixa e exata após remover pontuação. O token permanece somente em
 # memória e é enviado ao curl pela entrada padrão; ele nunca é impresso.
-ROWS="$(psql "$DB" -v ON_ERROR_STOP=1 -X -qAt -F $'\t' -P pager=off \
-  -v target_e164="$TARGET_E164" -v target_national="$TARGET_NATIONAL" -c "
+ROWS="$(psql "$DB" -v ON_ERROR_STOP=1 -X -qAt -F $'\t' -P pager=off -c "
     select n.id::text,
            coalesce(n.meta_phone_number_id, ''),
            coalesce(n.meta_access_token, ''),
@@ -49,13 +48,12 @@ ROWS="$(psql "$DB" -v ON_ERROR_STOP=1 -X -qAt -F $'\t' -P pager=off \
            'crm_whatsapp_numbers'
       from public.crm_whatsapp_numbers n
      where regexp_replace(coalesce(n.meta_display_phone_number, ''), '[^0-9]', '', 'g')
-           in (:'target_e164', :'target_national');")"
+           in ('5511920837268', '11920837268');")"
 
 if [[ -z "$ROWS" ]]; then
   LEGACY_COLUMNS="$(q1 "select count(*) from information_schema.columns where table_schema='public' and table_name='crm_settings' and column_name in ('meta_display_phone_number','meta_phone_number_id','meta_access_token')")"
   if [[ "$LEGACY_COLUMNS" == "3" ]]; then
-    ROWS="$(psql "$DB" -v ON_ERROR_STOP=1 -X -qAt -F $'\t' -P pager=off \
-      -v target_e164="$TARGET_E164" -v target_national="$TARGET_NATIONAL" -c "
+    ROWS="$(psql "$DB" -v ON_ERROR_STOP=1 -X -qAt -F $'\t' -P pager=off -c "
         select s.user_id::text,
                coalesce(s.meta_phone_number_id, ''),
                coalesce(s.meta_access_token, ''),
@@ -63,7 +61,7 @@ if [[ -z "$ROWS" ]]; then
                'crm_settings (legado)'
           from public.crm_settings s
          where regexp_replace(coalesce(s.meta_display_phone_number, ''), '[^0-9]', '', 'g')
-               in (:'target_e164', :'target_national');")"
+               in ('5511920837268', '11920837268');")"
   fi
 fi
 

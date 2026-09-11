@@ -25,3 +25,5 @@
 - [x] Lixeira de 7 dias (crm_media_gc_queue) + worker diário media-gc.
 - [x] Corrigir ownership/permissões do schema Auth e validar o caminho real de login após atualizações da VPS.
 - [x] Tornar o backup pré-atualização resiliente a reinícios transitórios do PostgreSQL, sem permitir atualização sem dump válido.
+
+- [x] Criar e validar teste seguro de ocultação do botão de ligação Meta para +55 11 92083-7268.

@@ -23,3 +23,4 @@
 - [x] Tornar o diagnóstico dos gatilhos completo por caixa, histórico, decisão e execução do primeiro nó.
 - [x] Catálogo de mídias (crm_media_assets) com contador de referências.
 - [x] Lixeira de 7 dias (crm_media_gc_queue) + worker diário media-gc.
+- [x] Corrigir ownership/permissões do schema Auth e validar o caminho real de login após atualizações da VPS.

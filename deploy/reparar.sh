@@ -120,9 +120,24 @@ BEGIN
     EXECUTE format('ALTER VIEW %I.%I OWNER TO %I', r.s, r.t,
       CASE r.s WHEN 'auth' THEN 'supabase_auth_admin' ELSE 'supabase_storage_admin' END);
   END LOOP;
+  FOR r IN
+    SELECT p.oid::regprocedure AS routine_name
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'auth' AND p.prokind IN ('f', 'p')
+  LOOP
+    EXECUTE format('ALTER ROUTINE %s OWNER TO supabase_auth_admin', r.routine_name);
+  END LOOP;
 END $$;
 GRANT ALL ON ALL TABLES    IN SCHEMA auth    TO supabase_auth_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA auth    TO supabase_auth_admin;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO supabase_auth_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth
+  GRANT ALL ON TABLES TO supabase_auth_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth
+  GRANT ALL ON SEQUENCES TO supabase_auth_admin;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA auth
+  GRANT EXECUTE ON FUNCTIONS TO supabase_auth_admin;
 GRANT ALL ON ALL TABLES    IN SCHEMA storage TO supabase_storage_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO supabase_storage_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon, authenticated;
@@ -272,6 +287,32 @@ espera auth    "$BASE/auth/v1/health"
 espera rest    "$BASE/rest/v1/"
 espera storage "$BASE/storage/v1/bucket"
 espera functions "$BASE/functions/v1/"
+
+# O endpoint de saúde pode retornar 200 mesmo sem acesso a auth.users. Confirma
+# o schema com o mesmo papel usado pelo GoTrue e testa o caminho real do login
+# sem usar nem modificar a senha de nenhum cliente.
+if ! PGPASSWORD="$POSTGRES_PASSWORD" psql \
+  -h 127.0.0.1 -p "${PG_PORT:-5432}" -U supabase_auth_admin \
+  -d "${POSTGRES_DB:-postgres}" -v ON_ERROR_STOP=1 -qAt \
+  -c "select count(*) from auth.users; select count(*) from auth.identities; select count(*) from auth.schema_migrations;" \
+  >/tmp/zapmro-auth-schema-check.log 2>&1; then
+  cat /tmp/zapmro-auth-schema-check.log >&2
+  die "Auth não consegue consultar o próprio schema; nenhum usuário foi alterado"
+fi
+
+AUTH_PROBE_BODY="/tmp/zapmro-auth-login-probe.json"
+auth_login_code=$(curl -sS -o "$AUTH_PROBE_BODY" -m 15 -w '%{http_code}' \
+  -X POST "$BASE/auth/v1/token?grant_type=password" \
+  -H "apikey: ${ANON_KEY}" \
+  -H "Content-Type: application/json" \
+  --data '{"email":"healthcheck-nao-existe@zapmro.invalid","password":"healthcheck-nao-e-login"}' \
+  2>/dev/null || echo 000)
+if [ "$auth_login_code" = "400" ]; then
+  ok "login + banco Auth OK (credencial de teste recusada corretamente)"
+else
+  docker logs --tail 80 zapmro-auth 2>&1 | sed 's/^/      /' >&2 || true
+  die "login ainda falhou (HTTP $auth_login_code); veja os logs do Auth acima"
+fi
 
 # ------------------------------------------------------------- 5) relatório ---
 sec "5/5 Relatório"

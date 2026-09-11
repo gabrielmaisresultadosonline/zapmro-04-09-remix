@@ -2106,7 +2106,7 @@ else if (message.type === "unsupported") {
   // fazendo o fluxo nunca iniciar. Agora avaliamos sempre que o contato está ocioso.
   if (contact && !hasActiveFlow && !isAiHandling) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
       console.log(`[TRIGGER-CTWA] (ad-priority) waId=${waId} msgType=${message?.type} aiActive=${isAiActive} candidates=${JSON.stringify(allCandidateTexts)}`);
       let adPriorityFlowsQuery = supabase
         .from('crm_flows')
@@ -2178,7 +2178,7 @@ else if (message.type === "unsupported") {
   // exato/palavra-chave configurado para esse texto, ele deve iniciar o novo fluxo.
   if (contact && hasActiveFlow && isWaitingResponse && !isAiHandling && !isAiActive) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
       const hasReferral = !!getReferralFromWebhookMessage(message);
       console.log(`[TRIGGER-CTWA] (waiting-flow) waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} candidates=${JSON.stringify(allCandidateTexts)}`);
       let waitingFlowsQuery = supabase
@@ -2358,7 +2358,7 @@ else if (message.type === "unsupported") {
       }
 
       if (activeFlows && activeFlows.length > 0) {
-        const allCandidateTexts = collectInboundTriggerTexts(message, text);
+        const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
         const hasReferral = !!getReferralFromWebhookMessage(message);
         console.log(`[TRIGGER-AUTO] waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} text="${(text || '').slice(0,80)}" candidates=${JSON.stringify(allCandidateTexts)} activeFlows=${activeFlows.length}`);
         const prevTotal = __previousTotalReceived;

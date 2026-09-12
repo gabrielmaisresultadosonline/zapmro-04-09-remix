@@ -236,6 +236,42 @@ function flowMatchesIncomingTrigger(flow: any, allCandidateTexts: string[]) {
   return false;
 }
 
+const AUTOMATIC_TRIGGER_PRIORITY = [
+  'exact_phrase',
+  'keyword',
+  'first_message',
+  'new_contact',
+  'first_message_day',
+  'after_24h',
+  '24h_inactivity',
+  'inactivity_2h',
+  'inactivity_1h',
+  'inactivity_30m',
+  'all_messages',
+] as const;
+
+/**
+ * Mantém a escolha do gatilho estável entre entregas e reinícios do webhook.
+ * Fluxos ligados à caixa atual vencem os legados; depois vale a data de criação
+ * e, por último, o UUID. Assim a ordem eventual do PostgREST nunca escolhe um
+ * fluxo diferente para a mesma configuração.
+ */
+function sortTriggerFlows(flows: any[], inboundNumberId: string | null) {
+  return [...flows].sort((left, right) => {
+    const leftPriority = AUTOMATIC_TRIGGER_PRIORITY.indexOf(left?.trigger_type);
+    const rightPriority = AUTOMATIC_TRIGGER_PRIORITY.indexOf(right?.trigger_type);
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+
+    const leftIsExactBox = !!inboundNumberId && left?.whatsapp_number_id === inboundNumberId;
+    const rightIsExactBox = !!inboundNumberId && right?.whatsapp_number_id === inboundNumberId;
+    if (leftIsExactBox !== rightIsExactBox) return leftIsExactBox ? -1 : 1;
+
+    const createdComparison = String(left?.created_at || '').localeCompare(String(right?.created_at || ''));
+    if (createdComparison !== 0) return createdComparison;
+    return String(left?.id || '').localeCompare(String(right?.id || ''));
+  });
+}
+
 function isUnavailableUnsupportedMessage(message: any) {
   if (message?.type !== 'unsupported') return false;
   const error = Array.isArray(message?.errors) ? message.errors[0] : null;

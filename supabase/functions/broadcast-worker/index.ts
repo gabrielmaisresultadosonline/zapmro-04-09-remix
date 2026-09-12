@@ -48,6 +48,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const workerId = crypto.randomUUID()
+  let claimedItem: Record<string, unknown> | null = null
   try {
     const { data: claimedRows, error: claimError } = await admin.rpc('crm_claim_broadcast_item', {
       p_worker_id: workerId,
@@ -57,6 +58,7 @@ Deno.serve(async (req: Request) => {
     if (claimError) throw claimError
     const item = Array.isArray(claimedRows) ? claimedRows[0] : null
     if (!item) return json({ success: true, processed: 0 })
+    claimedItem = item
 
     const { data: broadcast, error: broadcastError } = await admin
       .from('crm_broadcasts')
@@ -172,6 +174,16 @@ Deno.serve(async (req: Request) => {
     return json({ success: true, processed: 1, broadcast_id: broadcast.id })
   } catch (error) {
     console.error('[BROADCAST-WORKER-ERROR]', error)
+    if (claimedItem?.item_id && claimedItem?.claimed_broadcast_id) {
+      const message = errorMessage(error)
+      await admin.from('crm_broadcast_items').update({
+        status: 'failed', error_code: 'WORKER_ERROR', error_message: message,
+        processed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      }).eq('id', claimedItem.item_id).eq('locked_by', workerId)
+      await admin.from('crm_broadcasts').update({ last_error: message, updated_at: new Date().toISOString() })
+        .eq('id', claimedItem.claimed_broadcast_id)
+      await admin.rpc('crm_refresh_broadcast_progress', { p_broadcast_id: claimedItem.claimed_broadcast_id })
+    }
     return json({ success: false, error: errorMessage(error) }, 500)
   }
 })

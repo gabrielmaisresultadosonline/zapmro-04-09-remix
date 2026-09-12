@@ -169,5 +169,43 @@ $$;
 REVOKE ALL ON FUNCTION public.crm_claim_broadcast_item(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.crm_claim_broadcast_item(uuid, uuid, uuid) TO service_role;
 
+CREATE OR REPLACE FUNCTION public.crm_refresh_broadcast_progress(p_broadcast_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_processed integer;
+  v_failed integer;
+  v_remaining integer;
+BEGIN
+  SELECT count(*) FILTER (WHERE status IN ('sent', 'failed', 'skipped'))::integer,
+         count(*) FILTER (WHERE status = 'failed')::integer,
+         count(*) FILTER (WHERE status IN ('queued', 'processing'))::integer
+    INTO v_processed, v_failed, v_remaining
+    FROM public.crm_broadcast_items
+   WHERE broadcast_id = p_broadcast_id;
+
+  UPDATE public.crm_broadcasts
+     SET sent_count = COALESCE(v_processed, 0),
+         failed_count = COALESCE(v_failed, 0),
+         status = CASE
+           WHEN COALESCE(v_remaining, 0) = 0 AND status IN ('pending', 'running') THEN 'completed'
+           ELSE status
+         END,
+         completed_at = CASE
+           WHEN COALESCE(v_remaining, 0) = 0 AND status IN ('pending', 'running') THEN COALESCE(completed_at, now())
+           ELSE completed_at
+         END,
+         last_heartbeat_at = now(),
+         updated_at = now()
+   WHERE id = p_broadcast_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.crm_refresh_broadcast_progress(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.crm_refresh_broadcast_progress(uuid) TO service_role;
+
 -- Campanhas antigas que ficaram "running" no navegador permanecem intactas;
 -- somente novas campanhas com itens persistidos são processadas pelo worker.

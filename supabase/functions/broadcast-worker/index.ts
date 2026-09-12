@@ -110,6 +110,18 @@ Deno.serve(async (req: Request) => {
       payload.text = broadcast.message_text || ''
     }
 
+    // Pausar/parar pode acontecer enquanto o contato é preparado. Revalidamos
+    // imediatamente antes da chamada externa para não iniciar um novo envio.
+    const { data: latestCampaign } = await admin.from('crm_broadcasts').select('status').eq('id', broadcast.id).single()
+    if (!['pending', 'running'].includes(String(latestCampaign?.status))) {
+      await admin.from('crm_broadcast_items').update({
+        status: latestCampaign?.status === 'cancelled' ? 'skipped' : 'queued',
+        locked_at: null, locked_by: null, updated_at: new Date().toISOString(),
+      }).eq('id', item.item_id).eq('locked_by', workerId)
+      await admin.rpc('crm_refresh_broadcast_progress', { p_broadcast_id: broadcast.id })
+      return json({ success: true, processed: 0, status: latestCampaign?.status })
+    }
+
     const functionUrl = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/meta-whatsapp-crm`
     const response = await fetch(functionUrl, {
       method: 'POST',
@@ -130,10 +142,7 @@ Deno.serve(async (req: Request) => {
         processed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       }).eq('id', item.item_id).eq('locked_by', workerId)
       await admin.from('crm_broadcasts').update({
-        failed_count: Number(broadcast.failed_count || 0) + 1,
-        sent_count: Number(broadcast.sent_count || 0) + 1,
         last_error: message,
-        last_heartbeat_at: new Date().toISOString(),
         next_run_at: new Date(Date.now() + randomDelaySeconds(broadcast.random_delay_min, broadcast.random_delay_max) * 1000).toISOString(),
         updated_at: new Date().toISOString(),
       }).eq('id', broadcast.id)
@@ -143,36 +152,20 @@ Deno.serve(async (req: Request) => {
         processed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       }).eq('id', item.item_id).eq('locked_by', workerId)
       await admin.from('crm_broadcasts').update({
-        sent_count: Number(broadcast.sent_count || 0) + 1,
         last_error: null,
-        last_heartbeat_at: new Date().toISOString(),
         next_run_at: new Date(Date.now() + randomDelaySeconds(broadcast.random_delay_min, broadcast.random_delay_max) * 1000).toISOString(),
         updated_at: new Date().toISOString(),
       }).eq('id', broadcast.id)
     }
 
-    const { count: remaining } = await admin.from('crm_broadcast_items')
-      .select('id', { count: 'exact', head: true })
-      .eq('broadcast_id', broadcast.id)
-      .eq('status', 'queued')
-    if ((remaining || 0) === 0) {
-      const { count: processing } = await admin.from('crm_broadcast_items')
-        .select('id', { count: 'exact', head: true })
-        .eq('broadcast_id', broadcast.id)
-        .eq('status', 'processing')
-      if ((processing || 0) === 0) {
-        await admin.from('crm_broadcasts').update({
-          status: 'completed', completed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        }).eq('id', broadcast.id).in('status', ['pending', 'running'])
-
-        if (broadcast.apply_tag) {
-          let contactsQuery = admin.from('crm_contacts').update({ status: broadcast.apply_tag })
-            .eq('user_id', broadcast.user_id)
-            .in('wa_id', broadcast.uploaded_numbers || [])
-          if (broadcast.whatsapp_number_id) contactsQuery = contactsQuery.eq('whatsapp_number_id', broadcast.whatsapp_number_id)
-          await contactsQuery
-        }
-      }
+    await admin.rpc('crm_refresh_broadcast_progress', { p_broadcast_id: broadcast.id })
+    const { data: refreshedCampaign } = await admin.from('crm_broadcasts').select('status').eq('id', broadcast.id).single()
+    if (refreshedCampaign?.status === 'completed' && broadcast.apply_tag) {
+      let contactsQuery = admin.from('crm_contacts').update({ status: broadcast.apply_tag })
+        .eq('user_id', broadcast.user_id)
+        .in('wa_id', broadcast.uploaded_numbers || [])
+      if (broadcast.whatsapp_number_id) contactsQuery = contactsQuery.eq('whatsapp_number_id', broadcast.whatsapp_number_id)
+      await contactsQuery
     }
 
     console.log('[BROADCAST-WORKER]', { broadcast_id: broadcast.id, item_id: item.item_id, sequence: item.sequence_number })

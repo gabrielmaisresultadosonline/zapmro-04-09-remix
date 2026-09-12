@@ -284,6 +284,8 @@ async function claimAutomaticFlow(
     p_flow_id: flow.id,
     p_start_node_id: startNodeId,
     p_expected_flow_id: contact.current_flow_id || null,
+    p_expected_node_id: contact.current_node_id || null,
+    p_expected_flow_state: contact.flow_state || null,
   });
   if (error) throw new Error(`Falha ao reservar gatilho: ${error.message}`);
   return claimed === true;
@@ -2096,7 +2098,7 @@ else if (message.type === "unsupported") {
   const isWaitingResponse = contact?.flow_state === 'waiting_response';
   // ai_handling sem current_flow_id é a IA global ociosa, não um fluxo em
   // execução. Ela deve aguardar a avaliação dos gatilhos antes de responder.
-  const isAiHandlingFlow = isAiHandling && !!contact?.current_flow_id;
+  let isAiHandlingFlow = isAiHandling && !!contact?.current_flow_id;
   // Carrega as configurações do CRM deste usuário para saber se o Agente IA Global está ligado.
   // (Antes esta variável não existia neste escopo, o que quebrava o webhook com
   // "ReferenceError: settings is not defined" logo após salvar a mensagem recebida.)
@@ -2208,6 +2210,7 @@ else if (message.type === "unsupported") {
             contact.current_node_id = null;
             contact.flow_state = 'idle';
             hasActiveFlow = false;
+            isAiHandlingFlow = false;
           }
         }
       }

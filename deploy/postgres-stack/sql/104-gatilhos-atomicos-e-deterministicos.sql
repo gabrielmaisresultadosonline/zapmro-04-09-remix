@@ -5,6 +5,10 @@
 -- a atualização um compare-and-swap: apenas o primeiro webhook vence.
 -- Não altera histórico, credenciais, configurações ou fluxos existentes.
 
+-- Remove somente uma assinatura intermediária desta própria migration, caso
+-- uma tentativa anterior tenha sido interrompida antes da atualização final.
+DROP FUNCTION IF EXISTS public.crm_claim_flow_trigger(uuid, uuid, uuid, text, uuid);
+
 CREATE OR REPLACE FUNCTION public.crm_claim_flow_trigger(
   p_contact_id uuid,
   p_user_id uuid,

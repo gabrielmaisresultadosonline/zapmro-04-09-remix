@@ -121,9 +121,10 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify(payload),
     })
     const result = await response.json().catch(() => ({})) as JsonRecord
-    if (!response.ok || result.success === false) {
-      const message = String(result.message || result.error || `HTTP ${response.status}`)
-      const code = String(result.code || `HTTP_${response.status}`)
+    const missingMetaConfirmation = broadcast.type !== 'flow' && !result.messageId
+    if (!response.ok || result.success === false || missingMetaConfirmation) {
+      const message = String(result.message || result.error || (missingMetaConfirmation ? 'A Meta não confirmou o envio (sem ID de mensagem)' : `HTTP ${response.status}`))
+      const code = String(result.code || (missingMetaConfirmation ? 'META_CONFIRMATION_MISSING' : `HTTP_${response.status}`))
       await admin.from('crm_broadcast_items').update({
         status: 'failed', error_code: code, error_message: message,
         processed_at: new Date().toISOString(), updated_at: new Date().toISOString(),

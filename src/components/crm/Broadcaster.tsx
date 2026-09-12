@@ -714,7 +714,9 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
           random_delay_min: delayMin,
           random_delay_max: delayMax,
           total_contacts: numbers.length,
-          uploaded_numbers: (targetType === 'uploaded' || targetType === 'tag' || targetType === 'conversation' || targetType === 'contacts') ? numbers : null,
+          // A lista efetivamente aprovada fica congelada na campanha; mudanças
+          // posteriores em filtros/etiquetas não alteram quem receberá.
+          uploaded_numbers: numbers,
           status: 'pending',
           user_id: userId,
           whatsapp_number_id: activeNumberId,

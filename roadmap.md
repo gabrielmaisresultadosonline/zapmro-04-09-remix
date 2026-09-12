@@ -27,4 +27,4 @@
 - [x] Tornar o backup pré-atualização resiliente a reinícios transitórios do PostgreSQL, sem permitir atualização sem dump válido.
 
 - [x] Criar e validar teste seguro de ocultação do botão de ligação Meta para +55 11 92083-7268.
-- [ ] Tornar o envio em massa persistente na nuvem, com pausa, retomada, parada e diagnóstico de travamento.
+- [x] Tornar o envio em massa persistente na nuvem, com pausa, retomada, parada e diagnóstico de travamento.

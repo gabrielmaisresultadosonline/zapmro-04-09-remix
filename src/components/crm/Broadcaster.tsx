@@ -763,160 +763,33 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
     }
   };
 
-  const processBroadcast = async (broadcastId: string, numbers: string[]) => {
-    // This is a simplified client-side processor
-    // In a production app, this should be an Edge Function or Database Hook
-    toast({ title: "Iniciando disparos...", description: `Total: ${numbers.length} números` });
-    
-    // Update status to running
-    await supabase.from('crm_broadcasts').update({ status: 'running' }).eq('id', broadcastId);
-    
-    // We'll just update the DB records one by one in this simulation
-    // In reality, you'd insert into crm_scheduled_messages
-    for (let i = 0; i < numbers.length; i++) {
-      const number = numbers[i];
-      
-      // Check for manual cancellation between sends
-      const { data: cur } = await supabase
-        .from('crm_broadcasts')
-        .select('status')
-        .eq('id', broadcastId)
-        .maybeSingle();
-      if (cur?.status === 'cancelled') {
-        toast({ title: 'Disparo interrompido', description: `Parado em ${i}/${numbers.length}.` });
-        fetchBroadcasts();
-        return;
-      }
-
-      // Wait random delay
-      const delay = Math.floor(Math.random() * (delayMax - delayMin + 1) + delayMin) * 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      try {
-        // Send actual message
-        const payload: any = { action: 'sendMessage', to: number, broadcastId, ...activeNumberPatch() };
-        if (type === 'message') payload.text = messageText;
-        else if (type === 'template') {
-          const t = templates.find(temp => temp.id === selectedTemplate);
-          payload.action = 'sendTemplate';
-          payload.templateName = t?.name;
-          payload.languageCode = t?.language || 'pt_BR';
-          // Mesmo template aprovado, parâmetros próprios de cada contato.
-          if (t && templateConfig) {
-            const schema = parseTemplateSchema(t.components);
-            if (templateHasDynamicInputs(schema)) {
-              payload.components = buildTemplateComponents(schema, templateConfig, findContactForNumber(number));
-            }
-          }
-        } else if (type === 'flow') {
-          // Find contact or create one (flows require a contactId)
-          const canonicalNumber = canonicalWaId(number);
-          let { data: contact } = await scopeNumber(
-            supabase
-              .from('crm_contacts')
-              .select('id')
-              .in('wa_id', waIdVariants(number))
-          )
-            .limit(1)
-            .maybeSingle();
-          if (!contact) {
-            const { data: created } = await supabase
-              .from('crm_contacts')
-              .insert([{ wa_id: canonicalNumber, name: canonicalNumber, source_type: 'broadcast', ...activeNumberPatch() }])
-              .select('id')
-              .single();
-            contact = created;
-          }
-          payload.action = 'startFlow';
-          payload.flowId = selectedFlow;
-          payload.waId = number;
-          if (contact) payload.contactId = contact.id;
-        }
-
-        const { data: sendResult, error: invokeError } = await supabase.functions.invoke('meta-whatsapp-crm', { body: payload });
-        if (invokeError) throw invokeError;
-        if (sendResult?.success === false) {
-          throw new Error(sendResult?.message || sendResult?.error || 'A Meta recusou o envio');
-        }
-        // Só consideramos enviado quando a Meta devolve um ID de mensagem real.
-        // Fluxos (startFlow) não retornam messageId único, por isso são exceção.
-        if (type !== 'flow' && !sendResult?.messageId) {
-          throw new Error('A Meta não confirmou o envio (sem ID de mensagem)');
-        }
-
-        await supabase.from('crm_broadcasts')
-          .update({ sent_count: i + 1 })
-          .eq('id', broadcastId);
-          
-      } catch (err) {
-        console.error("Error sending to", number, err);
-        // Update failed count
-        await (supabase.rpc as any)('increment_broadcast_failed', { b_id: broadcastId });
-        await supabase.from('crm_broadcasts')
-          .update({ sent_count: i + 1 })
-          .eq('id', broadcastId);
-      }
+  const pauseBroadcast = async (id: string) => {
+    const { error } = await (supabase as any).from('crm_broadcasts').update({
+      status: 'paused',
+      paused_at: new Date().toISOString(),
+    }).eq('id', id);
+    if (error) {
+      toast({ title: 'Não foi possível pausar', description: error.message, variant: 'destructive' });
+      return;
     }
-    
-    await supabase.from('crm_broadcasts').update({ status: 'completed' }).eq('id', broadcastId);
-
-    // Conferência real de entrega: a Meta confirma via webhook (sent/delivered/read/failed).
-    // Damos um tempo para os status chegarem e reportamos o resultado verdadeiro.
-    try {
-      await new Promise(resolve => setTimeout(resolve, 15000));
-      const { data: sentMessages } = await scopeNumber(
-        supabase
-          .from('crm_messages')
-          .select('status')
-      ).contains('metadata', { broadcast_id: broadcastId });
-
-      if (sentMessages && sentMessages.length > 0) {
-        const confirmed = sentMessages.filter(m => ['sent', 'delivered', 'read'].includes(String(m.status))).length;
-        const failed = sentMessages.filter(m => String(m.status) === 'failed').length;
-        const pending = sentMessages.length - confirmed - failed;
-        toast({
-          title: 'Conferência de entrega',
-          description: `${confirmed} confirmadas pela Meta • ${failed} falharam • ${pending} aguardando confirmação.`,
-          variant: failed > 0 ? 'destructive' : 'default',
-        });
-      }
-    } catch (err) {
-      console.error('Erro ao conferir entregas do disparo:', err);
-    }
-
-    // Apply etiqueta (tag) to all contacts in this broadcast, if selected
-    if (applyTag) {
-      try {
-        for (const number of numbers) {
-          const canonicalNumber = canonicalWaId(number);
-          const { data: existing } = await scopeNumber(
-            supabase
-              .from('crm_contacts')
-              .select('id')
-              .in('wa_id', waIdVariants(number))
-          )
-            .limit(1)
-            .maybeSingle();
-
-          if (existing) {
-            await supabase
-              .from('crm_contacts')
-              .update({ status: applyTag })
-              .eq('id', existing.id);
-          } else {
-            await supabase
-              .from('crm_contacts')
-              .insert([{ wa_id: canonicalNumber, name: canonicalNumber, status: applyTag, source_type: 'broadcast', ...activeNumberPatch() }]);
-          }
-        }
-        toast({ title: `Etiqueta aplicada a ${numbers.length} contatos!` });
-      } catch (err) {
-        console.error('Error applying tag to broadcast contacts:', err);
-      }
-    }
-
+    toast({ title: 'Disparo pausado', description: 'A fila foi preservada para continuar depois.' });
     fetchBroadcasts();
-    toast({ title: "Campanha finalizada!" });
+  };
+
+  const resumeBroadcast = async (id: string) => {
+    const { error } = await (supabase as any).from('crm_broadcasts').update({
+      status: 'running',
+      paused_at: null,
+      last_error: null,
+      next_run_at: new Date().toISOString(),
+    }).eq('id', id);
+    if (error) {
+      toast({ title: 'Não foi possível retomar', description: error.message, variant: 'destructive' });
+      return;
+    }
+    toast({ title: 'Disparo retomado na nuvem' });
+    fetchBroadcasts();
+    void wakeBroadcastWorker(id);
   };
 
   const deleteBroadcast = async (id: string) => {

@@ -581,6 +581,14 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
     setBroadcasts(data || []);
   };
 
+  /** A primeira execução é imediata; o cron da VPS assume as próximas. */
+  const wakeBroadcastWorker = async (broadcastId: string) => {
+    const { error } = await supabase.functions.invoke('broadcast-worker', {
+      body: { broadcast_id: broadcastId },
+    });
+    if (error) console.warn('[BROADCAST] O cron continuará a fila:', error.message);
+  };
+
   const handleStartBroadcast = async () => {
     if (!name) {
       toast({ title: "Dê um nome à campanha", variant: "destructive" });
@@ -689,7 +697,12 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         return;
       }
 
-      const { data, error } = await supabase
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData.user?.id;
+      if (!userId) throw new Error('Sua sessão expirou. Entre novamente para iniciar o disparo.');
+      const activeNumberId = getActiveWhatsAppNumberId();
+
+      const { data, error } = await (supabase as any)
         .from('crm_broadcasts')
         .insert([{
           name,
@@ -702,14 +715,38 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
           random_delay_max: delayMax,
           total_contacts: numbers.length,
           uploaded_numbers: (targetType === 'uploaded' || targetType === 'tag' || targetType === 'conversation' || targetType === 'contacts') ? numbers : null,
-          status: 'pending'
+          status: 'pending',
+          user_id: userId,
+          whatsapp_number_id: activeNumberId,
+          template_config: type === 'template' ? templateConfig : null,
+          apply_tag: applyTag || null,
+          next_run_at: new Date().toISOString(),
         }])
         .select()
         .single();
 
       if (error) throw error;
 
-      toast({ title: "Campanha criada com sucesso!" });
+      const recipientNames = new Map(finalRecipients.map(recipient => [recipient.wa_id, recipient.name]));
+      const queueRows = numbers.map((number, index) => ({
+        broadcast_id: data.id,
+        user_id: userId,
+        whatsapp_number_id: activeNumberId,
+        wa_id: number,
+        recipient_name: recipientNames.get(number) || number,
+        sequence_number: index,
+      }));
+      for (let index = 0; index < queueRows.length; index += 500) {
+        const { error: queueError } = await (supabase as any)
+          .from('crm_broadcast_items')
+          .insert(queueRows.slice(index, index + 500));
+        if (queueError) {
+          await supabase.from('crm_broadcasts').delete().eq('id', data.id);
+          throw new Error(`Não foi possível preparar a fila: ${queueError.message}`);
+        }
+      }
+
+      toast({ title: "Campanha iniciada na nuvem!", description: 'Ela continuará mesmo se você fechar esta tela.' });
       fetchBroadcasts();
       
       // Reset form
@@ -717,9 +754,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
       setMessageText('');
       setUploadedNumbers('');
       
-      // Here we would ideally trigger an edge function to process the queue
-      // For now, let's just simulate the start
-      await processBroadcast(data.id, numbers);
+      void wakeBroadcastWorker(data.id);
 
     } catch (err: any) {
       toast({ title: "Erro ao criar campanha", description: err.message, variant: "destructive" });

@@ -800,7 +800,14 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
 
   const cancelBroadcast = async (id: string) => {
     if (!confirm('Parar este disparo? Os contatos restantes não receberão a mensagem.')) return;
-    await supabase.from('crm_broadcasts').update({ status: 'cancelled' }).eq('id', id);
+    await (supabase as any).from('crm_broadcasts').update({
+      status: 'cancelled',
+      stopped_at: new Date().toISOString(),
+    }).eq('id', id);
+    await (supabase as any).from('crm_broadcast_items').update({
+      status: 'skipped',
+      processed_at: new Date().toISOString(),
+    }).eq('broadcast_id', id).eq('status', 'queued');
     toast({ title: 'Solicitação de parada enviada', description: 'O disparo será interrompido no próximo intervalo.' });
     fetchBroadcasts();
   };
@@ -1897,26 +1904,50 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               >
                                 <AlertCircle className="w-2.5 h-2.5" /> Logs
                               </button>
-                              {b.status === 'running' && (
+                              {(b.status === 'running' || b.status === 'pending') && (
+                                <button
+                                  onClick={() => pauseBroadcast(b.id)}
+                                  className="text-[9px] px-2 h-5 rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/40 flex items-center gap-1"
+                                  title="Pausar e preservar a fila"
+                                >
+                                  <Pause className="w-2.5 h-2.5" /> Pausar
+                                </button>
+                              )}
+                              {b.status === 'paused' && (
+                                <button
+                                  onClick={() => resumeBroadcast(b.id)}
+                                  className="text-[9px] px-2 h-5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/40 flex items-center gap-1"
+                                  title="Continuar do ponto onde parou"
+                                >
+                                  <Play className="w-2.5 h-2.5" /> Retomar
+                                </button>
+                              )}
+                              {['running', 'pending', 'paused'].includes(b.status) && (
                                 <button
                                   onClick={() => cancelBroadcast(b.id)}
                                   className="text-[9px] px-2 h-5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/40 flex items-center gap-1"
                                   title="Parar disparo"
                                 >
-                                  <Pause className="w-2.5 h-2.5" /> Parar
+                                  <XCircle className="w-2.5 h-2.5" /> Parar
                                 </button>
                               )}
                               <Badge className={cn(
                                 "text-[8px] h-4 px-1 capitalize",
                                 b.status === 'completed' ? "bg-blue-500/20 text-blue-400" :
                                 b.status === 'running' ? "bg-green-500/20 text-green-400 animate-pulse" :
+                                 b.status === 'paused' ? "bg-yellow-500/20 text-yellow-400" :
                                 b.status === 'cancelled' ? "bg-red-500/20 text-red-400" :
                                 "bg-yellow-500/20 text-yellow-400"
                               )}>
-                                {b.status === 'completed' ? 'Finalizado' : b.status === 'running' ? 'Em curso' : b.status === 'cancelled' ? 'Parado' : 'Pendente'}
+                                {b.status === 'completed' ? 'Finalizado' : b.status === 'running' ? 'Em curso' : b.status === 'paused' ? 'Pausado' : b.status === 'cancelled' ? 'Parado' : 'Pendente'}
                               </Badge>
                             </div>
                           </div>
+                          {b.last_error && (
+                            <p className="text-[9px] text-red-300 break-words" title={b.last_error}>
+                              Último erro: {b.last_error}
+                            </p>
+                          )}
                         </div>
                       </div>
                     ))

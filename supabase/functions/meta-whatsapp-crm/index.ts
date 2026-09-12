@@ -1492,7 +1492,7 @@ function normalizeSmbWebhookEntries(entries: any[]): any[] {
   });
 }
 
-async function handleProcessWebhook(supabase: any, entry: any, skipSave = false, userId?: string) {
+async function handleProcessWebhook(supabase: any, entry: any, skipSave = false, userId?: string): Promise<Response> {
   const rawEntries = Array.isArray(entry) ? entry : (entry ? [entry] : []);
   const entries = normalizeSmbWebhookEntries(rawEntries);
   const changes = entries.flatMap((entryItem: any) =>
@@ -1535,7 +1535,7 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
 
       for (const unitValue of units) {
         const singleEntry = [{ ...entryItem, changes: [{ ...change, value: unitValue }] }];
-        const response = await handleProcessWebhook(supabase, singleEntry, skipSave, userId);
+        const response: Response = await handleProcessWebhook(supabase, singleEntry, skipSave, userId);
         try {
           results.push(await response.clone().json());
         } catch {
@@ -2010,10 +2010,12 @@ else if (message.type === "unsupported") {
 
 
   let savedInboundMessageId: string | null = null;
+  let __previousTotalReceived = 0;
+  let __previousLastReceivedAt: string | null = null;
   if (contactForSave && !skipSave) {
     // Capture state BEFORE update so we can evaluate triggers (first message, day, 24h)
-    var __previousTotalReceived = contactForSave.total_messages_received || 0;
-    var __previousLastReceivedAt: string | null = contactForSave.last_message_received_at || null;
+    __previousTotalReceived = contactForSave.total_messages_received || 0;
+    __previousLastReceivedAt = contactForSave.last_message_received_at || null;
      const storedInboundContent = text || extractedInboundText || `[${message.type}]`;
      const { data: insertedInboundMessage, error: insertMessageError } = await supabase.from('crm_messages').insert({
        contact_id: contactForSave.id,
@@ -2125,29 +2127,36 @@ else if (message.type === "unsupported") {
     || _flowState === 'completed'
     || _flowState === 'ended'
     || _flowState === 'finished';
-  // SE O MODO GLOBAL ESTIVER ATIVO, consideramos que não há fluxo impedindo a IA, a menos que esteja no meio de um fluxo rodando
-  let hasActiveFlow = !!contact?.current_flow_id && !_isFlowEnded && (!isGlobalAiEnabled || _flowState === 'running');
+  // Um fluxo salvo no contato continua ativo independentemente da configuração
+  // global da IA. Ignorá-lo aqui fazia respostas em waiting_response caírem no
+  // seletor automático e iniciarem outro fluxo incorretamente.
+  let hasActiveFlow = !!contact?.current_flow_id && !_isFlowEnded;
 
   if (contact?.current_flow_id && _isFlowEnded) {
 
     console.log(`[TRIGGER-GUARD] Contact ${contact.id} has stale current_flow_id with flow_state=${_flowState}. Clearing to allow new triggers.`);
-    await supabase.from('crm_contacts').update({
+    let staleFlowQuery = supabase.from('crm_contacts').update({
       current_flow_id: null,
       current_node_id: null,
       flow_timeout_node_id: null,
       flow_timeout_minutes: null,
       next_execution_time: null,
-    }).eq('id', contact.id);
-    contact.current_flow_id = null;
-    contact.current_node_id = null;
+    }).eq('id', contact.id).eq('current_flow_id', contact.current_flow_id);
+    if (_flowState) staleFlowQuery = staleFlowQuery.eq('flow_state', _flowState);
+    const { data: clearedStaleFlow, error: clearStaleFlowError } = await staleFlowQuery.select('id').maybeSingle();
+    if (clearStaleFlowError) throw clearStaleFlowError;
+    if (clearedStaleFlow) {
+      contact.current_flow_id = null;
+      contact.current_node_id = null;
+    }
   }
 
   // Libera fluxos antigos somente quando existe um gatilho temporal configurado
   // para a caixa e o intervalo dele foi realmente alcançado. A antiga trava fixa
   // de 6h fazia gatilhos de 30m/1h/2h ficarem para trás.
   if (contact && hasActiveFlow) {
-    const lastInteractionRaw = contact.last_flow_interaction
-      || __previousLastReceivedAt
+    const lastInteractionRaw = __previousLastReceivedAt
+      || contact.last_flow_interaction
       || contact.last_message_received_at
       || null;
     if (lastInteractionRaw) {
@@ -2239,7 +2248,6 @@ else if (message.type === "unsupported") {
 
       if (matchingTriggeredFlow) {
         console.log(`[TRIGGER] Starting ad flow ${matchingTriggeredFlow.id} (${matchingTriggeredFlow.name}) for ${waId} before AI handling`);
-        await supabase.from('crm_scheduled_messages').delete().eq('contact_id', contact.id);
         let startNode = matchingTriggeredFlow.nodes?.find((n: any) => n.type === 'start' || n.data?.isStartNode);
         if (!startNode && matchingTriggeredFlow.nodes?.length > 0) {
           const targets = new Set((matchingTriggeredFlow.edges || []).map((e: any) => e.target));
@@ -2252,6 +2260,7 @@ else if (message.type === "unsupported") {
             console.log(`[TRIGGER-CLAIM] Contact ${contact.id} was already claimed by another inbound message; skipping flow ${matchingTriggeredFlow.id}.`);
             return jsonResponse({ success: true, trigger_skipped: 'concurrent_message' });
           }
+          await supabase.from('crm_scheduled_messages').delete().eq('contact_id', contact.id);
 
           let currentRes: any = await executeVisualNode(supabase, matchingTriggeredFlow, startNode, contact.id, waId);
           let iterations = 0;
@@ -2310,7 +2319,6 @@ else if (message.type === "unsupported") {
 
       if (matchingTriggeredFlow) {
         console.log(`[TRIGGER] Restarting from waiting flow ${contact.current_flow_id} to ${matchingTriggeredFlow.id} for ${waId}`);
-        await supabase.from('crm_scheduled_messages').delete().eq('contact_id', contact.id);
         let startNode = matchingTriggeredFlow.nodes?.find((n: any) => n.type === 'start' || n.data?.isStartNode);
         if (!startNode && matchingTriggeredFlow.nodes?.length > 0) {
           const targets = new Set((matchingTriggeredFlow.edges || []).map((e: any) => e.target));
@@ -2323,6 +2331,7 @@ else if (message.type === "unsupported") {
             console.log(`[TRIGGER-CLAIM] Contact ${contact.id} changed before waiting-flow switch; skipping flow ${matchingTriggeredFlow.id}.`);
             return jsonResponse({ success: true, trigger_skipped: 'concurrent_message' });
           }
+          await supabase.from('crm_scheduled_messages').delete().eq('contact_id', contact.id);
 
           let currentRes: any = await executeVisualNode(supabase, matchingTriggeredFlow, startNode, contact.id, waId);
           let iterations = 0;
@@ -2504,11 +2513,11 @@ else if (message.type === "unsupported") {
         const isVeryRecentContact = contact.created_at && (new Date().getTime() - new Date(contact.created_at).getTime()) < 300000;
         const isNewAndFirst = isVeryRecentContact && !previousInbound;
 
-        let isFirstEver = effectiveIsFirstEver || isNewAndFirst;
+        const isFirstEver = effectiveIsFirstEver || isNewAndFirst;
         let isFirstOfDay = isFirstEver || !prevLast;
-        let isAfter24h = isFirstEver || !prevLast;
+        let isAfter24h = false;
         // Tempo (em ms) desde a mensagem recebida anterior — base dos gatilhos de inatividade.
-        let inactivityGapMs = isFirstEver ? Number.POSITIVE_INFINITY : 0;
+        let inactivityGapMs = 0;
 
         if (isFirstEver) {
           console.log(`[TRIGGER] First message ever detected for contact ${contact.id} (previousInbound: none, recent: ${isVeryRecentContact})`);
@@ -2559,9 +2568,14 @@ else if (message.type === "unsupported") {
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=keyword kws=${JSON.stringify(kws)} => matched=${m}`);
             return m;
           }
-          if (t === 'first_message' || t === 'new_contact') {
+          if (t === 'first_message') {
             console.log(`[TRIGGER-EVAL] flow="${flow.name}" type=${t} matched=${isFirstEver}`);
             return isFirstEver;
+          }
+          if (t === 'new_contact') {
+            const isNewContact = isFirstEver && Boolean(isVeryRecentContact);
+            console.log(`[TRIGGER-EVAL] flow="${flow.name}" type=${t} matched=${isNewContact}`);
+            return isNewContact;
           }
           if (t === 'first_message_day') {
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=first_message_day => matched=${isFirstOfDay}`);
@@ -2628,7 +2642,7 @@ else if (message.type === "unsupported") {
             console.log(`[TRIGGER-START] primeiro nó terminou flowId=${chosen.id} result=${JSON.stringify(executeRes)}`);
             
             // Loop de execução sequencial se o nó executado retornou nextNodeId (ex: após Delay ou nó de Mensagem simples)
-            let currentRes = executeRes;
+            let currentRes: any = executeRes;
             let iterations = 0;
             const MAX_TRIGGER_ITERATIONS = 10;
             while (currentRes?.nextNodeId && iterations < MAX_TRIGGER_ITERATIONS) {
@@ -2785,7 +2799,7 @@ async function processCountdownTriggers(supabase: any) {
       console.error('[COUNTDOWN] Failed to load eligible contacts:', {
         userId: settings.user_id,
         error: contactsError.message,
-      }).select('id').maybeSingle();
+      });
       summary.failed += 1;
       continue;
     }
@@ -8001,7 +8015,6 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     });
-    console.log(`[TRIGGER-GATE] desviado para IA existente waId=${waId} isAiHandling=${isAiHandling} isAiNode=${isInAiNode}`);
   }
 });
 

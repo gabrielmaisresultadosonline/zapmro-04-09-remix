@@ -6887,7 +6887,7 @@ async function fetchAndStoreIncomingMedia(
           .eq('step_order', 0)
           .single()
         
-        if (step) return await processStep(supabase, step, contactId, waId)
+        if (step) return jsonResponse(await processStep(supabase, step, contactId, waId))
       }
       
       return new Response(JSON.stringify({ success: true, message: 'Flow started' }), {

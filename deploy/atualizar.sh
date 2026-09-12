@@ -602,8 +602,8 @@ if grep -q "INBOUND_CONTENT_REFERRAL_IS_TRIGGER_ONLY_V1" "$ROOT/supabase/functio
 else
   die "Função antiga ainda pode gravar texto de anúncio como mensagem do cliente; confirme a branch main"
 fi
-trigger_claim_function="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='crm_claim_flow_trigger'")"
-if [ "$trigger_claim_function" = "1" ] \
+trigger_functions="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('crm_claim_flow_trigger','crm_record_inbound_contact_activity')")"
+if [ "$trigger_functions" = "2" ] \
   && grep -q "claimAutomaticFlow" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts"; then
   echo -e "  Gatilhos automáticos   : ${C_G}OK${N} (reserva atômica + ordem determinística)"
 else

@@ -49,5 +49,31 @@ $$;
 REVOKE ALL ON FUNCTION public.crm_claim_flow_trigger(uuid, uuid, uuid, text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.crm_claim_flow_trigger(uuid, uuid, uuid, text, uuid) TO service_role;
 
+-- Atualiza os marcadores da conversa sem perder incrementos concorrentes e sem
+-- deixar uma entrega atrasada da Meta fazer o relógio da conversa voltar.
+CREATE OR REPLACE FUNCTION public.crm_record_inbound_contact_activity(
+  p_contact_id uuid,
+  p_user_id uuid,
+  p_message_at timestamptz
+)
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  UPDATE public.crm_contacts
+     SET last_interaction = GREATEST(COALESCE(last_interaction, p_message_at), p_message_at),
+         last_message_received_at = GREATEST(COALESCE(last_message_received_at, p_message_at), p_message_at),
+         total_messages_received = COALESCE(total_messages_received, 0) + 1,
+         updated_at = now(),
+         countdown_trigger_sent_at = NULL,
+         last_read_at = NULL
+   WHERE id = p_contact_id
+     AND user_id = p_user_id;
+$$;
+
+REVOKE ALL ON FUNCTION public.crm_record_inbound_contact_activity(uuid, uuid, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.crm_record_inbound_contact_activity(uuid, uuid, timestamptz) TO service_role;
+
 CREATE INDEX IF NOT EXISTS crm_flows_trigger_lookup_idx
   ON public.crm_flows (user_id, whatsapp_number_id, is_active, trigger_type, created_at, id);

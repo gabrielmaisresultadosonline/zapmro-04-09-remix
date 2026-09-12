@@ -2041,6 +2041,10 @@ else if (message.type === "unsupported") {
          : new Date().toISOString()
      }).select('id').maybeSingle();
     if (insertMessageError) {
+      if (insertMessageError.code === '23505' && message?.id) {
+        console.log(`[FLOW-LOG] Concurrent duplicate inbound message ${message.id} ignored for ${waId}`);
+        return jsonResponse({ success: true, message: 'Duplicate inbound ignored' });
+      }
       console.error('[WEBHOOK] Failed to save inbound message', { waId, userId, error: insertMessageError.message });
       return jsonResponse({ success: false, error: insertMessageError.message }, 500);
     }
@@ -2048,14 +2052,15 @@ else if (message.type === "unsupported") {
      const inboundMessageAt = message?.timestamp
        ? new Date(Number(message.timestamp) * 1000).toISOString()
        : new Date().toISOString();
-     await supabase.from('crm_contacts').update({
-       last_interaction: inboundMessageAt,
-       last_message_received_at: inboundMessageAt,
-      total_messages_received: (contactForSave.total_messages_received || 0) + 1,
-      updated_at: new Date().toISOString(),
-      countdown_trigger_sent_at: null,
-      last_read_at: null // Reset last_read_at when new message arrives so it shows as unread
-    }).eq('id', contactForSave.id).eq('user_id', userId);
+      const { error: activityError } = await supabase.rpc('crm_record_inbound_contact_activity', {
+        p_contact_id: contactForSave.id,
+        p_user_id: userId,
+        p_message_at: inboundMessageAt,
+      });
+      if (activityError) {
+        console.error('[WEBHOOK] Failed to update inbound contact activity', { waId, userId, error: activityError.message });
+        return jsonResponse({ success: false, error: activityError.message }, 500);
+      }
     console.log('[WEBHOOK] Saved inbound message and reset last_read_at', {
       waId,
       userId,
@@ -2483,7 +2488,8 @@ else if (message.type === "unsupported") {
           .select('id, created_at, meta_message_id')
           .eq('contact_id', contact.id)
           .eq('direction', 'inbound')
-          .or('is_deleted.is.null,is_deleted.eq.false');
+          .or('is_deleted.is.null,is_deleted.eq.false')
+          .lt('created_at', now.toISOString());
         if (savedInboundMessageId) {
           previousInboundQuery = previousInboundQuery.neq('id', savedInboundMessageId);
         } else if (message?.id) {

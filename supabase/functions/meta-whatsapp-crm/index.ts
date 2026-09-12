@@ -272,6 +272,23 @@ function sortTriggerFlows(flows: any[], inboundNumberId: string | null) {
   });
 }
 
+async function claimAutomaticFlow(
+  supabase: any,
+  contact: any,
+  flow: any,
+  startNodeId: string,
+) {
+  const { data: claimed, error } = await supabase.rpc('crm_claim_flow_trigger', {
+    p_contact_id: contact.id,
+    p_user_id: contact.user_id,
+    p_flow_id: flow.id,
+    p_start_node_id: startNodeId,
+    p_expected_flow_id: contact.current_flow_id || null,
+  });
+  if (error) throw new Error(`Falha ao reservar gatilho: ${error.message}`);
+  return claimed === true;
+}
+
 function isUnavailableUnsupportedMessage(message: any) {
   if (message?.type !== 'unsupported') return false;
   const error = Array.isArray(message?.errors) ? message.errors[0] : null;
@@ -2070,6 +2087,9 @@ else if (message.type === "unsupported") {
   const isAiHandling = contact?.flow_state === 'ai_handling';
   const isAiActive = contact?.ai_active === true;
   const isWaitingResponse = contact?.flow_state === 'waiting_response';
+  // ai_handling sem current_flow_id é a IA global ociosa, não um fluxo em
+  // execução. Ela deve aguardar a avaliação dos gatilhos antes de responder.
+  const isAiHandlingFlow = isAiHandling && !!contact?.current_flow_id;
   // Carrega as configurações do CRM deste usuário para saber se o Agente IA Global está ligado.
   // (Antes esta variável não existia neste escopo, o que quebrava o webhook com
   // "ReferenceError: settings is not defined" logo após salvar a mensagem recebida.)
@@ -2122,9 +2142,9 @@ else if (message.type === "unsupported") {
     contact.current_node_id = null;
   }
 
-  // Libera fluxos "presos" (waiting_response/running) quando o contato ficou muito tempo
-  // sem falar. Sem isso, o gatilho "primeira mensagem do dia" (e os de inatividade)
-  // nunca disparam de novo, porque o contato segue marcado dentro do fluxo antigo.
+  // Libera fluxos antigos somente quando existe um gatilho temporal configurado
+  // para a caixa e o intervalo dele foi realmente alcançado. A antiga trava fixa
+  // de 6h fazia gatilhos de 30m/1h/2h ficarem para trás.
   if (contact && hasActiveFlow) {
     const lastInteractionRaw = contact.last_flow_interaction
       || __previousLastReceivedAt
@@ -2139,21 +2159,42 @@ else if (message.type === "unsupported") {
         const dayOfLast = new Date(lastInteraction.toLocaleString('en-US', { timeZone: tz })).toLocaleDateString('pt-BR');
         const dayOfNow = new Date(new Date().toLocaleString('en-US', { timeZone: tz })).toLocaleDateString('pt-BR');
         const isNewDay = dayOfLast !== dayOfNow;
-        const isLongGap = gapMs >= 6 * 60 * 60 * 1000;
-        if (isNewDay || isLongGap) {
-          console.log(`[TRIGGER-GUARD] Releasing stale running flow for contact ${contact.id} (gapMs=${gapMs}, newDay=${isNewDay}). Allowing re-trigger.`);
-          await supabase.from('crm_contacts').update({
+        let temporalFlowsQuery = supabase
+          .from('crm_flows')
+          .select('trigger_type')
+          .eq('user_id', userId)
+          .eq('is_active', true)
+          .in('trigger_type', ['first_message_day', 'after_24h', '24h_inactivity', 'inactivity_30m', 'inactivity_1h', 'inactivity_2h']);
+        if (inboundNumberId) {
+          temporalFlowsQuery = temporalFlowsQuery.or(`whatsapp_number_id.eq.${inboundNumberId},whatsapp_number_id.is.null`);
+        }
+        const { data: temporalFlows, error: temporalFlowsError } = await temporalFlowsQuery;
+        if (temporalFlowsError) throw temporalFlowsError;
+        const temporalTypes = new Set((temporalFlows || []).map((flow: any) => flow.trigger_type));
+        const elapsedTriggerMatched =
+          (temporalTypes.has('inactivity_30m') && gapMs >= 30 * 60 * 1000)
+          || (temporalTypes.has('inactivity_1h') && gapMs >= 60 * 60 * 1000)
+          || (temporalTypes.has('inactivity_2h') && gapMs >= 2 * 60 * 60 * 1000)
+          || ((temporalTypes.has('after_24h') || temporalTypes.has('24h_inactivity')) && gapMs >= 24 * 60 * 60 * 1000);
+        const dayTriggerMatched = temporalTypes.has('first_message_day') && isNewDay;
+        if (dayTriggerMatched || elapsedTriggerMatched) {
+          console.log(`[TRIGGER-GUARD] Releasing previous flow for eligible temporal trigger contact=${contact.id} gapMs=${gapMs} newDay=${isNewDay} types=${JSON.stringify([...temporalTypes])}`);
+          const releaseQuery = supabase.from('crm_contacts').update({
             current_flow_id: null,
             current_node_id: null,
             flow_state: 'idle',
             flow_timeout_node_id: null,
             flow_timeout_minutes: null,
             next_execution_time: null,
-          }).eq('id', contact.id);
-          contact.current_flow_id = null;
-          contact.current_node_id = null;
-          contact.flow_state = 'idle';
-          hasActiveFlow = false;
+          }).eq('id', contact.id).eq('current_flow_id', contact.current_flow_id);
+          const { data: released, error: releaseError } = await releaseQuery.select('id').maybeSingle();
+          if (releaseError) throw releaseError;
+          if (released) {
+            contact.current_flow_id = null;
+            contact.current_node_id = null;
+            contact.flow_state = 'idle';
+            hasActiveFlow = false;
+          }
         }
       }
     }
@@ -2164,13 +2205,13 @@ else if (message.type === "unsupported") {
   // mesmo sem referral. Mensagens de anúncio (CTWA) podem chegar como "unsupported" (code 131060)
   // SEM referral — antes, o bloco só rodava com referral e a IA interceptava a mensagem,
   // fazendo o fluxo nunca iniciar. Agora avaliamos sempre que o contato está ocioso.
-  if (contact && !hasActiveFlow && !isAiHandling) {
+  if (contact && !hasActiveFlow && !isAiHandlingFlow) {
     try {
       const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
       console.log(`[TRIGGER-CTWA] (ad-priority) waId=${waId} msgType=${message?.type} aiActive=${isAiActive} candidates=${JSON.stringify(allCandidateTexts)}`);
       let adPriorityFlowsQuery = supabase
         .from('crm_flows')
-        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id')
+        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id, created_at')
         .eq('user_id', userId)
         .eq('is_active', true)
         .in('trigger_type', ['exact_phrase', 'keyword']);
@@ -2183,10 +2224,11 @@ else if (message.type === "unsupported") {
 
       if (triggeredFlowsError) throw triggeredFlowsError;
 
+      const orderedTriggeredFlows = sortTriggerFlows(triggeredFlows || [], inboundNumberId);
       const priority = ['exact_phrase', 'keyword'];
       let matchingTriggeredFlow = null;
       for (const triggerType of priority) {
-        matchingTriggeredFlow = (triggeredFlows || []).find((flow: any) => {
+        matchingTriggeredFlow = orderedTriggeredFlows.find((flow: any) => {
           if (flow.trigger_type !== triggerType) return false;
           const matched = flowMatchesIncomingTrigger(flow, allCandidateTexts);
           console.log(`[TRIGGER-CTWA] (ad-priority) eval flow="${flow.name}" type=${flow.trigger_type} kws=${JSON.stringify(flow.trigger_keywords || [flow.trigger_keyword])} => matched=${matched}`);
@@ -2205,14 +2247,11 @@ else if (message.type === "unsupported") {
         }
 
         if (startNode) {
-          await supabase.from('crm_contacts').update({
-            current_flow_id: matchingTriggeredFlow.id,
-            current_node_id: startNode.id,
-            flow_state: 'running',
-            ai_active: false,
-            last_flow_interaction: new Date().toISOString(),
-            next_execution_time: null
-          }).eq('id', contact.id);
+          const claimed = await claimAutomaticFlow(supabase, contact, matchingTriggeredFlow, startNode.id);
+          if (!claimed) {
+            console.log(`[TRIGGER-CLAIM] Contact ${contact.id} was already claimed by another inbound message; skipping flow ${matchingTriggeredFlow.id}.`);
+            return jsonResponse({ success: true, trigger_skipped: 'concurrent_message' });
+          }
 
           let currentRes: any = await executeVisualNode(supabase, matchingTriggeredFlow, startNode, contact.id, waId);
           let iterations = 0;
@@ -2236,14 +2275,14 @@ else if (message.type === "unsupported") {
   // Mensagens vindas de anúncio podem chegar como texto + referral enquanto o contato
   // ainda está preso em um fluxo anterior aguardando resposta. Se existir um gatilho
   // exato/palavra-chave configurado para esse texto, ele deve iniciar o novo fluxo.
-  if (contact && hasActiveFlow && isWaitingResponse && !isAiHandling && !isAiActive) {
+  if (contact && hasActiveFlow && isWaitingResponse && !isAiHandlingFlow) {
     try {
       const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
       const hasReferral = !!getReferralFromWebhookMessage(message);
       console.log(`[TRIGGER-CTWA] (waiting-flow) waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} candidates=${JSON.stringify(allCandidateTexts)}`);
       let waitingFlowsQuery = supabase
         .from('crm_flows')
-        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id')
+        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id, created_at')
         .eq('user_id', userId)
         .eq('is_active', true)
         .in('trigger_type', ['exact_phrase', 'keyword'])
@@ -2256,10 +2295,11 @@ else if (message.type === "unsupported") {
       if (triggeredFlowsError) throw triggeredFlowsError;
 
       console.log(`[TRIGGER-CTWA] (waiting-flow) ${triggeredFlows?.length || 0} candidate flow(s) loaded for user ${userId}`);
+      const orderedTriggeredFlows = sortTriggerFlows(triggeredFlows || [], inboundNumberId);
       const priority = ['exact_phrase', 'keyword'];
       let matchingTriggeredFlow = null;
       for (const triggerType of priority) {
-        matchingTriggeredFlow = (triggeredFlows || []).find((flow: any) => {
+        matchingTriggeredFlow = orderedTriggeredFlows.find((flow: any) => {
           if (flow.trigger_type !== triggerType) return false;
           const matched = flowMatchesIncomingTrigger(flow, allCandidateTexts);
           console.log(`[TRIGGER-CTWA] (waiting-flow) eval flow="${flow.name}" type=${flow.trigger_type} kws=${JSON.stringify(flow.trigger_keywords || [flow.trigger_keyword])} => matched=${matched}`);
@@ -2278,13 +2318,11 @@ else if (message.type === "unsupported") {
         }
 
         if (startNode) {
-          await supabase.from('crm_contacts').update({
-            current_flow_id: matchingTriggeredFlow.id,
-            current_node_id: startNode.id,
-            flow_state: 'running',
-            last_flow_interaction: new Date().toISOString(),
-            next_execution_time: null
-          }).eq('id', contact.id);
+          const claimed = await claimAutomaticFlow(supabase, contact, matchingTriggeredFlow, startNode.id);
+          if (!claimed) {
+            console.log(`[TRIGGER-CLAIM] Contact ${contact.id} changed before waiting-flow switch; skipping flow ${matchingTriggeredFlow.id}.`);
+            return jsonResponse({ success: true, trigger_skipped: 'concurrent_message' });
+          }
 
           let currentRes: any = await executeVisualNode(supabase, matchingTriggeredFlow, startNode, contact.id, waId);
           let iterations = 0;
@@ -2329,7 +2367,7 @@ else if (message.type === "unsupported") {
 
   // CRITICAL: Ensure we capture messages for AI processing
   // Check if contact is in an AI node or AI state
-  if (contact && (isAiHandling || (hasActiveFlow && isInAiNode))) {
+  if (contact && (isAiHandlingFlow || (hasActiveFlow && isInAiNode))) {
     webhookAiLog('dispatch_existing_ai_state', {
       is_ai_handling: isAiHandling,
       is_ai_active: isAiActive,
@@ -2379,14 +2417,14 @@ else if (message.type === "unsupported") {
   // Log de diagnóstico: mostra SEMPRE por que os gatilhos automáticos rodaram ou não.
   console.log(`[TRIGGER-GATE] waId=${waId} hasContact=${!!contact} hasActiveFlow=${hasActiveFlow} isAiHandling=${isAiHandling} isAiActive=${isAiActive} flow_state=${contact?.flow_state} current_flow_id=${contact?.current_flow_id} numberId=${inboundNumberId || 'none'}`);
 
-  if (contact && !hasActiveFlow && !isAiHandling) {
+  if (contact && !hasActiveFlow && !isAiHandlingFlow) {
     // Check if Global AI is enabled - it should trigger if no specific flow matches
     let flowTriggered = false;
 
     try {
       let autoFlowsQuery = supabase
         .from('crm_flows')
-        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id')
+        .select('id, name, trigger_type, trigger_keywords, trigger_keyword, nodes, edges, user_id, whatsapp_number_id, created_at')
         .eq('user_id', userId)
         .eq('is_active', true);
       // Multi-número: cada número só dispara seus próprios fluxos
@@ -2418,6 +2456,7 @@ else if (message.type === "unsupported") {
       }
 
       if (activeFlows && activeFlows.length > 0) {
+        const orderedActiveFlows = sortTriggerFlows(activeFlows, inboundNumberId);
         const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
         const hasReferral = !!getReferralFromWebhookMessage(message);
         console.log(`[TRIGGER-AUTO] waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} text="${(text || '').slice(0,80)}" candidates=${JSON.stringify(allCandidateTexts)} activeFlows=${activeFlows.length}`);
@@ -2511,12 +2550,12 @@ else if (message.type === "unsupported") {
             : (flow.trigger_keyword ? [normalizeTriggerText(flow.trigger_keyword)] : []);
 
           if (t === 'exact_phrase') {
-            const m = kws.length > 0 && kws.some(k => allCandidateTexts.some(c => c === k || c.includes(k)));
+            const m = flowMatchesIncomingTrigger(flow, allCandidateTexts);
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=exact_phrase kws=${JSON.stringify(kws)} => matched=${m}`);
             return m;
           }
           if (t === 'keyword') {
-            const m = kws.length > 0 && allCandidateTexts.length > 0 && kws.some(k => k && allCandidateTexts.some(c => c.includes(k)));
+            const m = flowMatchesIncomingTrigger(flow, allCandidateTexts);
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=keyword kws=${JSON.stringify(kws)} => matched=${m}`);
             return m;
           }
@@ -2545,9 +2584,9 @@ else if (message.type === "unsupported") {
         };
 
         // Priority order: mais específico primeiro
-        const priority = ['exact_phrase', 'keyword', 'first_message', 'new_contact', 'first_message_day', 'after_24h', '24h_inactivity', 'inactivity_2h', 'inactivity_1h', 'inactivity_30m', 'all_messages'];
+        const priority = AUTOMATIC_TRIGGER_PRIORITY;
 
-        const automaticTriggerFlows = activeFlows.filter((flow: any) =>
+        const automaticTriggerFlows = orderedActiveFlows.filter((flow: any) =>
           priority.includes(flow.trigger_type) && !['exact_phrase', 'keyword'].includes(flow.trigger_type)
         );
         if (automaticTriggerFlows.length === 0) {
@@ -2556,7 +2595,7 @@ else if (message.type === "unsupported") {
 
         let chosen: any = null;
         for (const p of priority) {
-          chosen = activeFlows.find((f: any) => f.trigger_type === p && flowMatches(f));
+          chosen = orderedActiveFlows.find((f: any) => f.trigger_type === p && flowMatches(f));
           if (chosen) break;
         }
 
@@ -2574,22 +2613,10 @@ else if (message.type === "unsupported") {
 
           if (startNode) {
             // Garante que o estado do contato seja atualizado ANTES da execução
-            const { error: contactFlowUpdateError } = await supabase.from('crm_contacts').update({
-              current_flow_id: chosen.id,
-              current_node_id: startNode.id,
-              flow_state: 'running',
-              // O fluxo assume a conversa: desliga a IA para não responder por cima.
-              ai_active: false,
-              next_execution_time: null,
-              last_flow_interaction: new Date().toISOString()
-            }).eq('id', contact.id);
-            if (contactFlowUpdateError) {
-              console.error('[TRIGGER-START] falha ao reservar contato para o fluxo:', {
-                contactId: contact.id,
-                flowId: chosen.id,
-                error: contactFlowUpdateError.message,
-              });
-              throw contactFlowUpdateError;
+            const claimed = await claimAutomaticFlow(supabase, contact, chosen, startNode.id);
+            if (!claimed) {
+              console.log(`[TRIGGER-CLAIM] Contact ${contact.id} was already claimed by another inbound message; skipping flow ${chosen.id}.`);
+              return jsonResponse({ success: true, trigger_skipped: 'concurrent_message' });
             }
             
             // Re-fetch contact to ensure we have the most up-to-date object for executeVisualNode

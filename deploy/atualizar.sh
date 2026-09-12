@@ -283,6 +283,9 @@ else
     if [ "$nome" = "100-gatilhos-inatividade-fluxos.sql" ] || [ "$nome" = "101-corrigir-gatilhos-primeira-mensagem.sql" ]; then
       graves="${erros:-0}"
     fi
+    if [ "$nome" = "104-gatilhos-atomicos-e-deterministicos.sql" ]; then
+      graves="${erros:-0}"
+    fi
     if [ "${erros:-0}" -gt 0 ]; then
       warn "  ${erros} aviso(s)/erro(s) em $nome → /tmp/zapmro-sql-$nome.log"
       grep -iE '^psql:.*(ERROR|FATAL)' "/tmp/zapmro-sql-$nome.log" | sort -u | head -3 | sed 's/^/      /' || true
@@ -598,6 +601,13 @@ if grep -q "INBOUND_CONTENT_REFERRAL_IS_TRIGGER_ONLY_V1" "$ROOT/supabase/functio
   echo -e "  Mensagens de anúncios : ${C_G}OK${N} (texto do anúncio isolado do histórico)"
 else
   die "Função antiga ainda pode gravar texto de anúncio como mensagem do cliente; confirme a branch main"
+fi
+trigger_claim_function="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='crm_claim_flow_trigger'")"
+if [ "$trigger_claim_function" = "1" ] \
+  && grep -q "claimAutomaticFlow" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts"; then
+  echo -e "  Gatilhos automáticos   : ${C_G}OK${N} (reserva atômica + ordem determinística)"
+else
+  die "Migration 104 ou código de reserva atômica dos gatilhos não foi aplicado"
 fi
 echo "  frontend aponta  : ${API}"
 

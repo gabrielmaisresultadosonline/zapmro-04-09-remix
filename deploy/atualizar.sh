@@ -370,6 +370,7 @@ ok "banco atualizado — ${aplicados} arquivo(s) aplicado(s), ${tabelas} tabelas
 info "reagendando cron das functions para a API local…"
 CRON_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/meta-whatsapp-crm"
 MEDIA_GC_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/media-gc"
+BROADCAST_WORKER_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/broadcast-worker"
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.functions_url = '${PUBLIC_API_URL:-http://gateway}'" >/dev/null 2>&1 || true
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.service_role_key = '${SERVICE_ROLE_KEY}'" >/dev/null 2>&1 || true
 psql "$DB" -v ON_ERROR_STOP=0 -q >/tmp/zapmro-cron.log 2>&1 <<SQLCRON || true
@@ -408,6 +409,17 @@ SELECT cron.schedule('ai-recovery-every-10min', '*/10 * * * *', \$job\$
     url := '${CRON_URL}',
     headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
     body := '{"action": "processAiRecovery"}'::jsonb,
+    timeout_milliseconds := 300000
+  );
+\$job\$);
+
+-- O disparo em massa continua na VPS com o navegador fechado. O claim no
+-- banco impede que execuções simultâneas processem o mesmo destinatário.
+SELECT cron.schedule('process-broadcast-queue', '10 seconds', \$job\$
+  SELECT net.http_post(
+    url := '${BROADCAST_WORKER_URL}',
+    headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
+    body := '{"source":"cron"}'::jsonb,
     timeout_milliseconds := 300000
   );
 \$job\$);

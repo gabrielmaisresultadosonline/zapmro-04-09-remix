@@ -1,5 +1,9 @@
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 import { createClient } from 'npm:@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 
 type JsonRecord = Record<string, unknown>
 
@@ -66,7 +70,7 @@ Deno.serve(async (req: Request) => {
       : { data: null }
 
     let contact: { id: string; name?: string | null } | null = null
-    if (broadcast.type === 'flow') {
+    if (['message', 'template', 'flow'].includes(String(broadcast.type))) {
       let contactQuery = admin.from('crm_contacts').select('id, name').eq('user_id', broadcast.user_id).eq('wa_id', item.wa_id)
       if (broadcast.whatsapp_number_id) contactQuery = contactQuery.eq('whatsapp_number_id', broadcast.whatsapp_number_id)
       const found = await contactQuery.limit(1).maybeSingle()

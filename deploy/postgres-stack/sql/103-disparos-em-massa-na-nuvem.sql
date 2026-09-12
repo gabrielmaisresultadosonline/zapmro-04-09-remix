@@ -110,6 +110,27 @@ BEGIN
    WHERE i.status = 'processing'
      AND i.locked_at < now() - interval '10 minutes';
 
+  -- Recalcula os contadores a partir da fila persistente. Isso também fecha
+  -- corretamente campanhas cujo último item foi recuperado como falha.
+  UPDATE public.crm_broadcasts b
+     SET sent_count = totals.processed,
+         failed_count = totals.failed,
+         status = CASE WHEN totals.remaining = 0 THEN 'completed' ELSE b.status END,
+         completed_at = CASE WHEN totals.remaining = 0 THEN COALESCE(b.completed_at, now()) ELSE b.completed_at END,
+         updated_at = now()
+    FROM (
+      SELECT broadcast_id,
+             count(*) FILTER (WHERE status IN ('sent', 'failed', 'skipped'))::integer AS processed,
+             count(*) FILTER (WHERE status = 'failed')::integer AS failed,
+             count(*) FILTER (WHERE status IN ('queued', 'processing'))::integer AS remaining
+        FROM public.crm_broadcast_items
+       GROUP BY broadcast_id
+    ) totals
+   WHERE b.id = totals.broadcast_id
+     AND b.status IN ('pending', 'running')
+     AND (p_broadcast_id IS NULL OR b.id = p_broadcast_id)
+     AND (p_user_id IS NULL OR b.user_id = p_user_id);
+
   SELECT b.id INTO v_broadcast_id
     FROM public.crm_broadcasts b
    WHERE b.status IN ('pending', 'running')

@@ -3638,7 +3638,7 @@ async function pushPendingContactsToGoogle(supabase: any, userId: string, settin
       // 403 por escopo insuficiente é permanente: o refresh_token salvo não
       // tem permissão de escrita em Contatos. Sem circuit breaker, o cron
       // repetiria esse erro a cada minuto para sempre.
-      if (isGoogleInsufficientScopeError(lastError)) {
+      if (isGoogleInsufficientScopeError(lastError || '')) {
         reconnectAccounts.push(account.email);
         await markGoogleAccountReconnectRequired(
           supabase,
@@ -4479,7 +4479,7 @@ async function handleInternalSendMessage(supabase: any, phoneNumberId: string, a
   }
 
   console.log(`[META-SEND] Enviar fetch para Meta. type=${payload.type}, to=${to}`);
-  let response: Response;
+  let response: Response | null = null;
   let result: any = {};
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -4513,7 +4513,8 @@ async function handleInternalSendMessage(supabase: any, phoneNumberId: string, a
     console.warn(`[META-SEND] Transient Meta error (attempt ${attempt}/${maxAttempts}), retrying in ${backoff}ms. code=${result?.error?.code} msg=${result?.error?.message}`);
     await wait(backoff);
   }
-  console.log(`[META-SEND] Resposta Meta status=${response!.status} ok=${response!.ok} body=${JSON.stringify(result)}`);
+  if (!response) throw new Error('A Meta não retornou resposta após as tentativas de envio');
+  console.log(`[META-SEND] Resposta Meta status=${response.status} ok=${response.ok} body=${JSON.stringify(result)}`);
   if (!response.ok) {
     console.error(`[META-SEND] ERRO Meta status=${response.status} phoneId=${phoneNumberId} to=${to} payloadType=${payload.type} error=${JSON.stringify(result?.error)}`);
     const normalizedError = normalizeMetaSendError(result, `Erro ${response.status} ao enviar mensagem pela Meta`);
@@ -4952,7 +4953,7 @@ async function internalSendTemplate(
     if (contact) {
       await supabase.from('crm_messages').insert({
         contact_id: contact.id,
-        user_id: contact.user_id || userId || null,
+        user_id: contact.user_id || null,
         ...(contact.whatsapp_number_id ? { whatsapp_number_id: contact.whatsapp_number_id } : {}),
         direction: 'outbound',
         message_type: 'template',
@@ -4980,7 +4981,7 @@ async function internalSendTemplate(
     if (contact) {
       await supabase.from('crm_messages').insert({
         contact_id: contact.id,
-        user_id: contact.user_id || userId || null,
+        user_id: contact.user_id || null,
         ...(contact.whatsapp_number_id ? { whatsapp_number_id: contact.whatsapp_number_id } : {}),
         direction: 'outbound',
         message_type: 'template',
@@ -5030,7 +5031,7 @@ async function internalSendTemplate(
 
     const { data: savedMessage, error: insertError } = await supabase.from('crm_messages').insert({
       contact_id: contact.id,
-      user_id: contact.user_id || userId || null,
+      user_id: contact.user_id || null,
       ...(contact.whatsapp_number_id ? { whatsapp_number_id: contact.whatsapp_number_id } : {}),
       direction: 'outbound',
       message_type: isCarousel ? 'carousel' : 'template',
@@ -5766,7 +5767,7 @@ async function fetchAndStoreIncomingMedia(
  
      // Handle Meta POST (Webhook Events)
      if (!action && body.object === 'whatsapp_business_account' && userSettings) {
-       return await handleProcessWebhook(supabase, body.entry, false, userId);
+       return await handleProcessWebhook(supabase, body.entry, false, userId || undefined);
      }
       if (!action && body.object === 'whatsapp_business_account') {
         return await handleProcessWebhook(supabase, body.entry, false, userId || undefined);
@@ -6704,7 +6705,7 @@ async function fetchAndStoreIncomingMedia(
         languageCode || 'pt_BR', 
         manualComponents || [], 
         { ...contact, whatsapp_number_id: contact.whatsapp_number_id || templateNumberId || null },
-        null,
+        undefined,
         providedContactId,
         broadcastId
       );
@@ -7084,7 +7085,10 @@ async function fetchAndStoreIncomingMedia(
                     .eq('meta_message_id', sourceMessageId)
                     .maybeSingle();
 
-                  const resolvedText = await resolveInboundMessageText(supabase, OPENAI_API_KEY, currentInbound);
+                  const openAiKey = settings?.openai_api_key || Deno.env.get('OPENAI_API_KEY');
+                  const resolvedText = openAiKey
+                    ? await resolveInboundMessageText(supabase, openAiKey, currentInbound)
+                    : currentInbound?.content;
                   if (resolvedText) finalAiText = resolvedText;
                 }
 
@@ -7556,7 +7560,7 @@ async function fetchAndStoreIncomingMedia(
       const orderedAccounts = [...selectedAccounts].sort(
         (a: any, b: any) => Number(!!b.auto_sync) - Number(!!a.auto_sync)
       );
-      const result = await pushPendingContactsToGoogle(supabase, userId, settings, orderedAccounts, 500);
+      const result = await pushPendingContactsToGoogle(supabase, userId!, settings, orderedAccounts, 500);
       return jsonResponse(result);
     }
 
@@ -7653,7 +7657,7 @@ async function fetchAndStoreIncomingMedia(
         if (!updErr) detached++;
       }
 
-      const result = await pushPendingContactsToGoogle(supabase, userId, settings, [target], 500);
+      const result = await pushPendingContactsToGoogle(supabase, userId!, settings, [target], 500);
       return jsonResponse({ ...result, detached, targetAccountId });
     }
     // Legacy action block removed to prevent duplication with main processScheduled at line 332

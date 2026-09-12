@@ -346,10 +346,16 @@ async function getConfiguredCtwaFallbackText(supabase: any, userId?: string) {
   return '';
 }
 
+// INBOUND_CONTENT_REFERRAL_IS_TRIGGER_ONLY_V1
+// Retorna SOMENTE conteúdo efetivamente enviado pelo contato. Campos de
+// `referral` pertencem ao anúncio (título, chamada, mensagem pré-preenchida)
+// e jamais podem ser apresentados ou persistidos como se fossem a mensagem
+// recebida. Eles continuam disponíveis separadamente para avaliar gatilhos.
 function extractInboundTextFromWebhookMessage(message: any) {
   const node = message?.[message?.type] || {};
   const directText = firstNonEmptyString(
     message?.text?.body,
+    typeof message?.text === 'string' ? message.text : '',
     message?.button?.text,
     message?.interactive?.button_reply?.title,
     message?.interactive?.list_reply?.title,
@@ -365,15 +371,7 @@ function extractInboundTextFromWebhookMessage(message: any) {
     message?.unsupported?.caption,
   );
 
-  if (directText) return directText;
-
-  const referral = getReferralFromWebhookMessage(message);
-  if (referral) {
-    const parts = getReferralTextParts(referral);
-    if (parts.length > 0) return parts.join('\n');
-  }
-
-  return '';
+  return directText || '';
 }
 
 function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTexts: string[] = []) {
@@ -1701,6 +1699,16 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   // cliente por uma frase padrão na conversa.
   let ctwaTriggerFallbackText = '';
 
+  if (getReferralFromWebhookMessage(message)) {
+    console.log('[INBOUND-CONTENT] Referral isolated from conversation content', {
+      messageId: message?.id || null,
+      messageType: message?.type || null,
+      hasDirectCustomerText: Boolean(extractedInboundText),
+      userId,
+      whatsappNumberId: inboundNumberId || null,
+    });
+  }
+
   if (!extractedInboundText && isUnavailableUnsupportedMessage(message)) {
     // CTWA fallback should ONLY apply to brand-new conversations coming from
     // Click-to-WhatsApp ads. If the contact already has prior interactions,
@@ -1953,15 +1961,22 @@ else if (message.type === "unsupported") {
     // Capture state BEFORE update so we can evaluate triggers (first message, day, 24h)
     var __previousTotalReceived = contactForSave.total_messages_received || 0;
     var __previousLastReceivedAt: string | null = contactForSave.last_message_received_at || null;
+     const storedInboundContent = text || extractedInboundText || `[${message.type}]`;
      const { data: insertedInboundMessage, error: insertMessageError } = await supabase.from('crm_messages').insert({
        contact_id: contactForSave.id,
        direction: 'inbound',
        message_type: message.type === 'ptv' ? 'video' : message.type,
-      content: text || extractedInboundText || `[${message.type}]`,
+      content: storedInboundContent,
        status: 'received',
        meta_message_id: message.id,
        media_url: mediaUrlForSave,
-      metadata: { raw: message, referral: getReferralFromWebhookMessage(message), ...(templateButtonMeta || {}) },
+      metadata: {
+        raw: message,
+        referral: getReferralFromWebhookMessage(message),
+        content_source: extractedInboundText ? 'customer_payload' : 'system_placeholder',
+        referral_used_as_content: false,
+        ...(templateButtonMeta || {}),
+      },
         user_id: userId,
         ...numberPatch,
        // Preserve real send order: webhook batches may arrive out-of-order, so
@@ -1986,7 +2001,14 @@ else if (message.type === "unsupported") {
       countdown_trigger_sent_at: null,
       last_read_at: null // Reset last_read_at when new message arrives so it shows as unread
     }).eq('id', contactForSave.id).eq('user_id', userId);
-    console.log('[WEBHOOK] Saved inbound message and reset last_read_at', { waId, userId, contact_id: contactForSave.id, meta_message_id: message.id });
+    console.log('[WEBHOOK] Saved inbound message and reset last_read_at', {
+      waId,
+      userId,
+      contact_id: contactForSave.id,
+      meta_message_id: message.id,
+      content_source: extractedInboundText ? 'customer_payload' : 'system_placeholder',
+      referral_used_as_content: false,
+    });
   }
 
 

@@ -593,6 +593,12 @@ if grep -q "Não usar upsert ON CONFLICT (wa_id,user_id)" "$ROOT/supabase/functi
 else
   die "Importador Google antigo ainda usa ON CONFLICT (wa_id,user_id)"
 fi
+if grep -q "INBOUND_CONTENT_REFERRAL_IS_TRIGGER_ONLY_V1" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts" \
+  && grep -q "referral_used_as_content: false" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts"; then
+  echo -e "  Mensagens de anúncios : ${C_G}OK${N} (texto do anúncio isolado do histórico)"
+else
+  die "Função antiga ainda pode gravar texto de anúncio como mensagem do cliente; confirme a branch main"
+fi
 echo "  frontend aponta  : ${API}"
 
 echo

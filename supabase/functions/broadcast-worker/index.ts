@@ -1,6 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
-import { z } from 'npm:zod@3.24.2'
+import { z } from 'npm:zod@3.25.76'
 
 type JsonRecord = Record<string, unknown>
 

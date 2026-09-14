@@ -793,12 +793,15 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
       }
 
       const activeNumberId = getActiveWhatsAppNumberId();
-      const { data: priorRows, error: priorError } = await (supabase as any).rpc('crm_find_previously_sent_numbers', {
-        p_whatsapp_number_id: activeNumberId,
-        p_wa_ids: numbers,
-      });
-      if (priorError) throw new Error(`Não foi possível conferir o histórico: ${priorError.message}`);
-      const repeatedNumbers = new Set<string>((priorRows || []).map((row: { wa_id: string }) => canonicalWaId(row.wa_id)));
+      const repeatedNumbers = new Set<string>();
+      for (let index = 0; index < numbers.length; index += 500) {
+        const { data: priorRows, error: priorError } = await (supabase as any).rpc('crm_find_previously_sent_numbers', {
+          p_whatsapp_number_id: activeNumberId,
+          p_wa_ids: numbers.slice(index, index + 500),
+        });
+        if (priorError) throw new Error(`Não foi possível conferir o histórico: ${priorError.message}`);
+        for (const row of priorRows || []) repeatedNumbers.add(canonicalWaId(String(row.wa_id || '')));
+      }
       if (repeatedNumbers.size > 0) {
         setDuplicateDecision({ allNumbers: numbers, repeatedNumbers });
         return;

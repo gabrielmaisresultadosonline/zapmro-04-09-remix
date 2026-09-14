@@ -1,11 +1,13 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
+import { z } from 'npm:zod@3.24.2'
 
 type JsonRecord = Record<string, unknown>
+
+const BodySchema = z.object({
+  broadcast_id: z.string().uuid().optional(),
+  source: z.string().max(50).optional(),
+}).strict()
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -41,11 +43,9 @@ Deno.serve(async (req: Request) => {
     requestedUserId = data.user.id
   }
 
-  const body = await req.json().catch(() => ({})) as JsonRecord
-  const requestedBroadcastId = typeof body.broadcast_id === 'string' ? body.broadcast_id : null
-  if (requestedBroadcastId && !/^[0-9a-f-]{36}$/i.test(requestedBroadcastId)) {
-    return json({ success: false, error: 'Invalid broadcast_id' }, 400)
-  }
+  const parsedBody = BodySchema.safeParse(await req.json().catch(() => ({})))
+  if (!parsedBody.success) return json({ success: false, error: parsedBody.error.flatten().fieldErrors }, 400)
+  const requestedBroadcastId = parsedBody.data.broadcast_id || null
 
   const workerId = crypto.randomUUID()
   let claimedItem: Record<string, unknown> | null = null

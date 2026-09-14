@@ -94,6 +94,9 @@ type BroadcastAction = 'pause' | 'resume' | 'stop';
 
 const normalizeBroadcastStatus = (status: unknown): string => String(status || 'pending').trim().toLowerCase();
 
+const ACTIVE_BROADCAST_STATUSES = new Set(['pending', 'running', 'sending']);
+const STOPPABLE_BROADCAST_STATUSES = new Set(['pending', 'running', 'sending', 'paused']);
+
 const isBroadcastPossiblyStalled = (broadcast: any): boolean => {
   if (!['pending', 'running', 'sending'].includes(normalizeBroadcastStatus(broadcast?.status))) return false;
   const reference = broadcast.last_heartbeat_at || broadcast.created_at;
@@ -1959,6 +1962,9 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                     broadcasts.map(b => {
                       const normalizedStatus = normalizeBroadcastStatus(b.status);
                       const actionInProgress = broadcastAction?.id === b.id;
+                      const canPause = ACTIVE_BROADCAST_STATUSES.has(normalizedStatus);
+                      const canResume = normalizedStatus === 'paused';
+                      const canStop = STOPPABLE_BROADCAST_STATUSES.has(normalizedStatus);
                       return (
                       <div key={b.id} className="p-3 rounded-xl bg-[#202c33] border border-white/5 space-y-2 group">
                         <div className="flex justify-between items-start">
@@ -2002,7 +2008,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               >
                                 <AlertCircle className="w-2.5 h-2.5" /> Logs
                               </Button>
-                              {['running', 'pending', 'sending'].includes(normalizedStatus) && (
+                              {canPause && (
                                 <Button
                                   type="button"
                                   size="sm"
@@ -2015,7 +2021,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                                   {broadcastAction?.id === b.id && broadcastAction.action === 'pause' ? <RefreshCcw className="w-2.5 h-2.5 animate-spin" /> : <Pause className="w-2.5 h-2.5" />} Pausar
                                 </Button>
                               )}
-                              {normalizedStatus === 'paused' && (
+                              {canResume && (
                                 <Button
                                   type="button"
                                   size="sm"
@@ -2028,7 +2034,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                                   {broadcastAction?.id === b.id && broadcastAction.action === 'resume' ? <RefreshCcw className="w-2.5 h-2.5 animate-spin" /> : <Play className="w-2.5 h-2.5" />} Retomar
                                 </Button>
                               )}
-                              {['running', 'pending', 'paused'].includes(normalizedStatus) && (
+                              {canStop && (
                                 <Button
                                   type="button"
                                   size="sm"

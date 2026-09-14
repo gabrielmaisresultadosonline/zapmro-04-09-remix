@@ -392,47 +392,43 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
       
       const prompt = node.data?.prompt || "";
       const labelOnTransfer = node.data?.labelOnHumanTransfer || "";
-      const { data: currentContact } = await supabase
+      const { data: currentContact, error: currentContactError } = await supabase
         .from('crm_contacts')
-        .select('metadata')
+        .select('metadata, whatsapp_number_id')
         .eq('id', contactId)
         .maybeSingle();
-      const { data: settings } = await supabase
-        .from('crm_settings')
-        .select('ai_agent_enabled')
-        .eq('user_id', flow.user_id)
-        .maybeSingle();
-      const shouldActivateAi = settings?.ai_agent_enabled === true || currentContact?.metadata?.manual_ai_activation === true;
-
-      if (!shouldActivateAi) {
-        console.log(`[EXECUTOR] AI Agent node ${node.id} skipped: general AI disabled and no manual activation for contact ${contactId}`);
-        await supabase.from('crm_contacts').update({
-          flow_state: 'idle',
-          current_node_id: null,
-          ai_active: false,
-          metadata: {
-            ...(currentContact?.metadata || {}),
-            ai_agent_prompt: prompt,
-            ai_agent_label_on_transfer: labelOnTransfer,
-            ai_agent_node_id: node.id
-          }
-        }).eq('id', contactId);
-        return { success: true, message: 'AI agent skipped because it is not enabled for this contact' };
+      if (currentContactError || !currentContact) {
+        throw new Error(currentContactError?.message || `Contato ${contactId} não encontrado ao iniciar o Agente IA`);
       }
+
+      // Entrar em um nó Agente IA por uma conexão do fluxo é uma ativação
+      // explícita. A chave geral controla a IA global/fallback, mas não pode
+      // impedir um bloco que o próprio usuário colocou dentro do fluxo.
+      console.log(`[EXECUTOR] AI Agent node ${node.id} explicitly activated by flow ${flow.id}`);
       
       // Se tiver uma mensagem inicial configurada no nó, envia antes de disparar a IA
       const initialMessageText = node.data?.initialMessage || "";
       if (initialMessageText) {
         console.log(`[EXECUTOR] Sending AI Agent initial message: ${initialMessageText}`);
-        const { error: initialMessageError } = await supabase.functions.invoke('meta-whatsapp-crm', {
+        const { data: initialMessageResult, error: initialMessageError } = await supabase.functions.invoke('meta-whatsapp-crm', {
           headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}` },
-          body: { action: 'sendMessage', to: waId, text: initialMessageText, contactId }
+          body: {
+            action: 'sendMessage',
+            to: waId,
+            text: initialMessageText,
+            contactId,
+            whatsapp_number_id: currentContact.whatsapp_number_id || null
+          }
         });
         if (initialMessageError) throw initialMessageError;
+        if (initialMessageResult?.success === false || initialMessageResult?.error) {
+          throw new Error(initialMessageResult.error || 'A mensagem de abertura do Agente IA não foi enviada');
+        }
+        console.log(`[EXECUTOR] AI Agent initial message sent successfully for contact ${contactId}`);
       }
 
       console.log(`[EXECUTOR] Updating contact ${contactId} to ai_handling state. prompt length: ${prompt.length}`);
-      await supabase.from('crm_contacts').update({
+      const { error: activateAiError } = await supabase.from('crm_contacts').update({
         flow_state: 'ai_handling',
         current_node_id: node.id,
         ai_active: true,
@@ -445,25 +441,33 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
           ai_agent_node_id: node.id
         }
       }).eq('id', contactId);
+      if (activateAiError) throw activateAiError;
       
       console.log(`[EXECUTOR] Contact ${contactId} state updated to ai_handling. Triggering initial processAiAgentResponse.`);
       // IMPORTANTE: Dispara o processamento inicial da IA para que ela responda sem esperar nova mensagem do cliente
       // Exceto se configurado para aguardar a primeira resposta
+      let aiResponseStarted = false;
       if (node.data?.wait_response_before_start !== true) {
-        await supabase.functions.invoke('meta-whatsapp-crm', {
+        const { data: aiStartResult, error: aiStartError } = await supabase.functions.invoke('meta-whatsapp-crm', {
           headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}` },
           body: { 
             action: 'processAiAgent', 
             contactId: contactId, 
             waId: waId,
-            text: initialMessageText || "Inicie o atendimento se apresentando."
+            text: initialMessageText || "Inicie o atendimento se apresentando.",
+            whatsapp_number_id: currentContact.whatsapp_number_id || null
           }
         });
+        if (aiStartError) throw aiStartError;
+        if (aiStartResult?.success === false || aiStartResult?.error) {
+          throw new Error(aiStartResult.error || 'O Agente IA não conseguiu iniciar a resposta');
+        }
+        aiResponseStarted = true;
       } else {
         console.log(`[EXECUTOR] AI Agent configured to wait for first response. Skipping initial trigger.`);
       }
       
-      return { success: true, message: 'Contact moved to AI handling state' };
+      return { success: true, message: 'Contact moved to AI handling state', aiResponseStarted };
     } else if (node.type === 'crmAction') {
       const action = node.data?.action;
       const statusValue = node.data?.statusValue;

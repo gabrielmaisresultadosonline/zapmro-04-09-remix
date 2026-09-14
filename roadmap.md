@@ -33,3 +33,4 @@
 - [x] Tornar gatilhos automáticos fiéis, determinísticos e protegidos contra mensagens simultâneas.
 - [x] Reforçar pausa/retomada do disparador e avisar sobre números já enviados antes de uma nova campanha.
 - [x] Tornar Pausar/Retomar sempre visíveis no histórico e confirmar no banco cada mudança de estado.
+- [x] Garantir que o bloco Agente IA iniciado por um gatilho envie a abertura e responda sem depender da ativação global.

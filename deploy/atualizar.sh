@@ -616,6 +616,12 @@ if [ "$broadcast_history_function" = "1" ]; then
 else
   die "Migration 105 incompleta; a consulta segura de números já enviados não foi criada"
 fi
+broadcast_update_policy="$(q "select count(*) from pg_policies where schemaname='public' and tablename='crm_broadcasts' and cmd='UPDATE' and roles::text like '%authenticated%'")"
+if [ "${broadcast_update_policy:-0}" -ge 1 ]; then
+  echo -e "  Pausa dos disparos     : ${C_G}OK${N} (UPDATE autenticado + RLS por usuário)"
+else
+  die "Migration 106 incompleta; a permissão segura para pausar/retomar não foi criada"
+fi
 echo "  frontend aponta  : ${API}"
 
 echo

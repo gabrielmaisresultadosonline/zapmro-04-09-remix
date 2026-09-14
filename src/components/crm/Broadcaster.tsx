@@ -95,7 +95,7 @@ type BroadcastAction = 'pause' | 'resume' | 'stop';
 const normalizeBroadcastStatus = (status: unknown): string => String(status || 'pending').trim().toLowerCase();
 
 const isBroadcastPossiblyStalled = (broadcast: any): boolean => {
-  if (!['pending', 'running'].includes(String(broadcast?.status))) return false;
+  if (!['pending', 'running', 'sending'].includes(normalizeBroadcastStatus(broadcast?.status))) return false;
   const reference = broadcast.last_heartbeat_at || broadcast.created_at;
   const nextRunAt = broadcast.next_run_at ? new Date(broadcast.next_run_at).getTime() : 0;
   const referenceAt = reference ? new Date(reference).getTime() : 0;
@@ -286,7 +286,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
 
   // Poll while any campaign is running so progress + Stop stay live
   useEffect(() => {
-    const hasRunning = broadcasts.some((b: any) => b.status === 'running' || b.status === 'pending');
+    const hasRunning = broadcasts.some((b: any) => ['running', 'pending', 'sending'].includes(normalizeBroadcastStatus(b.status)));
     if (!hasRunning) return;
     const id = setInterval(fetchBroadcasts, 3000);
     return () => clearInterval(id);
@@ -827,7 +827,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         status: 'paused',
         paused_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      }).eq('id', id).in('status', ['pending', 'running']).select('id, status').maybeSingle();
+      }).eq('id', id).in('status', ['pending', 'running', 'sending']).select('id, status').maybeSingle();
       if (error) throw error;
       if (!data || normalizeBroadcastStatus(data.status) !== 'paused') {
         throw new Error('A campanha mudou de estado ou sua sessão não permitiu a pausa. Atualize a tela e tente novamente.');
@@ -2002,7 +2002,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               >
                                 <AlertCircle className="w-2.5 h-2.5" /> Logs
                               </Button>
-                              {['running', 'pending'].includes(normalizedStatus) && (
+                              {['running', 'pending', 'sending'].includes(normalizedStatus) && (
                                 <Button
                                   type="button"
                                   size="sm"
@@ -2044,12 +2044,12 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               <Badge className={cn(
                                 "text-[8px] h-4 px-1 capitalize",
                                 normalizedStatus === 'completed' ? "bg-blue-500/20 text-blue-400" :
-                                normalizedStatus === 'running' ? "bg-green-500/20 text-green-400 animate-pulse" :
+                                ['running', 'sending'].includes(normalizedStatus) ? "bg-green-500/20 text-green-400 animate-pulse" :
                                 normalizedStatus === 'paused' ? "bg-yellow-500/20 text-yellow-400" :
                                 normalizedStatus === 'cancelled' ? "bg-red-500/20 text-red-400" :
                                 "bg-yellow-500/20 text-yellow-400"
                               )}>
-                                {normalizedStatus === 'completed' ? 'Finalizado' : normalizedStatus === 'running' ? 'Em curso' : normalizedStatus === 'paused' ? 'Pausado' : normalizedStatus === 'cancelled' ? 'Parado' : 'Pendente'}
+                                {normalizedStatus === 'completed' ? 'Finalizado' : ['running', 'sending'].includes(normalizedStatus) ? 'Em curso' : normalizedStatus === 'paused' ? 'Pausado' : normalizedStatus === 'cancelled' ? 'Parado' : 'Pendente'}
                               </Badge>
                             </div>
                           </div>

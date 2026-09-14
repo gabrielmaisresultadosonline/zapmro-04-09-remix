@@ -19,7 +19,8 @@ STRICT
 SET search_path = public
 AS $$
   SELECT CASE
-    WHEN length(digits) IN (10, 11) THEN public.crm_canonical_broadcast_wa_id('55' || digits)
+    WHEN length(digits) = 10 THEN '55' || substring(digits FROM 1 FOR 2) || '9' || substring(digits FROM 3)
+    WHEN length(digits) = 11 THEN '55' || digits
     WHEN digits LIKE '55%' AND length(digits) = 12 THEN substring(digits FROM 1 FOR 4) || '9' || substring(digits FROM 5)
     ELSE digits
   END

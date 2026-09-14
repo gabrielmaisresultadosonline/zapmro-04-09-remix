@@ -780,10 +780,12 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   }
 
   const manualAiActivation = contact?.metadata?.manual_ai_activation === true;
-  if (!aiSettings?.ai_agent_enabled && !manualAiActivation) {
+  const flowAiActivation = contact?.ai_active === true && Boolean(contact?.current_flow_id);
+  if (!aiSettings?.ai_agent_enabled && !manualAiActivation && !flowAiActivation) {
     aiLog('skipped_not_enabled', {
       global_enabled: aiSettings?.ai_agent_enabled === true,
       manual_enabled: manualAiActivation,
+      flow_enabled: flowAiActivation,
     });
     console.log(`[AI-AGENT] Ignorado para ${waId}: ativação geral desligada e conversa sem ativação manual.`);
     return { success: true, skipped: 'ai_not_enabled_for_contact' };
@@ -5978,7 +5980,7 @@ async function fetchAndStoreIncomingMedia(
               results.push({ contactId: contact.id, result: res });
 
               // Se o nó executado foi um Agente IA, processamos a resposta imediatamente
-                if (res?.message?.includes('AI handling state')) {
+                if (res?.message?.includes('AI handling state') && res?.aiResponseStarted !== true) {
                 console.log(`[SCHEDULED] Node resulted in AI handling state. Triggering AI response for ${contact.wa_id}`);
                 // Re-fetch contact to get updated flow_state and metadata from executeVisualNode
                 const { data: updatedContact } = await supabase.from('crm_contacts').select('*').eq('id', contact.id).single();
@@ -6882,7 +6884,7 @@ async function fetchAndStoreIncomingMedia(
         
         // IMPORTANTE: Se o fluxo começou em um nó de Agente IA ou foi para ai_handling, processamos a resposta imediatamente
         const { data: contactAfterExec } = await supabase.from('crm_contacts').select('*').eq('id', contactId).single();
-        if (contactAfterExec?.flow_state === 'ai_handling' || contactAfterExec?.ai_active || res?.message?.includes('AI handling state')) {
+        if ((contactAfterExec?.flow_state === 'ai_handling' || contactAfterExec?.ai_active || res?.message?.includes('AI handling state')) && res?.aiResponseStarted !== true) {
           console.log(`[START-FLOW] Started or moved to AI handling state. Checking wait_response for ${waId}`);
           
           // Se o prompt não estiver no contato, tentamos forçar a atualização a partir do nó
@@ -7085,7 +7087,7 @@ async function fetchAndStoreIncomingMedia(
           
           // Se o próximo nó é um Agente IA, verificamos se ele deve responder agora ou esperar.
           // O Agente IA só responde automaticamente se NÃO houver uma mensagem de pergunta/botões ativa.
-          if (res?.message?.includes('AI handling state') && text) {
+          if (res?.message?.includes('AI handling state') && text && res?.aiResponseStarted !== true) {
             // Se o nó de IA foi ativado por uma resposta do cliente (o que o 'text' indica),
             // então ele deve processar a resposta agora.
             console.log(`[CONTINUE-FLOW] Moved to AI handling state. Processing AI response safely for ${waId}. Source: ${sourceMessageId}`);
@@ -7133,7 +7135,7 @@ async function fetchAndStoreIncomingMedia(
                 await processAiAgentResponse(supabase, updatedContact, waId, finalAiText, sourceMessageId, updatedContact.user_id, updatedContact.whatsapp_number_id || null);
               }
             })();
-          } else if (res?.message?.includes('AI handling state') && !text) {
+          } else if (res?.message?.includes('AI handling state') && !text && res?.aiResponseStarted !== true) {
             // Se NÃO há texto (foi uma transição automática do nó anterior para o IA),
             // colocamos o estado em 'waiting_response' para que o IA responda apenas após a próxima mensagem do cliente.
             console.log(`[CONTINUE-FLOW] AI Agent reached via auto-transition. Setting state to waiting_response for ${waId}`);

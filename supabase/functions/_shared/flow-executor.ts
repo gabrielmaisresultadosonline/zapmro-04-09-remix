@@ -446,6 +446,7 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
       console.log(`[EXECUTOR] Contact ${contactId} state updated to ai_handling. Triggering initial processAiAgentResponse.`);
       // IMPORTANTE: Dispara o processamento inicial da IA para que ela responda sem esperar nova mensagem do cliente
       // Exceto se configurado para aguardar a primeira resposta
+      let aiResponseStarted = false;
       if (node.data?.wait_response_before_start !== true) {
         const { data: aiStartResult, error: aiStartError } = await supabase.functions.invoke('meta-whatsapp-crm', {
           headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}` },
@@ -461,11 +462,12 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
         if (aiStartResult?.success === false || aiStartResult?.error) {
           throw new Error(aiStartResult.error || 'O Agente IA não conseguiu iniciar a resposta');
         }
+        aiResponseStarted = true;
       } else {
         console.log(`[EXECUTOR] AI Agent configured to wait for first response. Skipping initial trigger.`);
       }
       
-      return { success: true, message: 'Contact moved to AI handling state' };
+      return { success: true, message: 'Contact moved to AI handling state', aiResponseStarted };
     } else if (node.type === 'crmAction') {
       const action = node.data?.action;
       const statusValue = node.data?.statusValue;

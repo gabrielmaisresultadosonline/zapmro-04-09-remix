@@ -90,6 +90,15 @@ interface DuplicateRecipientsDecision {
   repeatedNumbers: Set<string>;
 }
 
+const isBroadcastPossiblyStalled = (broadcast: any): boolean => {
+  if (!['pending', 'running'].includes(String(broadcast?.status))) return false;
+  const reference = broadcast.last_heartbeat_at || broadcast.created_at;
+  const nextRunAt = broadcast.next_run_at ? new Date(broadcast.next_run_at).getTime() : 0;
+  const referenceAt = reference ? new Date(reference).getTime() : 0;
+  if (!referenceAt || Number.isNaN(referenceAt) || Number.isNaN(nextRunAt)) return false;
+  return Date.now() - referenceAt > 10 * 60 * 1000 && nextRunAt < Date.now() - 2 * 60 * 1000;
+};
+
 /** DDDs válidos no Brasil (ANATEL) */
 const VALID_BR_DDD = new Set([
   11,12,13,14,15,16,17,18,19,
@@ -1988,6 +1997,12 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               Último erro: {b.last_error}
                             </p>
                           )}
+                          {isBroadcastPossiblyStalled(b) && (
+                            <div className="flex items-start gap-1.5 rounded-md border border-yellow-500/20 bg-yellow-500/10 p-2 text-[9px] text-yellow-300">
+                              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                              <span>Sem atividade recente. Pause e retome para acordar o motor sem reenviar quem já recebeu.</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))
@@ -2029,6 +2044,31 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         open={!!logsBroadcast}
         onOpenChange={(o) => { if (!o) setLogsBroadcast(null); }}
       />
+
+      <Dialog open={!!duplicateDecision} onOpenChange={(open) => { if (!open) setDuplicateDecision(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Alguns números já receberam disparos</DialogTitle>
+            <DialogDescription>
+              {duplicateDecision?.repeatedNumbers.size || 0} de {duplicateDecision?.allNumbers.length || 0} números desta lista já foram enviados antes por esta caixa WhatsApp.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Ao remover os repetidos, permanecerão {(duplicateDecision?.allNumbers.length || 0) - (duplicateDecision?.repeatedNumbers.size || 0)} números novos. Nenhum histórico anterior será alterado.
+          </div>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <Button type="button" variant="outline" onClick={() => setDuplicateDecision(null)} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void finishDuplicateDecision(false)} disabled={loading}>
+              Manter todos
+            </Button>
+            <Button type="button" onClick={() => void finishDuplicateDecision(true)} disabled={loading}>
+              Remover já usados
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <TemplateVariablesDialog
         open={templateVariablesOpen}

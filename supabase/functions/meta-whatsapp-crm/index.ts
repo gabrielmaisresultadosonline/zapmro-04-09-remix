@@ -236,24 +236,6 @@ function normalizeAdReferral(referral: any): NormalizedAdReferral | null {
   };
 }
 
-function getReferralTextParts(referral: any) {
-  if (!referral || typeof referral !== 'object') return [];
-  return [
-    referral.headline,
-    referral.title,
-    referral.body,
-    referral.description,
-    referral.text,
-    referral.text?.body,
-    referral.caption,
-    referral.cta_text,
-    referral.welcome_message?.text,
-    referral.welcome_message?.button?.text,
-    referral.source_url,
-    referral.url,
-  ].filter((value) => typeof value === 'string' && value.trim());
-}
-
 function flowMatchesIncomingTrigger(flow: any, allCandidateTexts: string[]) {
   const triggerType = flow?.trigger_type;
   const keywords: string[] = Array.isArray(flow?.trigger_keywords)
@@ -331,13 +313,6 @@ async function claimAutomaticFlow(
   return claimed === true;
 }
 
-function isUnavailableUnsupportedMessage(message: any) {
-  if (message?.type !== 'unsupported') return false;
-  const error = Array.isArray(message?.errors) ? message.errors[0] : null;
-  const details = firstNonEmptyString(error?.error_data?.details, error?.message, error?.title);
-  return Number(error?.code) === 131060 || /unavailable/i.test(details);
-}
-
 /**
  * Detecta se o evento recebido é a EDIÇÃO de uma mensagem já enviada
  * (o usuário editou a mensagem no WhatsApp segundos depois).
@@ -381,12 +356,6 @@ function detectEditedInboundMessage(message: any, field?: string): { isEdit: boo
 }
 
 
-const COMMON_CTWA_TRIGGER_TEXTS = [
-  'Olá! Posso ter mais informações sobre isso?',
-  'Gostaria de saber sobre o sistema inovador !',
-  'Gostaria de saber sobre o sistema inovador!',
-];
-
 /**
  * Carrega um fluxo garantindo o isolamento por usuário.
  * Fluxos legados migrados da base antiga podem estar com `user_id` NULL:
@@ -411,34 +380,6 @@ async function loadFlowForUser(supabase: any, flowId: string, userId: string) {
   }
 
   return flow;
-}
-
-async function getConfiguredCtwaFallbackText(supabase: any, userId?: string) {
-  if (!userId) return '';
-
-  const { data: flows, error } = await supabase
-    .from('crm_flows')
-    .select('trigger_keyword, trigger_keywords')
-    .eq('user_id', userId)
-    .eq('is_active', true)
-    .in('trigger_type', ['exact_phrase', 'keyword']);
-
-  if (error) {
-    console.error('[WEBHOOK] Failed to load CTWA fallback triggers', { userId, error: error.message });
-    return '';
-  }
-
-  const configuredKeywords = (flows || []).flatMap((flow: any) => {
-    const multi = Array.isArray(flow?.trigger_keywords) ? flow.trigger_keywords : [];
-    return [...multi, flow?.trigger_keyword].filter((keyword) => typeof keyword === 'string' && keyword.trim());
-  });
-
-  for (const defaultText of COMMON_CTWA_TRIGGER_TEXTS) {
-    const match = configuredKeywords.find((keyword: string) => normalizeTriggerText(keyword) === normalizeTriggerText(defaultText));
-    if (match) return match.trim();
-  }
-
-  return '';
 }
 
 // INBOUND_CONTENT_REFERRAL_IS_TRIGGER_ONLY_V1

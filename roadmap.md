@@ -32,3 +32,4 @@
 - [x] Exibir a mídia real do anúncio separada da frase exata recebida e impedir gatilhos por texto inferido.
 - [x] Tornar gatilhos automáticos fiéis, determinísticos e protegidos contra mensagens simultâneas.
 - [x] Reforçar pausa/retomada do disparador e avisar sobre números já enviados antes de uma nova campanha.
+- [x] Tornar Pausar/Retomar sempre visíveis no histórico e confirmar no banco cada mudança de estado.

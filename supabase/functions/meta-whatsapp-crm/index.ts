@@ -200,7 +200,23 @@ function getReferralFromWebhookMessage(message: any) {
   return referral && typeof referral === 'object' ? referral : null;
 }
 
-function normalizeAdReferral(referral: any) {
+interface NormalizedAdReferral {
+  source_url: string | null;
+  source_type: string | null;
+  source_id: string | null;
+  headline: string | null;
+  body: string | null;
+  media_type: string | null;
+  image_url: string | null;
+  video_url: string | null;
+  thumbnail_url: string | null;
+  ctwa_clid: string | null;
+  welcome_message: { text: string | null } | null;
+  persisted_media_url?: string | null;
+  persisted_media_type?: 'image' | 'video';
+}
+
+function normalizeAdReferral(referral: any): NormalizedAdReferral | null {
   if (!referral || typeof referral !== 'object') return null;
   const welcomeMessage = referral?.welcome_message && typeof referral.welcome_message === 'object'
     ? { text: firstNonEmptyString(referral.welcome_message.text) || null }
@@ -453,7 +469,7 @@ function extractInboundTextFromWebhookMessage(message: any) {
   return directText || '';
 }
 
-function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTexts: string[] = []) {
+function collectInboundTriggerTexts(message: any, resolvedText?: string) {
   const node = message?.[message?.type] || {};
 
   const rawCandidates = [
@@ -476,7 +492,6 @@ function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTe
     // Referral é o conteúdo do anúncio, não a frase efetivamente enviada pelo
     // contato. Também não aceitamos fallback inferido: gatilho de frase exata
     // só pode usar texto que veio no payload da mensagem.
-    ...extraTexts,
   ];
 
   const normalized = rawCandidates
@@ -1916,16 +1931,17 @@ else if (message.type === "unsupported") {
         });
       }
     }
-    normalizedAdReferral = {
+    const completeAdReferral: NormalizedAdReferral = {
       ...normalizedAdReferral,
       persisted_media_url: persistedReferralMediaUrl || referralMediaUrl || null,
       persisted_media_type: referralMediaType,
     };
+    normalizedAdReferral = completeAdReferral;
     console.log('[AD-REFERRAL] Dados do anúncio separados da mensagem recebida', {
       messageId: message?.id || null,
       hasCustomerText: Boolean(extractedInboundText),
-      hasHeadline: Boolean(normalizedAdReferral.headline),
-      hasBody: Boolean(normalizedAdReferral.body),
+      hasHeadline: Boolean(completeAdReferral.headline),
+      hasBody: Boolean(completeAdReferral.body),
       hasMedia: Boolean(referralMediaUrl),
       mediaPersisted: Boolean(persistedReferralMediaUrl),
       userId,
@@ -2260,7 +2276,7 @@ else if (message.type === "unsupported") {
   // fazendo o fluxo nunca iniciar. Agora avaliamos sempre que o contato está ocioso.
   if (contact && !hasActiveFlow && !isAiHandlingFlow) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text);
       console.log(`[TRIGGER-CTWA] (ad-priority) waId=${waId} msgType=${message?.type} aiActive=${isAiActive} candidates=${JSON.stringify(allCandidateTexts)}`);
       let adPriorityFlowsQuery = supabase
         .from('crm_flows')
@@ -2330,7 +2346,7 @@ else if (message.type === "unsupported") {
   // exato/palavra-chave configurado para esse texto, ele deve iniciar o novo fluxo.
   if (contact && hasActiveFlow && isWaitingResponse && !isAiHandlingFlow) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text);
       const hasReferral = !!getReferralFromWebhookMessage(message);
       console.log(`[TRIGGER-CTWA] (waiting-flow) waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} candidates=${JSON.stringify(allCandidateTexts)}`);
       let waitingFlowsQuery = supabase
@@ -2510,7 +2526,7 @@ else if (message.type === "unsupported") {
 
       if (activeFlows && activeFlows.length > 0) {
         const orderedActiveFlows = sortTriggerFlows(activeFlows, inboundNumberId);
-        const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
+        const allCandidateTexts = collectInboundTriggerTexts(message, text);
         const hasReferral = !!getReferralFromWebhookMessage(message);
         console.log(`[TRIGGER-AUTO] waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} text="${(text || '').slice(0,80)}" candidates=${JSON.stringify(allCandidateTexts)} activeFlows=${activeFlows.length}`);
         const prevTotal = __previousTotalReceived;

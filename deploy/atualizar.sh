@@ -596,11 +596,12 @@ if grep -q "Não usar upsert ON CONFLICT (wa_id,user_id)" "$ROOT/supabase/functi
 else
   die "Importador Google antigo ainda usa ON CONFLICT (wa_id,user_id)"
 fi
-if grep -q "INBOUND_CONTENT_REFERRAL_IS_TRIGGER_ONLY_V1" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts" \
+if grep -q "AD_REFERRAL_EXACT_CONTENT_V2" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts" \
+  && grep -q "downloadAndStoreAdReferralMedia" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts" \
   && grep -q "referral_used_as_content: false" "$ROOT/supabase/functions/meta-whatsapp-crm/index.ts"; then
-  echo -e "  Mensagens de anúncios : ${C_G}OK${N} (texto do anúncio isolado do histórico)"
+  echo -e "  Mensagens de anúncios : ${C_G}OK${N} (frase real + mídia preservada separadamente)"
 else
-  die "Função antiga ainda pode gravar texto de anúncio como mensagem do cliente; confirme a branch main"
+  die "Correção de frase/mídia dos anúncios não está completa; confirme a branch main"
 fi
 trigger_functions="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('crm_claim_flow_trigger','crm_record_inbound_contact_activity')")"
 if [ "$trigger_functions" = "2" ] \

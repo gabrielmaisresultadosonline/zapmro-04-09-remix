@@ -29,5 +29,6 @@
 - [x] Criar e validar teste seguro de ocultação do botão de ligação Meta para +55 11 92083-7268.
 - [x] Tornar o envio em massa persistente na nuvem, com pausa, retomada, parada e diagnóstico de travamento.
 - [x] Impedir definitivamente que textos de anúncios/CTWA substituam o conteúdo real recebido no histórico.
+- [x] Exibir a mídia real do anúncio separada da frase exata recebida e impedir gatilhos por texto inferido.
 - [x] Tornar gatilhos automáticos fiéis, determinísticos e protegidos contra mensagens simultâneas.
 - [x] Reforçar pausa/retomada do disparador e avisar sobre números já enviados antes de uma nova campanha.

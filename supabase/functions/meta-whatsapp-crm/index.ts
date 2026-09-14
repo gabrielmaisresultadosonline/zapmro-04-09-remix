@@ -192,26 +192,48 @@ function normalizeTriggerText(value: unknown) {
 }
 
 function getReferralFromWebhookMessage(message: any) {
-  const referral = message?.referral || message?.context?.referral || message?.unsupported?.referral || null;
+  const referral = message?.referral
+    || message?.context?.referral
+    || message?.context?.referred_product
+    || message?.unsupported?.referral
+    || null;
   return referral && typeof referral === 'object' ? referral : null;
 }
 
-function getReferralTextParts(referral: any) {
-  if (!referral || typeof referral !== 'object') return [];
-  return [
-    referral.headline,
-    referral.title,
-    referral.body,
-    referral.description,
-    referral.text,
-    referral.text?.body,
-    referral.caption,
-    referral.cta_text,
-    referral.welcome_message?.text,
-    referral.welcome_message?.button?.text,
-    referral.source_url,
-    referral.url,
-  ].filter((value) => typeof value === 'string' && value.trim());
+interface NormalizedAdReferral {
+  source_url: string | null;
+  source_type: string | null;
+  source_id: string | null;
+  headline: string | null;
+  body: string | null;
+  media_type: string | null;
+  image_url: string | null;
+  video_url: string | null;
+  thumbnail_url: string | null;
+  ctwa_clid: string | null;
+  welcome_message: { text: string | null } | null;
+  persisted_media_url?: string | null;
+  persisted_media_type?: 'image' | 'video';
+}
+
+function normalizeAdReferral(referral: any): NormalizedAdReferral | null {
+  if (!referral || typeof referral !== 'object') return null;
+  const welcomeMessage = referral?.welcome_message && typeof referral.welcome_message === 'object'
+    ? { text: firstNonEmptyString(referral.welcome_message.text) || null }
+    : null;
+  return {
+    source_url: firstNonEmptyString(referral.source_url, referral.url) || null,
+    source_type: firstNonEmptyString(referral.source_type) || null,
+    source_id: firstNonEmptyString(referral.source_id) || null,
+    headline: firstNonEmptyString(referral.headline, referral.title) || null,
+    body: firstNonEmptyString(referral.body, referral.description, referral.caption) || null,
+    media_type: firstNonEmptyString(referral.media_type) || null,
+    image_url: firstNonEmptyString(referral.image_url) || null,
+    video_url: firstNonEmptyString(referral.video_url) || null,
+    thumbnail_url: firstNonEmptyString(referral.thumbnail_url) || null,
+    ctwa_clid: firstNonEmptyString(referral.ctwa_clid) || null,
+    welcome_message: welcomeMessage,
+  };
 }
 
 function flowMatchesIncomingTrigger(flow: any, allCandidateTexts: string[]) {
@@ -291,13 +313,6 @@ async function claimAutomaticFlow(
   return claimed === true;
 }
 
-function isUnavailableUnsupportedMessage(message: any) {
-  if (message?.type !== 'unsupported') return false;
-  const error = Array.isArray(message?.errors) ? message.errors[0] : null;
-  const details = firstNonEmptyString(error?.error_data?.details, error?.message, error?.title);
-  return Number(error?.code) === 131060 || /unavailable/i.test(details);
-}
-
 /**
  * Detecta se o evento recebido é a EDIÇÃO de uma mensagem já enviada
  * (o usuário editou a mensagem no WhatsApp segundos depois).
@@ -341,12 +356,6 @@ function detectEditedInboundMessage(message: any, field?: string): { isEdit: boo
 }
 
 
-const COMMON_CTWA_TRIGGER_TEXTS = [
-  'Olá! Posso ter mais informações sobre isso?',
-  'Gostaria de saber sobre o sistema inovador !',
-  'Gostaria de saber sobre o sistema inovador!',
-];
-
 /**
  * Carrega um fluxo garantindo o isolamento por usuário.
  * Fluxos legados migrados da base antiga podem estar com `user_id` NULL:
@@ -371,34 +380,6 @@ async function loadFlowForUser(supabase: any, flowId: string, userId: string) {
   }
 
   return flow;
-}
-
-async function getConfiguredCtwaFallbackText(supabase: any, userId?: string) {
-  if (!userId) return '';
-
-  const { data: flows, error } = await supabase
-    .from('crm_flows')
-    .select('trigger_keyword, trigger_keywords')
-    .eq('user_id', userId)
-    .eq('is_active', true)
-    .in('trigger_type', ['exact_phrase', 'keyword']);
-
-  if (error) {
-    console.error('[WEBHOOK] Failed to load CTWA fallback triggers', { userId, error: error.message });
-    return '';
-  }
-
-  const configuredKeywords = (flows || []).flatMap((flow: any) => {
-    const multi = Array.isArray(flow?.trigger_keywords) ? flow.trigger_keywords : [];
-    return [...multi, flow?.trigger_keyword].filter((keyword) => typeof keyword === 'string' && keyword.trim());
-  });
-
-  for (const defaultText of COMMON_CTWA_TRIGGER_TEXTS) {
-    const match = configuredKeywords.find((keyword: string) => normalizeTriggerText(keyword) === normalizeTriggerText(defaultText));
-    if (match) return match.trim();
-  }
-
-  return '';
 }
 
 // INBOUND_CONTENT_REFERRAL_IS_TRIGGER_ONLY_V1
@@ -429,20 +410,8 @@ function extractInboundTextFromWebhookMessage(message: any) {
   return directText || '';
 }
 
-function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTexts: string[] = []) {
+function collectInboundTriggerTexts(message: any, resolvedText?: string) {
   const node = message?.[message?.type] || {};
-  const referral = getReferralFromWebhookMessage(message);
-  // Se o contato enviou um texto real (digitado ou clique em botão), o gatilho
-  // deve ser avaliado APENAS contra esse texto — nunca contra o welcome_message
-  // do referral do anúncio (CTWA). Caso contrário, um simples "Oi" dispara o
-  // fluxo cujo gatilho é o texto pré-preenchido do anúncio.
-  const userTypedText = firstNonEmptyString(
-    message?.text?.body,
-    message?.button?.text,
-    message?.interactive?.button_reply?.title,
-    message?.interactive?.list_reply?.title,
-  );
-  const hasUserTypedText = !!(userTypedText && userTypedText.trim());
 
   const rawCandidates = [
     resolvedText,
@@ -461,13 +430,9 @@ function collectInboundTriggerTexts(message: any, resolvedText?: string, extraTe
     message?.unsupported?.text?.body,
     message?.unsupported?.body,
     message?.unsupported?.caption,
-    // Só incluímos textos do referral (welcome_message/headline/etc.) quando
-    // o usuário NÃO enviou um texto próprio — ex.: clique de anúncio que chega
-    // como "unsupported" sem body.
-    ...(hasUserTypedText ? [] : getReferralTextParts(referral)),
-    // Textos auxiliares (ex.: fallback de clique de anúncio) usados APENAS para
-    // casar gatilhos — nunca para gravar/mostrar o conteúdo da conversa.
-    ...(hasUserTypedText ? [] : extraTexts),
+    // Referral é o conteúdo do anúncio, não a frase efetivamente enviada pelo
+    // contato. Também não aceitamos fallback inferido: gatilho de frase exata
+    // só pode usar texto que veio no payload da mensagem.
   ];
 
   const normalized = rawCandidates
@@ -1749,10 +1714,10 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   let mediaUrlForSave: string | null = null;
   let mediaCaption = '';
   const extractedInboundText = extractInboundTextFromWebhookMessage(message);
-  // Texto sintético do clique de anúncio: usado SOMENTE para casar gatilhos.
-  // Nunca pode virar o conteúdo gravado — isso trocava a mensagem real do
-  // cliente por uma frase padrão na conversa.
-  let ctwaTriggerFallbackText = '';
+  // AD_REFERRAL_EXACT_CONTENT_V2: anúncio e mensagem do cliente são dados
+  // separados. Nunca inferimos a frase recebida a partir de um fluxo salvo.
+  const rawAdReferral = getReferralFromWebhookMessage(message);
+  let normalizedAdReferral = normalizeAdReferral(rawAdReferral);
 
   if (getReferralFromWebhookMessage(message)) {
     console.log('[INBOUND-CONTENT] Referral isolated from conversation content', {
@@ -1762,34 +1727,6 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
       userId,
       whatsappNumberId: inboundNumberId || null,
     });
-  }
-
-  if (!extractedInboundText && isUnavailableUnsupportedMessage(message)) {
-    // CTWA fallback should ONLY apply to brand-new conversations coming from
-    // Click-to-WhatsApp ads. If the contact already has prior interactions,
-    // an "unsupported" event is almost certainly a real unsupported payload
-    // (WhatsApp Business auto-reply / stickers / etc.) — NOT a CTWA click.
-    const hasReferral = !!getReferralFromWebhookMessage(message);
-    const variants = getBrazilianPhoneVariants(waId);
-    const { data: existingContactForCtwa } = await scopeNumber(
-      supabase
-        .from('crm_contacts')
-        .select('id, total_messages_received, last_message_received_at')
-        .in('wa_id', variants)
-        .eq('user_id', userId)
-    )
-      .order('last_message_received_at', { ascending: false, nullsFirst: true })
-      .limit(1)
-      .maybeSingle();
-    const isBrandNewContact =
-      !existingContactForCtwa ||
-      ((existingContactForCtwa.total_messages_received || 0) === 0 &&
-        !existingContactForCtwa.last_message_received_at);
-    if (hasReferral || isBrandNewContact) {
-      ctwaTriggerFallbackText = await getConfiguredCtwaFallbackText(supabase, userId);
-    } else {
-      console.log('[WEBHOOK] Skipping CTWA fallback for existing contact', { waId, userId });
-    }
   }
 
   if (message.type === 'image' || message.type === 'video' || message.type === 'ptv') {
@@ -1859,7 +1796,7 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
 else if (message.type === "unsupported") {
     const error = message.errors?.[0];
     text = extractedInboundText
-      || (ctwaTriggerFallbackText ? '[Mensagem do anúncio]' : '')
+      || (rawAdReferral ? '[Conteúdo do cliente não disponibilizado pela Meta]' : '')
       || `[Formato não suportado pela Meta] ${error?.title || ""}: ${error?.message || ""}`.trim();
   } else if (message.type === "location") {
     text = `[Localização] Lat: ${message.location?.latitude}, Long: ${message.location?.longitude}`;
@@ -1896,6 +1833,61 @@ else if (message.type === "unsupported") {
     console.log('[WEBHOOK] Template quick reply recebido', { waId, button: templateButtonMeta.template_button_text, template: templateButtonMeta.template_name || null });
   } else if (message.type === "reaction") {
     text = `[Reação] ${message.reaction?.emoji || ""}`;
+  }
+
+  if (normalizedAdReferral) {
+    const referralMediaUrl = firstNonEmptyString(
+      normalizedAdReferral.thumbnail_url,
+      normalizedAdReferral.image_url,
+      normalizedAdReferral.video_url,
+    );
+    const referralMediaType = normalizedAdReferral.video_url === referralMediaUrl ? 'video' : 'image';
+    let persistedReferralMediaUrl: string | null = null;
+    if (referralMediaUrl) {
+      try {
+        let referralToken = inboundNumberRow?.user_id === userId
+          ? (inboundNumberRow?.meta_access_token || null)
+          : null;
+        if (!referralToken) {
+          const { data: referralSettings } = await supabase
+            .from('crm_settings')
+            .select('meta_access_token')
+            .eq('user_id', userId)
+            .maybeSingle();
+          referralToken = referralSettings?.meta_access_token || null;
+        }
+        persistedReferralMediaUrl = await downloadAndStoreAdReferralMedia(
+          supabase,
+          referralToken,
+          referralMediaUrl,
+          referralMediaType,
+          `${message?.id || waId}_ad`,
+        );
+      } catch (referralMediaError) {
+        console.warn('[AD-REFERRAL] Não foi possível preservar a mídia do anúncio', {
+          messageId: message?.id || null,
+          userId,
+          whatsappNumberId: inboundNumberId || null,
+          error: referralMediaError instanceof Error ? referralMediaError.message : String(referralMediaError),
+        });
+      }
+    }
+    const completeAdReferral: NormalizedAdReferral = {
+      ...normalizedAdReferral,
+      persisted_media_url: persistedReferralMediaUrl || referralMediaUrl || null,
+      persisted_media_type: referralMediaType,
+    };
+    normalizedAdReferral = completeAdReferral;
+    console.log('[AD-REFERRAL] Dados do anúncio separados da mensagem recebida', {
+      messageId: message?.id || null,
+      hasCustomerText: Boolean(extractedInboundText),
+      hasHeadline: Boolean(completeAdReferral.headline),
+      hasBody: Boolean(completeAdReferral.body),
+      hasMedia: Boolean(referralMediaUrl),
+      mediaPersisted: Boolean(persistedReferralMediaUrl),
+      userId,
+      whatsappNumberId: inboundNumberId || null,
+    });
   }
 
    const variantsForSave = getBrazilianPhoneVariants(waId);
@@ -2029,8 +2021,9 @@ else if (message.type === "unsupported") {
        media_url: mediaUrlForSave,
       metadata: {
         raw: message,
-        referral: getReferralFromWebhookMessage(message),
-        content_source: extractedInboundText ? 'customer_payload' : 'system_placeholder',
+        referral: normalizedAdReferral,
+        ad_referral: normalizedAdReferral,
+        content_source: extractedInboundText ? 'customer_payload' : 'meta_unavailable',
         referral_used_as_content: false,
         ...(templateButtonMeta || {}),
       },
@@ -2068,7 +2061,7 @@ else if (message.type === "unsupported") {
       userId,
       contact_id: contactForSave.id,
       meta_message_id: message.id,
-      content_source: extractedInboundText ? 'customer_payload' : 'system_placeholder',
+      content_source: extractedInboundText ? 'customer_payload' : 'meta_unavailable',
       referral_used_as_content: false,
     });
   }
@@ -2224,7 +2217,7 @@ else if (message.type === "unsupported") {
   // fazendo o fluxo nunca iniciar. Agora avaliamos sempre que o contato está ocioso.
   if (contact && !hasActiveFlow && !isAiHandlingFlow) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text);
       console.log(`[TRIGGER-CTWA] (ad-priority) waId=${waId} msgType=${message?.type} aiActive=${isAiActive} candidates=${JSON.stringify(allCandidateTexts)}`);
       let adPriorityFlowsQuery = supabase
         .from('crm_flows')
@@ -2294,7 +2287,7 @@ else if (message.type === "unsupported") {
   // exato/palavra-chave configurado para esse texto, ele deve iniciar o novo fluxo.
   if (contact && hasActiveFlow && isWaitingResponse && !isAiHandlingFlow) {
     try {
-      const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
+      const allCandidateTexts = collectInboundTriggerTexts(message, text);
       const hasReferral = !!getReferralFromWebhookMessage(message);
       console.log(`[TRIGGER-CTWA] (waiting-flow) waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} candidates=${JSON.stringify(allCandidateTexts)}`);
       let waitingFlowsQuery = supabase
@@ -2474,7 +2467,7 @@ else if (message.type === "unsupported") {
 
       if (activeFlows && activeFlows.length > 0) {
         const orderedActiveFlows = sortTriggerFlows(activeFlows, inboundNumberId);
-        const allCandidateTexts = collectInboundTriggerTexts(message, text, [ctwaTriggerFallbackText]);
+        const allCandidateTexts = collectInboundTriggerTexts(message, text);
         const hasReferral = !!getReferralFromWebhookMessage(message);
         console.log(`[TRIGGER-AUTO] waId=${waId} msgType=${message?.type} hasReferral=${hasReferral} text="${(text || '').slice(0,80)}" candidates=${JSON.stringify(allCandidateTexts)} activeFlows=${activeFlows.length}`);
         const prevTotal = __previousTotalReceived;
@@ -5372,6 +5365,49 @@ async function downloadAndStoreMetaMedia(supabase: any, accessToken: string, med
     return finalUrl;
   } catch (err) {
     console.error('Error in downloadAndStoreMetaMedia:', err);
+    return null;
+  }
+}
+
+async function downloadAndStoreAdReferralMedia(
+  supabase: any,
+  accessToken: string | null,
+  mediaUrl: string,
+  type: 'image' | 'video',
+  name: string,
+): Promise<string | null> {
+  if (!mediaUrl) return null;
+  try {
+    const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
+    let response = await fetch(mediaUrl, { headers });
+    // Alguns links do referral já são públicos e rejeitam Authorization.
+    if (!response.ok && headers) response = await fetch(mediaUrl);
+    if (!response.ok) {
+      console.warn('[AD-REFERRAL] Download da mídia recusado pela Meta', { status: response.status, type });
+      return null;
+    }
+
+    const blob = await response.blob();
+    const contentType = blob.type || (type === 'video' ? 'video/mp4' : 'image/jpeg');
+    const ext = type === 'video'
+      ? (contentType.includes('quicktime') ? 'mov' : 'mp4')
+      : (contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg');
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filePath = `incoming/ads/${safeName}.${ext}`;
+    const { error } = await supabase.storage
+      .from('crm-media')
+      .upload(filePath, blob, { contentType, upsert: true });
+    if (error) {
+      console.warn('[AD-REFERRAL] Falha ao armazenar mídia do anúncio', { message: error.message, type });
+      return null;
+    }
+    const { data: { publicUrl } } = supabase.storage.from('crm-media').getPublicUrl(filePath);
+    return toPublicMediaUrl(publicUrl);
+  } catch (error) {
+    console.warn('[AD-REFERRAL] Falha inesperada ao preservar mídia', {
+      type,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }

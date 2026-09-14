@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
+import AdReferralCard, { type AdReferralData } from '@/components/crm/AdReferralCard';
 import { openWhatsAppChat } from '@/lib/whatsapp';
  import { useNavigate, Link } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -452,6 +453,7 @@ const getAdReferral = (message: unknown): AdReferral | null => {
   if (!message || typeof message !== 'object') return null;
   const meta = (message as { metadata?: any }).metadata;
   const ref =
+    meta?.ad_referral ||
     meta?.referral ||
     meta?.raw?.referral ||
     meta?.context?.referred_product ||
@@ -7484,36 +7486,7 @@ const CRM = () => {
                                           {(() => {
                                             const ref = getAdReferral(m);
                                             if (!ref) return null;
-                                            const thumb = ref.thumbnail_url || ref.image_url;
-                                            const Wrapper: any = ref.source_url ? 'a' : 'div';
-                                            const wrapperProps: any = ref.source_url
-                                              ? { href: ref.source_url, target: '_blank', rel: 'noopener noreferrer' }
-                                              : {};
-                                            return (
-                                              <Wrapper
-                                                {...wrapperProps}
-                                                className="mt-2 block p-1.5 rounded-xl bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 w-[160px] shadow-sm hover:shadow-md transition-shadow"
-                                                title="Ver anúncio"
-                                              >
-                                                <div className="flex items-center justify-between gap-1 mb-1">
-                                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">
-                                                    📣 Anúncio
-                                                  </span>
-                                                </div>
-                                                {thumb ? (
-                                                  <img src={thumb} alt="Anúncio" className="w-full aspect-square object-cover rounded-lg border border-emerald-100" />
-                                                ) : (
-                                                  <div className="w-full aspect-square rounded-lg border border-emerald-100 bg-emerald-50/60 flex items-center justify-center text-[10px] text-emerald-700">
-                                                    Ver anúncio
-                                                  </div>
-                                                )}
-                                                {ref.source_url && (
-                                                  <div className="mt-1 text-center text-[10px] font-semibold text-emerald-700">
-                                                    🔗 Ver anúncio
-                                                  </div>
-                                                )}
-                                              </Wrapper>
-                                            );
+                                            return <AdReferralCard referral={ref as AdReferralData} />;
                                           })()}
                                         </>
                                       )}

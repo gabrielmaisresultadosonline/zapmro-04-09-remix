@@ -476,6 +476,10 @@ else
   npm install --no-audit --no-fund --legacy-peer-deps
   rm -rf dist
   npm run build
+  if ! grep -Rqs --include='*.js' 'Pausar' "$ROOT/dist/assets" \
+    || ! grep -Rqs --include='*.js' 'Retomar' "$ROOT/dist/assets"; then
+    die "o frontend gerado não contém os controles Pausar/Retomar do Histórico Recente"
+  fi
   ok "build gerado em dist/ (vídeos, imagens e assets incluídos)"
 fi
 
@@ -623,6 +627,15 @@ else
   die "Migration 106 incompleta; a permissão segura para pausar/retomar não foi criada"
 fi
 echo "  frontend aponta  : ${API}"
+if [ "$SEM_BUILD" != "1" ]; then
+  local_frontend_asset="$(grep -oE 'assets/[^\"'\'' ]+\.js' "$ROOT/dist/index.html" | head -1 || true)"
+  published_frontend_html="$(curl -fsSL --max-time 20 -H 'Cache-Control: no-cache' "${SITE_URL:-https://zapmro.com.br}/?deploy=$(date +%s)" 2>/dev/null || true)"
+  if [ -n "$local_frontend_asset" ] && printf '%s' "$published_frontend_html" | grep -Fq "$local_frontend_asset"; then
+    echo -e "  versão publicada      : ${C_G}OK${N} (${local_frontend_asset})"
+  else
+    die "o domínio ainda não está servindo o frontend recém-gerado em dist; confira o root do nginx para $ROOT/dist"
+  fi
+fi
 
 echo
 ok "ATUALIZAÇÃO CONCLUÍDA — front, backend, banco, storage e functions rodando na sua VPS."

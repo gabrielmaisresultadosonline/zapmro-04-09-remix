@@ -90,8 +90,12 @@ interface DuplicateRecipientsDecision {
   repeatedNumbers: Set<string>;
 }
 
+type BroadcastAction = 'pause' | 'resume' | 'stop';
+
+const normalizeBroadcastStatus = (status: unknown): string => String(status || 'pending').trim().toLowerCase();
+
 const isBroadcastPossiblyStalled = (broadcast: any): boolean => {
-  if (!['pending', 'running'].includes(String(broadcast?.status))) return false;
+  if (!['pending', 'running', 'sending'].includes(normalizeBroadcastStatus(broadcast?.status))) return false;
   const reference = broadcast.last_heartbeat_at || broadcast.created_at;
   const nextRunAt = broadcast.next_run_at ? new Date(broadcast.next_run_at).getTime() : 0;
   const referenceAt = reference ? new Date(reference).getTime() : 0;
@@ -262,6 +266,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   // Campanha selecionada para exibir os logs de falha detalhados
   const [logsBroadcast, setLogsBroadcast] = useState<any | null>(null);
   const [duplicateDecision, setDuplicateDecision] = useState<DuplicateRecipientsDecision | null>(null);
+  const [broadcastAction, setBroadcastAction] = useState<{ id: string; action: BroadcastAction } | null>(null);
 
   useEffect(() => {
     fetchBroadcasts();
@@ -281,7 +286,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
 
   // Poll while any campaign is running so progress + Stop stay live
   useEffect(() => {
-    const hasRunning = broadcasts.some((b: any) => b.status === 'running' || b.status === 'pending');
+    const hasRunning = broadcasts.some((b: any) => ['running', 'pending', 'sending'].includes(normalizeBroadcastStatus(b.status)));
     if (!hasRunning) return;
     const id = setInterval(fetchBroadcasts, 3000);
     return () => clearInterval(id);
@@ -816,32 +821,52 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   };
 
   const pauseBroadcast = async (id: string) => {
-    const { error } = await (supabase as any).from('crm_broadcasts').update({
-      status: 'paused',
-      paused_at: new Date().toISOString(),
-    }).eq('id', id);
-    if (error) {
-      toast({ title: 'Não foi possível pausar', description: error.message, variant: 'destructive' });
-      return;
+    setBroadcastAction({ id, action: 'pause' });
+    try {
+      const { data, error } = await (supabase as any).from('crm_broadcasts').update({
+        status: 'paused',
+        paused_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', id).in('status', ['pending', 'running', 'sending']).select('id, status').maybeSingle();
+      if (error) throw error;
+      if (!data || normalizeBroadcastStatus(data.status) !== 'paused') {
+        throw new Error('A campanha mudou de estado ou sua sessão não permitiu a pausa. Atualize a tela e tente novamente.');
+      }
+      setBroadcasts(current => current.map(b => b.id === id ? { ...b, status: 'paused', paused_at: new Date().toISOString() } : b));
+      toast({ title: 'Disparo pausado', description: 'A fila foi preservada para continuar depois.' });
+      await fetchBroadcasts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: 'Não foi possível pausar', description: message, variant: 'destructive' });
+    } finally {
+      setBroadcastAction(null);
     }
-    toast({ title: 'Disparo pausado', description: 'A fila foi preservada para continuar depois.' });
-    fetchBroadcasts();
   };
 
   const resumeBroadcast = async (id: string) => {
-    const { error } = await (supabase as any).from('crm_broadcasts').update({
-      status: 'running',
-      paused_at: null,
-      last_error: null,
-      next_run_at: new Date().toISOString(),
-    }).eq('id', id);
-    if (error) {
-      toast({ title: 'Não foi possível retomar', description: error.message, variant: 'destructive' });
-      return;
+    setBroadcastAction({ id, action: 'resume' });
+    try {
+      const { data, error } = await (supabase as any).from('crm_broadcasts').update({
+        status: 'running',
+        paused_at: null,
+        last_error: null,
+        next_run_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', id).eq('status', 'paused').select('id, status').maybeSingle();
+      if (error) throw error;
+      if (!data || normalizeBroadcastStatus(data.status) !== 'running') {
+        throw new Error('A campanha não está pausada ou sua sessão não permitiu a retomada. Atualize a tela e tente novamente.');
+      }
+      setBroadcasts(current => current.map(b => b.id === id ? { ...b, status: 'running', paused_at: null, last_error: null } : b));
+      toast({ title: 'Disparo retomado na nuvem', description: 'O motor continuará somente pelos destinatários que ainda estão na fila.' });
+      await fetchBroadcasts();
+      void wakeBroadcastWorker(id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: 'Não foi possível retomar', description: message, variant: 'destructive' });
+    } finally {
+      setBroadcastAction(null);
     }
-    toast({ title: 'Disparo retomado na nuvem', description: 'O motor continuará somente pelos destinatários que ainda estão na fila.' });
-    fetchBroadcasts();
-    void wakeBroadcastWorker(id);
   };
 
   const deleteBroadcast = async (id: string) => {
@@ -852,16 +877,31 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
 
   const cancelBroadcast = async (id: string) => {
     if (!confirm('Parar este disparo? Os contatos restantes não receberão a mensagem.')) return;
-    await (supabase as any).from('crm_broadcasts').update({
-      status: 'cancelled',
-      stopped_at: new Date().toISOString(),
-    }).eq('id', id);
-    await (supabase as any).from('crm_broadcast_items').update({
-      status: 'skipped',
-      processed_at: new Date().toISOString(),
-    }).eq('broadcast_id', id).eq('status', 'queued');
-    toast({ title: 'Solicitação de parada enviada', description: 'O disparo será interrompido no próximo intervalo.' });
-    fetchBroadcasts();
+    setBroadcastAction({ id, action: 'stop' });
+    try {
+      const { data, error } = await (supabase as any).from('crm_broadcasts').update({
+        status: 'cancelled',
+        stopped_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', id).in('status', ['pending', 'running', 'paused']).select('id, status').maybeSingle();
+      if (error) throw error;
+      if (!data || normalizeBroadcastStatus(data.status) !== 'cancelled') {
+        throw new Error('A campanha mudou de estado ou sua sessão não permitiu a parada. Atualize a tela e tente novamente.');
+      }
+      const { error: queueError } = await (supabase as any).from('crm_broadcast_items').update({
+        status: 'skipped',
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('broadcast_id', id).eq('status', 'queued');
+      if (queueError) throw queueError;
+      toast({ title: 'Disparo parado', description: 'Os contatos restantes não receberão esta campanha.' });
+      await fetchBroadcasts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({ title: 'Não foi possível parar', description: message, variant: 'destructive' });
+    } finally {
+      setBroadcastAction(null);
+    }
   };
 
   const handleFileUpload = (type: 'vcard' | 'csv') => {
@@ -1916,7 +1956,10 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                       <p className="text-xs text-[#8696a0]">Nenhuma campanha realizada ainda.</p>
                     </div>
                   ) : (
-                    broadcasts.map(b => (
+                    broadcasts.map(b => {
+                      const normalizedStatus = normalizeBroadcastStatus(b.status);
+                      const actionInProgress = broadcastAction?.id === b.id;
+                      return (
                       <div key={b.id} className="p-3 rounded-xl bg-[#202c33] border border-white/5 space-y-2 group">
                         <div className="flex justify-between items-start">
                           <div className="min-w-0 flex-1">
@@ -1942,56 +1985,71 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               style={{ width: `${(b.sent_count / b.total_contacts) * 100}%` }}
                             />
                           </div>
-                          <div className="flex justify-between items-center pt-1">
+                          <div className="flex flex-col gap-2 pt-1">
                             <div className="flex gap-2 text-[9px]">
                               <span className="text-[#00a884]">{Math.max(0, b.sent_count - b.failed_count)} ok</span>
                               <span className="text-red-400">{b.failed_count || 0} erro</span>
                               <span className="text-[#8696a0]">/ {b.total_contacts} total</span>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <button
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
                                 onClick={() => setLogsBroadcast(b)}
-                                className="text-[9px] px-2 h-5 rounded bg-white/5 text-[#8696a0] hover:text-[#e9edef] hover:bg-white/10 flex items-center gap-1"
+                                className="text-[9px] px-2 h-6 rounded bg-white/5 text-[#8696a0] hover:text-[#e9edef] hover:bg-white/10 flex items-center gap-1"
                                 title="Ver logs e motivos das falhas"
                               >
                                 <AlertCircle className="w-2.5 h-2.5" /> Logs
-                              </button>
-                              {(b.status === 'running' || b.status === 'pending') && (
-                                <button
+                              </Button>
+                              {['running', 'pending', 'sending'].includes(normalizedStatus) && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
                                   onClick={() => pauseBroadcast(b.id)}
-                                  className="text-[9px] px-2 h-5 rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/40 flex items-center gap-1"
+                                  disabled={actionInProgress}
+                                  className="text-[9px] px-2 h-6 rounded bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/40 flex items-center gap-1"
                                   title="Pausar e preservar a fila"
                                 >
-                                  <Pause className="w-2.5 h-2.5" /> Pausar
-                                </button>
+                                  {broadcastAction?.id === b.id && broadcastAction.action === 'pause' ? <RefreshCcw className="w-2.5 h-2.5 animate-spin" /> : <Pause className="w-2.5 h-2.5" />} Pausar
+                                </Button>
                               )}
-                              {b.status === 'paused' && (
-                                <button
+                              {normalizedStatus === 'paused' && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
                                   onClick={() => resumeBroadcast(b.id)}
-                                  className="text-[9px] px-2 h-5 rounded bg-green-500/20 text-green-300 hover:bg-green-500/40 flex items-center gap-1"
+                                  disabled={actionInProgress}
+                                  className="text-[9px] px-2 h-6 rounded bg-green-500/20 text-green-300 hover:bg-green-500/40 flex items-center gap-1"
                                   title="Continuar do ponto onde parou"
                                 >
-                                  <Play className="w-2.5 h-2.5" /> Retomar
-                                </button>
+                                  {broadcastAction?.id === b.id && broadcastAction.action === 'resume' ? <RefreshCcw className="w-2.5 h-2.5 animate-spin" /> : <Play className="w-2.5 h-2.5" />} Retomar
+                                </Button>
                               )}
-                              {['running', 'pending', 'paused'].includes(b.status) && (
-                                <button
+                              {['running', 'pending', 'paused'].includes(normalizedStatus) && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
                                   onClick={() => cancelBroadcast(b.id)}
-                                  className="text-[9px] px-2 h-5 rounded bg-red-500/20 text-red-300 hover:bg-red-500/40 flex items-center gap-1"
+                                  disabled={actionInProgress}
+                                  className="text-[9px] px-2 h-6 rounded bg-red-500/20 text-red-300 hover:bg-red-500/40 flex items-center gap-1"
                                   title="Parar disparo"
                                 >
-                                  <XCircle className="w-2.5 h-2.5" /> Parar
-                                </button>
+                                  {broadcastAction?.id === b.id && broadcastAction.action === 'stop' ? <RefreshCcw className="w-2.5 h-2.5 animate-spin" /> : <XCircle className="w-2.5 h-2.5" />} Parar
+                                </Button>
                               )}
                               <Badge className={cn(
                                 "text-[8px] h-4 px-1 capitalize",
-                                b.status === 'completed' ? "bg-blue-500/20 text-blue-400" :
-                                b.status === 'running' ? "bg-green-500/20 text-green-400 animate-pulse" :
-                                 b.status === 'paused' ? "bg-yellow-500/20 text-yellow-400" :
-                                b.status === 'cancelled' ? "bg-red-500/20 text-red-400" :
+                                normalizedStatus === 'completed' ? "bg-blue-500/20 text-blue-400" :
+                                ['running', 'sending'].includes(normalizedStatus) ? "bg-green-500/20 text-green-400 animate-pulse" :
+                                normalizedStatus === 'paused' ? "bg-yellow-500/20 text-yellow-400" :
+                                normalizedStatus === 'cancelled' ? "bg-red-500/20 text-red-400" :
                                 "bg-yellow-500/20 text-yellow-400"
                               )}>
-                                {b.status === 'completed' ? 'Finalizado' : b.status === 'running' ? 'Em curso' : b.status === 'paused' ? 'Pausado' : b.status === 'cancelled' ? 'Parado' : 'Pendente'}
+                                {normalizedStatus === 'completed' ? 'Finalizado' : ['running', 'sending'].includes(normalizedStatus) ? 'Em curso' : normalizedStatus === 'paused' ? 'Pausado' : normalizedStatus === 'cancelled' ? 'Parado' : 'Pendente'}
                               </Badge>
                             </div>
                           </div>
@@ -2008,7 +2066,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                           )}
                         </div>
                       </div>
-                    ))
+                    )})
                   )}
                 </div>
                     </ScrollArea>

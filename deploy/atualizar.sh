@@ -283,7 +283,7 @@ else
     if [ "$nome" = "100-gatilhos-inatividade-fluxos.sql" ] || [ "$nome" = "101-corrigir-gatilhos-primeira-mensagem.sql" ]; then
       graves="${erros:-0}"
     fi
-    if [ "$nome" = "104-gatilhos-atomicos-e-deterministicos.sql" ]; then
+    if [ "$nome" = "104-gatilhos-atomicos-e-deterministicos.sql" ] || [ "$nome" = "105-historico-disparos-sem-repeticao.sql" ]; then
       graves="${erros:-0}"
     fi
     if [ "${erros:-0}" -gt 0 ]; then
@@ -608,6 +608,12 @@ if [ "$trigger_functions" = "2" ] \
   echo -e "  Gatilhos automáticos   : ${C_G}OK${N} (reserva atômica + ordem determinística)"
 else
   die "Migration 104 ou código de reserva atômica dos gatilhos não foi aplicado"
+fi
+broadcast_history_function="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='crm_find_previously_sent_numbers'")"
+if [ "$broadcast_history_function" = "1" ]; then
+  echo -e "  Histórico de disparos  : ${C_G}OK${N} (repetidos por usuário + caixa)"
+else
+  die "Migration 105 incompleta; a consulta segura de números já enviados não foi criada"
 fi
 echo "  frontend aponta  : ${API}"
 

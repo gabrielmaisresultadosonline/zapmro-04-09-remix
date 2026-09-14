@@ -30,3 +30,4 @@
 - [x] Tornar o envio em massa persistente na nuvem, com pausa, retomada, parada e diagnóstico de travamento.
 - [x] Impedir definitivamente que textos de anúncios/CTWA substituam o conteúdo real recebido no histórico.
 - [x] Tornar gatilhos automáticos fiéis, determinísticos e protegidos contra mensagens simultâneas.
+- [x] Reforçar pausa/retomada do disparador e avisar sobre números já enviados antes de uma nova campanha.

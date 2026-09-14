@@ -61,6 +61,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import MetaPricingCalculator from "@/components/whatsapp/MetaPricingCalculator";
 import BroadcastFailureLogs from "@/components/crm/BroadcastFailureLogs";
 import TemplateVariablesDialog, { loadDefaultTemplatePreset } from "@/components/whatsapp/TemplateVariablesDialog";
@@ -83,6 +84,20 @@ interface BroadcasterProps {
   contacts: any[];
   statuses: any[];
 }
+
+interface DuplicateRecipientsDecision {
+  allNumbers: string[];
+  repeatedNumbers: Set<string>;
+}
+
+const isBroadcastPossiblyStalled = (broadcast: any): boolean => {
+  if (!['pending', 'running'].includes(String(broadcast?.status))) return false;
+  const reference = broadcast.last_heartbeat_at || broadcast.created_at;
+  const nextRunAt = broadcast.next_run_at ? new Date(broadcast.next_run_at).getTime() : 0;
+  const referenceAt = reference ? new Date(reference).getTime() : 0;
+  if (!referenceAt || Number.isNaN(referenceAt) || Number.isNaN(nextRunAt)) return false;
+  return Date.now() - referenceAt > 10 * 60 * 1000 && nextRunAt < Date.now() - 2 * 60 * 1000;
+};
 
 /** DDDs válidos no Brasil (ANATEL) */
 const VALID_BR_DDD = new Set([
@@ -246,6 +261,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   const [countdownHistory, setCountdownHistory] = useState<any[]>([]);
   // Campanha selecionada para exibir os logs de falha detalhados
   const [logsBroadcast, setLogsBroadcast] = useState<any | null>(null);
+  const [duplicateDecision, setDuplicateDecision] = useState<DuplicateRecipientsDecision | null>(null);
 
   useEffect(() => {
     fetchBroadcasts();
@@ -589,6 +605,85 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
     if (error) console.warn('[BROADCAST] O cron continuará a fila:', error.message);
   };
 
+  const createPersistentBroadcast = async (numbers: string[]) => {
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+    if (!userId) throw new Error('Sua sessão expirou. Entre novamente para iniciar o disparo.');
+    const activeNumberId = getActiveWhatsAppNumberId();
+
+    const { data, error } = await (supabase as any)
+      .from('crm_broadcasts')
+      .insert([{
+        name,
+        type,
+        target_type: targetType,
+        message_text: type === 'message' ? messageText : null,
+        template_id: type === 'template' ? selectedTemplate : null,
+        flow_id: type === 'flow' ? selectedFlow : null,
+        random_delay_min: delayMin,
+        random_delay_max: delayMax,
+        total_contacts: numbers.length,
+        uploaded_numbers: numbers,
+        status: 'pending',
+        user_id: userId,
+        whatsapp_number_id: activeNumberId,
+        template_config: type === 'template' ? templateConfig : null,
+        apply_tag: applyTag || null,
+        next_run_at: new Date().toISOString(),
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const recipientNames = new Map(finalRecipients.map(recipient => [recipient.wa_id, recipient.name]));
+    const queueRows = numbers.map((number, index) => ({
+      broadcast_id: data.id,
+      user_id: userId,
+      whatsapp_number_id: activeNumberId,
+      wa_id: number,
+      recipient_name: recipientNames.get(number) || number,
+      sequence_number: index,
+    }));
+    for (let index = 0; index < queueRows.length; index += 500) {
+      const { error: queueError } = await (supabase as any)
+        .from('crm_broadcast_items')
+        .insert(queueRows.slice(index, index + 500));
+      if (queueError) {
+        await supabase.from('crm_broadcasts').delete().eq('id', data.id);
+        throw new Error(`Não foi possível preparar a fila: ${queueError.message}`);
+      }
+    }
+
+    toast({ title: "Campanha iniciada na nuvem!", description: 'Ela continuará mesmo se você fechar esta tela.' });
+    fetchBroadcasts();
+    setName('');
+    setMessageText('');
+    setUploadedNumbers('');
+    void wakeBroadcastWorker(data.id);
+  };
+
+  const finishDuplicateDecision = async (removeRepeated: boolean) => {
+    const decision = duplicateDecision;
+    if (!decision) return;
+    const selectedNumbers = removeRepeated
+      ? decision.allNumbers.filter(number => !decision.repeatedNumbers.has(canonicalWaId(number)))
+      : decision.allNumbers;
+    if (selectedNumbers.length === 0) {
+      toast({ title: 'Todos os números já foram usados', description: 'Mantenha todos ou altere a lista para criar a campanha.', variant: 'destructive' });
+      return;
+    }
+    setDuplicateDecision(null);
+    setLoading(true);
+    try {
+      await createPersistentBroadcast(selectedNumbers);
+    } catch (err: any) {
+      toast({ title: "Erro ao criar campanha", description: err.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleStartBroadcast = async () => {
     if (!name) {
       toast({ title: "Dê um nome à campanha", variant: "destructive" });
@@ -697,66 +792,21 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         return;
       }
 
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData.user?.id;
-      if (!userId) throw new Error('Sua sessão expirou. Entre novamente para iniciar o disparo.');
       const activeNumberId = getActiveWhatsAppNumberId();
-
-      const { data, error } = await (supabase as any)
-        .from('crm_broadcasts')
-        .insert([{
-          name,
-          type,
-          target_type: targetType,
-          message_text: type === 'message' ? messageText : null,
-          template_id: type === 'template' ? selectedTemplate : null,
-          flow_id: type === 'flow' ? selectedFlow : null,
-          random_delay_min: delayMin,
-          random_delay_max: delayMax,
-          total_contacts: numbers.length,
-          // A lista efetivamente aprovada fica congelada na campanha; mudanças
-          // posteriores em filtros/etiquetas não alteram quem receberá.
-          uploaded_numbers: numbers,
-          status: 'pending',
-          user_id: userId,
-          whatsapp_number_id: activeNumberId,
-          template_config: type === 'template' ? templateConfig : null,
-          apply_tag: applyTag || null,
-          next_run_at: new Date().toISOString(),
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const recipientNames = new Map(finalRecipients.map(recipient => [recipient.wa_id, recipient.name]));
-      const queueRows = numbers.map((number, index) => ({
-        broadcast_id: data.id,
-        user_id: userId,
-        whatsapp_number_id: activeNumberId,
-        wa_id: number,
-        recipient_name: recipientNames.get(number) || number,
-        sequence_number: index,
-      }));
-      for (let index = 0; index < queueRows.length; index += 500) {
-        const { error: queueError } = await (supabase as any)
-          .from('crm_broadcast_items')
-          .insert(queueRows.slice(index, index + 500));
-        if (queueError) {
-          await supabase.from('crm_broadcasts').delete().eq('id', data.id);
-          throw new Error(`Não foi possível preparar a fila: ${queueError.message}`);
-        }
+      const repeatedNumbers = new Set<string>();
+      for (let index = 0; index < numbers.length; index += 500) {
+        const { data: priorRows, error: priorError } = await (supabase as any).rpc('crm_find_previously_sent_numbers', {
+          p_whatsapp_number_id: activeNumberId,
+          p_wa_ids: numbers.slice(index, index + 500),
+        });
+        if (priorError) throw new Error(`Não foi possível conferir o histórico: ${priorError.message}`);
+        for (const row of priorRows || []) repeatedNumbers.add(canonicalWaId(String(row.wa_id || '')));
       }
-
-      toast({ title: "Campanha iniciada na nuvem!", description: 'Ela continuará mesmo se você fechar esta tela.' });
-      fetchBroadcasts();
-      
-      // Reset form
-      setName('');
-      setMessageText('');
-      setUploadedNumbers('');
-      
-      void wakeBroadcastWorker(data.id);
+      if (repeatedNumbers.size > 0) {
+        setDuplicateDecision({ allNumbers: numbers, repeatedNumbers });
+        return;
+      }
+      await createPersistentBroadcast(numbers);
 
     } catch (err: any) {
       toast({ title: "Erro ao criar campanha", description: err.message, variant: "destructive" });
@@ -789,7 +839,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
       toast({ title: 'Não foi possível retomar', description: error.message, variant: 'destructive' });
       return;
     }
-    toast({ title: 'Disparo retomado na nuvem' });
+    toast({ title: 'Disparo retomado na nuvem', description: 'O motor continuará somente pelos destinatários que ainda estão na fila.' });
     fetchBroadcasts();
     void wakeBroadcastWorker(id);
   };
@@ -1950,6 +2000,12 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               Último erro: {b.last_error}
                             </p>
                           )}
+                          {isBroadcastPossiblyStalled(b) && (
+                            <div className="flex items-start gap-1.5 rounded-md border border-yellow-500/20 bg-yellow-500/10 p-2 text-[9px] text-yellow-300">
+                              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                              <span>Sem atividade recente. Pause e retome para acordar o motor sem reenviar quem já recebeu.</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))
@@ -1991,6 +2047,31 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         open={!!logsBroadcast}
         onOpenChange={(o) => { if (!o) setLogsBroadcast(null); }}
       />
+
+      <Dialog open={!!duplicateDecision} onOpenChange={(open) => { if (!open) setDuplicateDecision(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Alguns números já receberam disparos</DialogTitle>
+            <DialogDescription>
+              {duplicateDecision?.repeatedNumbers.size || 0} de {duplicateDecision?.allNumbers.length || 0} números desta lista já foram enviados antes por esta caixa WhatsApp.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Ao remover os repetidos, permanecerão {(duplicateDecision?.allNumbers.length || 0) - (duplicateDecision?.repeatedNumbers.size || 0)} números novos. Nenhum histórico anterior será alterado.
+          </div>
+          <DialogFooter className="gap-2 sm:space-x-0">
+            <Button type="button" variant="outline" onClick={() => setDuplicateDecision(null)} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void finishDuplicateDecision(false)} disabled={loading}>
+              Manter todos
+            </Button>
+            <Button type="button" onClick={() => void finishDuplicateDecision(true)} disabled={loading}>
+              Remover já usados
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <TemplateVariablesDialog
         open={templateVariablesOpen}

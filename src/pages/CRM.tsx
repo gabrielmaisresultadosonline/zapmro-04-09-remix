@@ -1479,6 +1479,7 @@ const CRM = () => {
       const windowEnd = new Date().toISOString();
       const rows: any[] = [];
       const pageSize = 250;
+      let fallbackWindowComplete = false;
 
       for (let from = 0; from < 10_000; from += pageSize) {
         const { data, error } = await scopeToNumber(
@@ -1495,10 +1496,18 @@ const CRM = () => {
 
         if (error) throw error;
         rows.push(...(data || []));
-        if (!data || data.length < pageSize) break;
+        if (!data || data.length < pageSize) {
+          fallbackWindowComplete = true;
+          break;
+        }
       }
 
-      realtimeFallbackCursorRef.current = windowEnd;
+      // Só avança até o fim da janela quando todas as páginas foram lidas.
+      // Se o limite defensivo for atingido, continua do último registro na
+      // próxima rodada em vez de pular mensagens ainda não processadas.
+      realtimeFallbackCursorRef.current = fallbackWindowComplete
+        ? windowEnd
+        : rows.at(-1)?.created_at || firstCursor;
 
       if (rows.length === 0) return;
 
@@ -2123,7 +2132,7 @@ const CRM = () => {
           const map = new Map<string, any>();
           // Em uma carga completa, o banco é a fonte da verdade. Em cargas
           // incrementais, preservamos somente registros pertencentes à conta atual.
-          if (lastContactsSyncRef.current) {
+          if (lastContactsSyncRef.current || pageError) {
             for (const c of prev) {
               if (c?.user_id === userId) map.set(c.id, c);
             }
@@ -2185,6 +2194,7 @@ const CRM = () => {
           description: 'Mantivemos a lista já carregada e tentaremos sincronizar novamente.',
           variant: 'destructive',
         });
+        window.setTimeout(() => void fetchContacts(), 5_000);
       }
       setLoading(false); // Garante que o loading saia após o fetch bem sucedido
     } finally {
@@ -2432,6 +2442,9 @@ const CRM = () => {
        const user = session?.user;
        if (!user) return;
        currentUserIdRef.current = user.id;
+        // O número salvo já foi restaurado no mount. Começamos a rede agora,
+        // sem aguardar configurações, métricas, fluxos e integrações.
+        let contactsSyncPromise = fetchContacts();
 
  
         let settingsData = null;
@@ -2499,18 +2512,16 @@ const CRM = () => {
          setActiveWhatsAppNumberId(validStored);
          setActiveNumberId(validStored);
           if (numberChanged) {
+            await contactsSyncPromise;
             setContacts([]);
             contactsSeededRef.current = false;
             lastContactsSyncRef.current = null;
+            contactsSyncPromise = fetchContacts();
           }
           restoreContactsFromCache(user.id, validStored);
        } catch (multiError) {
          console.warn('[CRM] multi-whatsapp indisponível:', multiError);
        }
-
-       // Começa a sincronização principal imediatamente. As consultas abaixo
-       // continuam em paralelo e não atrasam mais a lista de conversas.
-       const contactsSyncPromise = fetchContacts();
 
       const { data: metricsData } = await supabase
         .from('crm_metrics')

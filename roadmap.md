@@ -43,3 +43,4 @@
 - [x] Explicar mensagens sem conteúdo ou mídia disponibilizada pela Meta, eliminando bolhas que mostram somente o horário.
 - [x] Criar diagnóstico seguro por número para conexão Meta, webhook, mensagens, agente, fluxos e tempo real na VPS.
 - [x] Ampliar o diagnóstico por número para DDI, nono dígito, caixa provável e assinatura Meta sem correspondência exata.
+- [x] Corrigir o diagnóstico por phone_number_id/UUID e impedir que a escuta misture mensagens de outras caixas.

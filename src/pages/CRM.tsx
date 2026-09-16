@@ -693,7 +693,12 @@ const CRM = () => {
   const scopeToNumber = <T,>(query: T): T => {
     const numberId = activeNumberIdRef.current;
     if (!numberId) return query;
-    return (query as any).eq('whatsapp_number_id', numberId) as T;
+    // A leitura precisa incluir o legado sem caixa exatamente como o realtime.
+    // Sem isso, uma queda do socket deixa essas conversas congeladas porque a
+    // carga inicial e o polling nunca voltam a encontrá-las.
+    return (query as any).or(
+      `whatsapp_number_id.eq.${numberId},whatsapp_number_id.is.null`
+    ) as T;
   };
   /** Campos de escopo para inserts de contatos/mensagens. */
   const numberScopePatch = (): { whatsapp_number_id?: string } =>
@@ -1948,7 +1953,16 @@ const CRM = () => {
           setSelectedContact((prev: any) => ({ ...prev, ...payload.new }));
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status !== 'SUBSCRIBED') return;
+        // Eventos ocorridos durante uma queda do socket não são reenviados.
+        // Reconciliamos banco e lista ao conectar/reconectar para não deixar
+        // horários ou ordenação presos no último evento recebido.
+        void Promise.all([
+          fetchContacts(),
+          syncRecentRealtimeMessages(),
+        ]);
+      });
 
     // Interval for processing scheduled flow nodes (delays)
     let scheduledRunning = false;

@@ -741,6 +741,18 @@ const CRM = () => {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed?.rows)) return;
 
+      // O polling precisa recomeçar do último instante realmente salvo no
+      // navegador. Antes ele sempre começava em "agora - 15 segundos" e podia
+      // ignorar todas as mensagens recebidas enquanto o CRM esteve fechado.
+      const cachedSyncTime = typeof parsed?.lastSyncedAt === 'string'
+        ? new Date(parsed.lastSyncedAt)
+        : null;
+      if (cachedSyncTime && Number.isFinite(cachedSyncTime.getTime())) {
+        // Pequena sobreposição protege mensagens que chegaram exatamente no
+        // limite; a deduplicação por id evita itens repetidos.
+        realtimeFallbackCursorRef.current = new Date(cachedSyncTime.getTime() - 60_000).toISOString();
+      }
+
       const ownedRows = parsed.rows.filter((contact: any) =>
         contact?.user_id === userId &&
         (!numberId || !contact?.whatsapp_number_id || contact.whatsapp_number_id === numberId)
@@ -1475,7 +1487,10 @@ const CRM = () => {
 
     try {
       const cursor = realtimeFallbackCursorRef.current;
-      const firstCursor = cursor || new Date(Date.now() - 15_000).toISOString();
+      // Sem cache (primeiro acesso ou cache removido), reconcilia o último dia.
+      // Assim a lista não depende exclusivamente do websocket para recuperar o
+      // período em que a aba estava fechada ou a conexão em tempo real caiu.
+      const firstCursor = cursor || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       // Fecha a janela antes de consultar. Mensagens que chegarem durante a
       // paginação ficam para a próxima rodada e não deslocam os offsets.
       const windowEnd = new Date().toISOString();
@@ -1538,11 +1553,13 @@ const CRM = () => {
 
       const contactIds = Array.from(new Set(rows.map((row: any) => row.contact_id).filter(Boolean)));
       if (contactIds.length > 0) {
-        const { data: changedContacts } = await supabase
-          .from('crm_contacts')
-          .select('*')
-          .eq('user_id', currentUserIdRef.current ?? '')
-          .in('id', contactIds);
+        const { data: changedContacts } = await scopeToNumber(
+          supabase
+            .from('crm_contacts')
+            .select('*')
+            .eq('user_id', currentUserIdRef.current ?? '')
+            .in('id', contactIds)
+        );
 
         if (changedContacts?.length) {
           setContacts(prev => {
@@ -1605,7 +1622,14 @@ const CRM = () => {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status !== 'SUBSCRIBED') return;
+        // O canal pode reconectar depois de uma queda silenciosa. Reconciliar
+        // imediatamente elimina o intervalo perdido sem depender do próximo
+        // timer e sem recarregar a página.
+        void syncRecentRealtimeMessages();
+        void fetchContacts();
+      });
 
     return () => {
       supabase.removeChannel(activeMessageChannel);
@@ -1780,6 +1804,7 @@ const CRM = () => {
           contactsCacheKeyRef.current = `crm_contacts_cache_v3_${nextUserId}_${activeNumberIdRef.current || 'default'}`;
           contactsSeededRef.current = false;
           lastContactsSyncRef.current = null;
+          realtimeFallbackCursorRef.current = null;
         }
         currentUserIdRef.current = nextUserId;
         // A chave por usuário evita consultar por engano a caixa que ficou
@@ -1790,6 +1815,9 @@ const CRM = () => {
         // Primeira pintura imediata: não espera configurações, métricas,
         // templates ou integrações para mostrar as conversas recentes.
         restoreContactsFromCache(nextUserId, storedNumberId);
+        // Não espera seis segundos para reconciliar mensagens recebidas enquanto
+        // a tela estava fechada. O lock interno impede chamadas sobrepostas.
+        void syncRecentRealtimeMessages();
         if (localStorage.getItem(`crm_whatsapp_connected_${session.user.id}`) === 'true') {
           setWhatsAppConnectionConfirmed(true);
         }
@@ -1802,6 +1830,7 @@ const CRM = () => {
         console.log('App visível, atualizando dados...');
         fetchData(false);
         fetchContacts();
+         void syncRecentRealtimeMessages();
 
         if (selectedContactRef.current?.id) {
           fetchMessages(selectedContactRef.current.id, true);
@@ -2093,8 +2122,8 @@ const CRM = () => {
       const MAX_PAGES = 200; // até 200k contatos
       const newRows: any[] = [];
       const fetchStartedAt = new Date().toISOString();
-      let from = 0;
       let pageError = false;
+      let pageCursor: { updatedAt: string; id: string } | null = null;
 
       for (let page = 0; page < MAX_PAGES; page++) {
         let q = scopeToNumber(
@@ -2103,13 +2132,25 @@ const CRM = () => {
             .select('*')
             .eq('user_id', userId)
         )
+          // Fecha a janela para atualizações novas não deslocarem registros
+          // entre páginas durante esta mesma sincronização.
+          .lte('updated_at', fetchStartedAt)
           .order('updated_at', { ascending: false })
           .order('id', { ascending: true })
-          .range(from, from + pageSize - 1);
+          .limit(pageSize);
 
         // Se já temos um sync anterior, buscamos apenas o que mudou
         if (lastContactsSyncRef.current) {
           q = q.gt('updated_at', lastContactsSyncRef.current);
+        }
+
+        // Paginação por cursor composto, em vez de OFFSET. Mesmo que outro
+        // contato seja atualizado durante a leitura, nenhuma linha ainda não
+        // visitada muda de posição e fica para trás.
+        if (pageCursor) {
+          q = q.or(
+            `updated_at.lt.${pageCursor.updatedAt},and(updated_at.eq.${pageCursor.updatedAt},id.gt.${pageCursor.id})`
+          );
         }
 
         const { data, error } = await q;
@@ -2136,7 +2177,13 @@ const CRM = () => {
           if (page === 0) setLoading(false);
         }
         if (data.length < pageSize) break;
-        from += pageSize;
+        const lastRow = data[data.length - 1];
+        if (!lastRow?.updated_at || !lastRow?.id) {
+          pageError = true;
+          console.warn('[CRM] Página de contatos sem cursor válido; sincronização será repetida.');
+          break;
+        }
+        pageCursor = { updatedAt: lastRow.updated_at, id: lastRow.id };
       }
 
       if (newRows.length > 0 || !lastContactsSyncRef.current) {
@@ -2543,7 +2590,9 @@ const CRM = () => {
             setContacts([]);
             contactsSeededRef.current = false;
             lastContactsSyncRef.current = null;
+             realtimeFallbackCursorRef.current = null;
             contactsSyncPromise = fetchContacts();
+             void syncRecentRealtimeMessages();
           }
           restoreContactsFromCache(user.id, validStored);
        } catch (multiError) {

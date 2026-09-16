@@ -2141,7 +2141,7 @@ else if (message.type === "unsupported") {
        } catch (activityError) {
          const activityMessage = activityError instanceof Error ? activityError.message : String(activityError);
          console.error('[WEBHOOK] Failed to update inbound contact activity', { waId, userId, error: activityMessage });
-        return jsonResponse({ success: false, error: activityError.message }, 500);
+         return jsonResponse({ success: false, error: activityMessage }, 500);
        }
     console.log('[WEBHOOK] Saved inbound message and reset last_read_at', {
       waId,

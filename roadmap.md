@@ -37,3 +37,4 @@
 - [x] Garantir que o bloco Agente IA iniciado por um gatilho envie a abertura e responda sem depender da ativação global.
 - [x] Acelerar a abertura das conversas com cache imediato, carga progressiva, fallback realtime paginado e índices compostos.
 - [x] Avisar uma vez por usuário após 4 minutos e limpar diariamente históricos sem atividade por 10 dias, preservando contatos e mídias ainda referenciadas.
+- [x] Restaurar todos os gatilhos quando a função do webhook chegar antes da migration 104, mantendo reserva condicional contra disparos concorrentes.

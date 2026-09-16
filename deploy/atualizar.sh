@@ -472,6 +472,20 @@ qtd=$(find "$ROOT/supabase/functions" -maxdepth 1 -mindepth 1 -type d ! -name '_
 
 ok "${qtd} funções recarregadas em ${PUBLIC_API_URL:-http://localhost:${GATEWAY_PORT:-8000}}/functions/v1/<nome>"
 
+# A política começa no mesmo deploy. Se a primeira execução falhar, o cron
+# diário tenta novamente; a atualização não apaga contatos nem configurações.
+retention_response="$(curl -sS --max-time 300 -X POST \
+  "${PUBLIC_API_URL:-http://localhost:${GATEWAY_PORT:-8000}}/functions/v1/retention-cleanup" \
+  -H "apikey: ${ANON_KEY}" \
+  -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+  -H "Content-Type: application/json" \
+  --data '{"source":"deploy","contact_limit":100,"max_batches":100}' 2>/dev/null || true)"
+if printf '%s' "$retention_response" | grep -q '"success":true'; then
+  ok "primeira limpeza de históricos inativos concluída"
+else
+  warn "primeira limpeza não respondeu; o cron diário tentará novamente às 04:05"
+fi
+
 # --------------------------------------------------------------- 7) frontend --
 sec "7/9 Frontend"
 cd "$ROOT"
@@ -637,6 +651,13 @@ if [ "${broadcast_update_policy:-0}" -ge 1 ]; then
   echo -e "  Pausa dos disparos     : ${C_G}OK${N} (UPDATE autenticado + RLS por usuário)"
 else
   die "Migration 106 incompleta; a permissão segura para pausar/retomar não foi criada"
+fi
+retention_function="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='crm_cleanup_inactive_histories'")"
+retention_cron="$(q "select count(*) from cron.job where jobname='inactive-history-cleanup-daily'")"
+if [ "$retention_function" = "1" ] && [ "$retention_cron" = "1" ]; then
+  echo -e "  Retenção de históricos : ${C_G}OK${N} (10 dias + cron diário)"
+else
+  die "Migration 108 incompleta; a retenção automática de históricos não foi ativada"
 fi
 echo "  frontend aponta  : ${API}"
 if [ "$SEM_BUILD" != "1" ]; then

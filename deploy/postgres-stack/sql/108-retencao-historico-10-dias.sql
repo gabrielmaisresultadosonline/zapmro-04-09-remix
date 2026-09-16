@@ -60,6 +60,19 @@ BEGIN
    ORDER BY max(m.created_at)
    LIMIT LEAST(1000, GREATEST(1, COALESCE(p_contact_limit, 100)));
 
+  -- Serializa com as rotinas que atualizam o contato ao receber/enviar. Assim
+  -- uma conversa retomada durante o lote fica para a próxima conferência.
+  PERFORM 1
+    FROM public.crm_contacts c
+    JOIN pg_temp.retention_contacts r ON r.contact_id = c.id
+   FOR UPDATE OF c;
+
+  DELETE FROM pg_temp.retention_contacts c
+   WHERE EXISTS (
+     SELECT 1 FROM public.crm_messages m
+      WHERE m.contact_id = c.contact_id AND m.created_at >= v_cutoff
+   );
+
   SELECT count(*)::integer INTO deleted_contacts FROM pg_temp.retention_contacts;
   IF deleted_contacts = 0 THEN
     deleted_messages := 0;
@@ -79,6 +92,10 @@ BEGIN
     DELETE FROM public.crm_messages m
      USING pg_temp.retention_contacts c
      WHERE m.contact_id = c.contact_id
+       AND NOT EXISTS (
+         SELECT 1 FROM public.crm_messages recent
+          WHERE recent.contact_id = c.contact_id AND recent.created_at >= v_cutoff
+       )
      RETURNING m.user_id, m.media_url, m.content, m.metadata
   ), stored AS (
     INSERT INTO pg_temp.retention_removed_media (user_id, public_url)

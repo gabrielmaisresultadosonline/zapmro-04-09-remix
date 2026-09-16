@@ -64,6 +64,7 @@ fi
 # O argumento contém apenas dígitos; ainda assim usamos uma variável do psql
 # para evitar interpolar entrada livre nas consultas.
 MATCH_NUMBER="regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g') = :'alvo' OR n.meta_phone_number_id = :'alvo'"
+MATCH_SOURCE="exata"
 
 titulo "1) Serviços necessários"
 for servico in "$DB_CONTAINER" "$FN_CONTAINER" zapmro-rest zapmro-realtime; do
@@ -85,7 +86,62 @@ NUMEROS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_
    order by n.is_active desc, n.is_primary desc, n.created_at;" 2>/dev/null)"
 
 if [ -z "$NUMEROS" ]; then
-  warn "Nenhuma caixa cadastrada com esse telefone/ID. Procurando como contato..."
+  warn "Nenhuma correspondência exata. Conferindo DDI, DDD e variação do nono dígito..."
+
+  PROVAVEIS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -v alvo="$ALVO" -c "
+    with base as (
+      select n.*,
+             regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g') as telefone_limpo
+        from public.crm_whatsapp_numbers n
+    )
+    select distinct n.id, n.user_id, coalesce(n.label,''), coalesce(n.meta_display_phone_number,''),
+           coalesce(n.meta_phone_number_id,''), coalesce(n.meta_waba_id,''),
+           case when coalesce(n.meta_access_token,'') <> '' then 'sim' else 'nao' end,
+           n.is_active, n.is_primary
+      from base n
+     where length(n.telefone_limpo) >= 8
+       and (
+         right(n.telefone_limpo, 8) = right(:'alvo', 8)
+         or regexp_replace(n.telefone_limpo, '^(55[0-9]{2})9([0-9]{8})$', '\1\2')
+              = regexp_replace(:'alvo', '^(55[0-9]{2})9([0-9]{8})$', '\1\2')
+       )
+     order by n.is_active desc, n.is_primary desc;" 2>/dev/null)"
+
+  PROVAVEL_COUNT="$(printf '%s\n' "$PROVAVEIS" | sed '/^$/d' | wc -l | tr -d ' ')"
+  TOTAL_CAIXAS="$(q1 'select count(*) from public.crm_whatsapp_numbers')"
+
+  if [ "$PROVAVEL_COUNT" = "1" ]; then
+    NUMEROS="$PROVAVEIS"
+    MATCH_SOURCE="provavel"
+    warn "Uma única caixa provável foi encontrada pela variação do telefone; ela será testada abaixo."
+  elif [ "$PROVAVEL_COUNT" = "0" ] && [ "$TOTAL_CAIXAS" = "1" ]; then
+    NUMEROS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -c "
+      select n.id, n.user_id, coalesce(n.label,''), coalesce(n.meta_display_phone_number,''),
+             coalesce(n.meta_phone_number_id,''), coalesce(n.meta_waba_id,''),
+             case when coalesce(n.meta_access_token,'') <> '' then 'sim' else 'nao' end,
+             n.is_active, n.is_primary
+        from public.crm_whatsapp_numbers n limit 1;" 2>/dev/null)"
+    MATCH_SOURCE="unica"
+    warn "Há somente uma caixa cadastrada; ela será testada mesmo sem correspondência do telefone."
+  elif [ "$PROVAVEL_COUNT" -gt 1 ]; then
+    warn "Há mais de uma caixa parecida; nenhuma foi escolhida automaticamente."
+  else
+    warn "Nenhuma caixa provável foi encontrada. Procurando o número como contato..."
+  fi
+
+  q "select coalesce(n.label,'(sem nome)') as caixa,
+            case
+              when length(regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g')) >= 6
+              then left(regexp_replace(n.meta_display_phone_number, '[^0-9]', '', 'g'), 4)
+                   || repeat('*', greatest(length(regexp_replace(n.meta_display_phone_number, '[^0-9]', '', 'g')) - 6, 1))
+                   || right(regexp_replace(n.meta_display_phone_number, '[^0-9]', '', 'g'), 2)
+              else '(telefone ausente)'
+            end as telefone_mascarado,
+            case when coalesce(n.meta_phone_number_id,'') <> '' then left(n.meta_phone_number_id,4) || '…' else '(ID ausente)' end as phone_id,
+            case when coalesce(n.meta_waba_id,'') <> '' then left(n.meta_waba_id,4) || '…' else '(WABA ausente)' end as waba_id,
+            n.is_active as ativa, n.is_primary as principal
+       from public.crm_whatsapp_numbers n
+      order by n.is_active desc, n.is_primary desc, n.created_at;"
 else
   q "\set alvo '$ALVO'
     select coalesce(u.email,'(sem e-mail)') as cadastro,
@@ -100,9 +156,12 @@ else
      where $MATCH_NUMBER;"
 fi
 
+SELECTED_IDS="$(printf '%s\n' "$NUMEROS" | awk -F'|' 'NF {print $1}' | paste -sd',' -)"
+MATCH_SELECTED="n.id::text = any(string_to_array(:'ids', ','))"
+
 titulo "3) Agente, fluxos e recebimento"
 if [ -n "$NUMEROS" ]; then
-  q "\set alvo '$ALVO'
+  q "\set ids '$SELECTED_IDS'
     select coalesce(u.email,'(sem e-mail)') as cadastro,
            s.ai_agent_enabled as agente_geral,
            s.ai_agent_trigger as gatilho_agente,
@@ -118,7 +177,7 @@ if [ -n "$NUMEROS" ]; then
       from public.crm_whatsapp_numbers n
       left join auth.users u on u.id=n.user_id
       left join public.crm_settings s on s.user_id=n.user_id
-     where $MATCH_NUMBER;"
+     where $MATCH_SELECTED;"
 fi
 
 q "\set alvo '$ALVO'
@@ -137,7 +196,7 @@ q "\set alvo '$ALVO'
 
 titulo "4) Últimos registros (sem mostrar conteúdo)"
 if [ -n "$NUMEROS" ]; then
-  q "\set alvo '$ALVO'
+  q "\set ids '$SELECTED_IDS'
     select m.direction, m.message_type, m.status,
            case when m.media_url is not null then 'SIM' else 'NAO' end as tem_midia,
            case when m.error_code is not null or m.error_message is not null
@@ -146,7 +205,7 @@ if [ -n "$NUMEROS" ]; then
       from public.crm_messages m
       join public.crm_whatsapp_numbers n on n.id=m.whatsapp_number_id
       left join public.crm_contacts c on c.id=m.contact_id
-     where $MATCH_NUMBER
+     where $MATCH_SELECTED
      order by m.created_at desc limit 20;"
 else
   q "\set alvo '$ALVO'
@@ -169,10 +228,13 @@ done
 
 titulo "6) Meta: credencial e assinatura do webhook"
 if [ -z "$NUMEROS" ]; then
-  warn "Teste da Meta ignorado: o alvo não corresponde a uma caixa cadastrada."
+  warn "Teste da Meta ignorado: não foi possível escolher uma caixa sem ambiguidade."
 elif ! command -v jq >/dev/null; then
   warn "Instale jq para conferir a Meta: sudo apt-get install -y jq"
 else
+  if [ "$MATCH_SOURCE" != "exata" ]; then
+    warn "Teste executado sobre uma caixa ${MATCH_SOURCE}; confirme o telefone exibido pela Meta no resultado."
+  fi
   while IFS='|' read -r _id _user label display pnid waba tem_token ativa primaria; do
     [ -n "$pnid" ] || { erro "${label:-Caixa}: phone_number_id vazio"; continue; }
     TOKEN="$(q1 "select meta_access_token from public.crm_whatsapp_numbers where id='$_id' limit 1")"
@@ -220,13 +282,14 @@ if docker ps --format '{{.Names}}' | grep -qx "$FN_CONTAINER"; then
   PADRAO="$ALVO"
   [ -n "$IDS" ] && PADRAO="$PADRAO|$IDS"
   timeout "$SEGUNDOS" docker logs -f --since 3s "$FN_CONTAINER" 2>&1 \
-    | grep --line-buffered -aiE "$PADRAO" \
+    | grep --line-buffered -aiE "$PADRAO|\[WEBHOOK-INBOUND\]|inbound_received|inbound_routed|Saved inbound message" \
     || true
 fi
 
 titulo "Como interpretar"
 cat <<'TXT'
   Nada aparece na escuta       -> a Meta não entregou o webhook; confira callback e subscribed_apps.
+  Evento de outro número       -> a Meta entrega webhooks, mas o phone_number_id desta caixa está divergente.
   inbound_received apenas      -> chegou, mas falhou antes de salvar; veja a falha logo abaixo/acima.
   inbound_routed               -> número e dono foram identificados corretamente.
   Saved inbound message        -> recebimento e gravação estão funcionando.

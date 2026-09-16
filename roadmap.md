@@ -35,3 +35,4 @@
 - [x] Tornar Pausar/Retomar sempre visíveis no histórico e confirmar no banco cada mudança de estado.
 - [x] Validar no deploy que o domínio publicou o frontend com Pausar/Retomar e tratar campanhas legadas em envio.
 - [x] Garantir que o bloco Agente IA iniciado por um gatilho envie a abertura e responda sem depender da ativação global.
+- [x] Acelerar a abertura das conversas com cache imediato, carga progressiva, fallback realtime paginado e índices compostos.

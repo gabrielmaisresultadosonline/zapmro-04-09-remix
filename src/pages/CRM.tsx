@@ -725,6 +725,32 @@ const CRM = () => {
   const contactsInFlightRef = useRef<boolean>(false);
   const realtimeFallbackCursorRef = useRef<string | null>(null);
   const realtimeFallbackInFlightRef = useRef<boolean>(false);
+  const restoreContactsFromCache = (userId: string, numberId: string | null): void => {
+    if (contactsSeededRef.current) return;
+
+    const cacheKey = `crm_contacts_cache_v3_${userId}_${numberId || 'default'}`;
+    contactsCacheKeyRef.current = cacheKey;
+    contactsSeededRef.current = true;
+
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed?.rows)) return;
+
+      const ownedRows = parsed.rows.filter((contact: any) =>
+        contact?.user_id === userId &&
+        (!numberId || !contact?.whatsapp_number_id || contact.whatsapp_number_id === numberId)
+      );
+      if (ownedRows.length === 0) return;
+
+      setContacts(deduplicateConversationContacts(ownedRows));
+      setLoading(false);
+    } catch (error) {
+      console.warn('[CRM] Não foi possível restaurar o cache de conversas:', error);
+    }
+  };
   const [statusFilter, setStatusFilter] = useState('all');
   // Texto visível do campo de busca da lista de Conversas. Mantido em sincronia
   // com `statusFilter`: quando o usuário apaga o texto, voltamos automaticamente
@@ -1448,20 +1474,31 @@ const CRM = () => {
     try {
       const cursor = realtimeFallbackCursorRef.current;
       const firstCursor = cursor || new Date(Date.now() - 15_000).toISOString();
-      const { data } = await scopeToNumber(
-        supabase
-          .from('crm_messages')
-          .select('*')
-          .eq('user_id', currentUserIdRef.current ?? '')
-      )
-        .gt('created_at', firstCursor)
-        .order('created_at', { ascending: true })
-        .limit(100); // Limite de segurança para evitar sobrecarga no realtime fallback
+      // Fecha a janela antes de consultar. Mensagens que chegarem durante a
+      // paginação ficam para a próxima rodada e não deslocam os offsets.
+      const windowEnd = new Date().toISOString();
+      const rows: any[] = [];
+      const pageSize = 250;
 
-      const rows = data || [];
-      realtimeFallbackCursorRef.current = rows.length > 0
-        ? rows.reduce((latest: string, row: any) => row.created_at > latest ? row.created_at : latest, firstCursor)
-        : firstCursor;
+      for (let from = 0; from < 10_000; from += pageSize) {
+        const { data, error } = await scopeToNumber(
+          supabase
+            .from('crm_messages')
+            .select('*')
+            .eq('user_id', currentUserIdRef.current ?? '')
+        )
+          .gt('created_at', firstCursor)
+          .lte('created_at', windowEnd)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < pageSize) break;
+      }
+
+      realtimeFallbackCursorRef.current = windowEnd;
 
       if (rows.length === 0) return;
 
@@ -1734,6 +1771,9 @@ const CRM = () => {
           lastContactsSyncRef.current = null;
         }
         currentUserIdRef.current = nextUserId;
+        // Primeira pintura imediata: não espera configurações, métricas,
+        // templates ou integrações para mostrar as conversas recentes.
+        restoreContactsFromCache(nextUserId, activeNumberIdRef.current);
         if (localStorage.getItem(`crm_whatsapp_connected_${session.user.id}`) === 'true') {
           setWhatsAppConnectionConfirmed(true);
         }
@@ -2023,34 +2063,10 @@ const CRM = () => {
         lastContactsSyncRef.current = null;
       }
       currentUserIdRef.current = userId;
-      // Resolve cache key once per user
+      // Resolve o cache por usuário e por caixa antes da sincronização.
       contactsCacheKeyRef.current = `crm_contacts_cache_v3_${userId}_${activeNumberIdRef.current || 'default'}`;
       const cacheKey = contactsCacheKeyRef.current;
-      const now = Date.now();
-
-      // Seed from cache only on the first call this session
-      if (!contactsSeededRef.current && cacheKey) {
-        try {
-          const raw = localStorage.getItem(cacheKey);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed?.rows)) {
-              const ownedRows = parsed.rows.filter((contact: any) => contact?.user_id === userId);
-              console.log(`[CRM] Restaurando ${ownedRows.length} contatos do cache da conta atual...`);
-              setContacts(deduplicateConversationContacts(ownedRows));
-              // O cache guarda só as conversas mais recentes (limite do navegador),
-              // então NÃO marcamos a sincronização como completa: o fetch abaixo
-              // continua trazendo a base inteira.
-              lastContactsSyncRef.current = null;
-              // Se restauramos do cache, podemos tirar o loading inicial para a UI aparecer logo
-              setLoading(false);
-            }
-          }
-        } catch (e) {
-          console.warn('[CRM] Erro ao ler cache de contatos:', e);
-        }
-        contactsSeededRef.current = true;
-      }
+      restoreContactsFromCache(userId, activeNumberIdRef.current);
 
       // Incremental paginated fetch — carrega TODOS os contatos (sem teto de 1000)
       const pageSize = 1000;
@@ -2083,6 +2099,21 @@ const CRM = () => {
         }
         if (!data || data.length === 0) break;
         newRows.push(...data);
+
+        // Na carga completa, publica cada página assim que chega. A lista mais
+        // recente aparece após a primeira consulta; o restante entra em segundo
+        // plano sem bloquear a tela.
+        if (!lastContactsSyncRef.current) {
+          const progressiveRows = [...newRows];
+          setContacts(prev => {
+            const changedDuringFetch = prev.filter((contact: any) =>
+              contact?.user_id === userId &&
+              new Date(contact.updated_at || 0).getTime() > new Date(fetchStartedAt).getTime()
+            );
+            return deduplicateConversationContacts([...changedDuringFetch, ...progressiveRows]);
+          });
+          if (page === 0) setLoading(false);
+        }
         if (data.length < pageSize) break;
         from += pageSize;
       }
@@ -2122,6 +2153,7 @@ const CRM = () => {
               last_interaction: c.last_interaction,
               last_message_received_at: c.last_message_received_at,
               last_read_at: c.last_read_at,
+              whatsapp_number_id: c.whatsapp_number_id,
               updated_at: c.updated_at,
               created_at: c.created_at,
             }));
@@ -2147,6 +2179,12 @@ const CRM = () => {
       // de sincronização — assim a próxima tentativa recupera o que faltou.
       if (!pageError) {
         lastContactsSyncRef.current = fetchStartedAt;
+      } else if (newRows.length === 0) {
+        toast({
+          title: 'Não foi possível atualizar as conversas',
+          description: 'Mantivemos a lista já carregada e tentaremos sincronizar novamente.',
+          variant: 'destructive',
+        });
       }
       setLoading(false); // Garante que o loading saia após o fetch bem sucedido
     } finally {
@@ -2456,12 +2494,23 @@ const CRM = () => {
          setUserNumbersCount(numbers.length);
          const stored = getActiveNumberId(user.id);
          const validStored = stored && numbers.some((n) => n.id === stored) ? stored : null;
+          const numberChanged = activeNumberIdRef.current !== validStored;
          activeNumberIdRef.current = validStored;
          setActiveWhatsAppNumberId(validStored);
          setActiveNumberId(validStored);
+          if (numberChanged) {
+            setContacts([]);
+            contactsSeededRef.current = false;
+            lastContactsSyncRef.current = null;
+          }
+          restoreContactsFromCache(user.id, validStored);
        } catch (multiError) {
          console.warn('[CRM] multi-whatsapp indisponível:', multiError);
        }
+
+       // Começa a sincronização principal imediatamente. As consultas abaixo
+       // continuam em paralelo e não atrasam mais a lista de conversas.
+       const contactsSyncPromise = fetchContacts();
 
       const { data: metricsData } = await supabase
         .from('crm_metrics')
@@ -2474,8 +2523,7 @@ const CRM = () => {
       const { data: flowsData } = await scopeQueryToActiveNumber(supabase.from('crm_flows').select('*, crm_flow_steps(*)'));
       setFlows(flowsData || []);
 
-      // Paginated fetch to load ALL contacts (default cap is 1000)
-      await fetchContacts();
+       await contactsSyncPromise;
       fetchInboundTimestamps();
 
       const { data: { user: currentUser } } = await supabase.auth.getUser();

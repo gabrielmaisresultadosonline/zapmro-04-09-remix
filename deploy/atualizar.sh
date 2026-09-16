@@ -373,6 +373,7 @@ ok "banco atualizado — ${aplicados} arquivo(s) aplicado(s), ${tabelas} tabelas
 info "reagendando cron das functions para a API local…"
 CRON_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/meta-whatsapp-crm"
 MEDIA_GC_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/media-gc"
+RETENTION_CLEANUP_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/retention-cleanup"
 BROADCAST_WORKER_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/broadcast-worker"
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.functions_url = '${PUBLIC_API_URL:-http://gateway}'" >/dev/null 2>&1 || true
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.service_role_key = '${SERVICE_ROLE_KEY}'" >/dev/null 2>&1 || true
@@ -434,6 +435,17 @@ SELECT cron.schedule('media-gc-daily', '25 4 * * *', \$job\$
     url := '${MEDIA_GC_URL}',
     headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
     body := '{"limit": 500}'::jsonb,
+    timeout_milliseconds := 300000
+  );
+\$job\$);
+
+-- Remove diariamente históricos de conversas sem nenhuma mensagem nova por
+-- mais de 10 dias. Contatos e configurações permanecem intactos.
+SELECT cron.schedule('inactive-history-cleanup-daily', '5 4 * * *', \$job\$
+  SELECT net.http_post(
+    url := '${RETENTION_CLEANUP_URL}',
+    headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
+    body := '{"source":"cron","contact_limit":100,"max_batches":100}'::jsonb,
     timeout_milliseconds := 300000
   );
 \$job\$);

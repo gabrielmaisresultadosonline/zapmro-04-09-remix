@@ -8,8 +8,9 @@ export PAGER=cat PSQL_PAGER=cat LESS=FRX
 ALVO_BRUTO="${1:-}"
 SEGUNDOS="${2:-120}"
 ALVO="$(printf '%s' "$ALVO_BRUTO" | tr -cd '0-9')"
+ALVO_UUID="$(printf '%s' "$ALVO_BRUTO" | tr '[:upper:]' '[:lower:]' | tr -cd '0-9a-f-')"
 
-if [ ${#ALVO} -lt 8 ] || [ ${#ALVO} -gt 20 ]; then
+if { [ ${#ALVO} -lt 8 ] || [ ${#ALVO} -gt 20 ]; } && ! [[ "$ALVO_UUID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
   echo "Uso: $0 <telefone ou phone_number_id> [segundos]"
   echo "Exemplo: $0 '+55 51 9283-5863' 120"
   exit 1
@@ -63,7 +64,7 @@ fi
 
 # O argumento contém apenas dígitos; ainda assim usamos uma variável do psql
 # para evitar interpolar entrada livre nas consultas.
-MATCH_NUMBER="regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g') = :'alvo' OR n.meta_phone_number_id = :'alvo'"
+MATCH_NUMBER="regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g') = :'alvo' OR regexp_replace(coalesce(n.meta_phone_number_id,''), '[^0-9]', '', 'g') = :'alvo' OR n.id::text = :'alvo_uuid'"
 MATCH_SOURCE="exata"
 
 titulo "1) Serviços necessários"
@@ -76,7 +77,7 @@ for servico in "$DB_CONTAINER" "$FN_CONTAINER" zapmro-rest zapmro-realtime; do
 done
 
 titulo "2) Cadastro da caixa WhatsApp"
-NUMEROS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -v alvo="$ALVO" -c "
+NUMEROS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -v alvo="$ALVO" -v alvo_uuid="$ALVO_UUID" -c "
   select n.id, n.user_id, coalesce(n.label,''), coalesce(n.meta_display_phone_number,''),
          coalesce(n.meta_phone_number_id,''), coalesce(n.meta_waba_id,''),
          case when coalesce(n.meta_access_token,'') <> '' then 'sim' else 'nao' end,
@@ -144,6 +145,7 @@ if [ -z "$NUMEROS" ]; then
       order by n.is_active desc, n.is_primary desc, n.created_at;"
 else
   q "\set alvo '$ALVO'
+    \set alvo_uuid '$ALVO_UUID'
     select coalesce(u.email,'(sem e-mail)') as cadastro,
            coalesce(n.label,'(sem nome)') as caixa,
            coalesce(n.meta_display_phone_number,'-') as telefone,
@@ -282,14 +284,13 @@ if docker ps --format '{{.Names}}' | grep -qx "$FN_CONTAINER"; then
   PADRAO="$ALVO"
   [ -n "$IDS" ] && PADRAO="$PADRAO|$IDS"
   timeout "$SEGUNDOS" docker logs -f --since 3s "$FN_CONTAINER" 2>&1 \
-    | grep --line-buffered -aiE "$PADRAO|\[WEBHOOK-INBOUND\]|inbound_received|inbound_routed|Saved inbound message" \
+    | grep --line-buffered -aiE "$PADRAO" \
     || true
 fi
 
 titulo "Como interpretar"
 cat <<'TXT'
   Nada aparece na escuta       -> a Meta não entregou o webhook; confira callback e subscribed_apps.
-  Evento de outro número       -> a Meta entrega webhooks, mas o phone_number_id desta caixa está divergente.
   inbound_received apenas      -> chegou, mas falhou antes de salvar; veja a falha logo abaixo/acima.
   inbound_routed               -> número e dono foram identificados corretamente.
   Saved inbound message        -> recebimento e gravação estão funcionando.

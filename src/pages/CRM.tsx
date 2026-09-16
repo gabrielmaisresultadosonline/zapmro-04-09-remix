@@ -1781,9 +1781,14 @@ const CRM = () => {
           lastContactsSyncRef.current = null;
         }
         currentUserIdRef.current = nextUserId;
+        // A chave por usuário evita consultar por engano a caixa que ficou
+        // selecionada em outra conta usada anteriormente neste navegador.
+        const storedNumberId = getActiveNumberId(nextUserId);
+        activeNumberIdRef.current = storedNumberId;
+        setActiveWhatsAppNumberId(storedNumberId);
         // Primeira pintura imediata: não espera configurações, métricas,
         // templates ou integrações para mostrar as conversas recentes.
-        restoreContactsFromCache(nextUserId, activeNumberIdRef.current);
+        restoreContactsFromCache(nextUserId, storedNumberId);
         if (localStorage.getItem(`crm_whatsapp_connected_${session.user.id}`) === 'true') {
           setWhatsAppConnectionConfirmed(true);
         }
@@ -2098,6 +2103,7 @@ const CRM = () => {
             .eq('user_id', userId)
         )
           .order('updated_at', { ascending: false })
+          .order('id', { ascending: true })
           .range(from, from + pageSize - 1);
 
         // Se já temos um sync anterior, buscamos apenas o que mudou

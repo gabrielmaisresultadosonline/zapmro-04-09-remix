@@ -294,6 +294,15 @@ function sortTriggerFlows(flows: any[], inboundNumberId: string | null) {
   });
 }
 
+function isMissingRpcFunction(error: any): boolean {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return code === 'PGRST202'
+    || code === '42883'
+    || message.includes('could not find the function')
+    || message.includes('does not exist');
+}
+
 async function claimAutomaticFlow(
   supabase: any,
   contact: any,
@@ -310,6 +319,9 @@ async function claimAutomaticFlow(
     p_expected_flow_state: contact.flow_state || null,
   });
   if (!error) return claimed === true;
+  if (!isMissingRpcFunction(error)) {
+    throw new Error(`Falha ao reservar gatilho: ${error.message}`);
+  }
 
   // Compatibilidade de implantação: algumas VPS receberam a Edge Function
   // antes da migration 104. Nesse estado, interromper aqui silencia TODOS os
@@ -365,6 +377,9 @@ async function recordInboundContactActivity(
     p_message_at: messageAt,
   });
   if (!error) return;
+  if (!isMissingRpcFunction(error)) {
+    throw new Error(`Falha ao atualizar atividade recebida: ${error.message}`);
+  }
 
   // Mesma compatibilidade da reserva acima: sem a migration 104, o webhook
   // não pode parar depois de salvar a mensagem e antes de avaliar os gatilhos.

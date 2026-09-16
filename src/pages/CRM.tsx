@@ -1622,7 +1622,14 @@ const CRM = () => {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status !== 'SUBSCRIBED') return;
+        // O canal pode reconectar depois de uma queda silenciosa. Reconciliar
+        // imediatamente elimina o intervalo perdido sem depender do próximo
+        // timer e sem recarregar a página.
+        void syncRecentRealtimeMessages();
+        void fetchContacts();
+      });
 
     return () => {
       supabase.removeChannel(activeMessageChannel);
@@ -2115,8 +2122,8 @@ const CRM = () => {
       const MAX_PAGES = 200; // até 200k contatos
       const newRows: any[] = [];
       const fetchStartedAt = new Date().toISOString();
-      let from = 0;
       let pageError = false;
+      let pageCursor: { updatedAt: string; id: string } | null = null;
 
       for (let page = 0; page < MAX_PAGES; page++) {
         let q = scopeToNumber(
@@ -2125,13 +2132,25 @@ const CRM = () => {
             .select('*')
             .eq('user_id', userId)
         )
+          // Fecha a janela para atualizações novas não deslocarem registros
+          // entre páginas durante esta mesma sincronização.
+          .lte('updated_at', fetchStartedAt)
           .order('updated_at', { ascending: false })
           .order('id', { ascending: true })
-          .range(from, from + pageSize - 1);
+          .limit(pageSize);
 
         // Se já temos um sync anterior, buscamos apenas o que mudou
         if (lastContactsSyncRef.current) {
           q = q.gt('updated_at', lastContactsSyncRef.current);
+        }
+
+        // Paginação por cursor composto, em vez de OFFSET. Mesmo que outro
+        // contato seja atualizado durante a leitura, nenhuma linha ainda não
+        // visitada muda de posição e fica para trás.
+        if (pageCursor) {
+          q = q.or(
+            `updated_at.lt.${pageCursor.updatedAt},and(updated_at.eq.${pageCursor.updatedAt},id.gt.${pageCursor.id})`
+          );
         }
 
         const { data, error } = await q;
@@ -2158,7 +2177,13 @@ const CRM = () => {
           if (page === 0) setLoading(false);
         }
         if (data.length < pageSize) break;
-        from += pageSize;
+        const lastRow = data[data.length - 1];
+        if (!lastRow?.updated_at || !lastRow?.id) {
+          pageError = true;
+          console.warn('[CRM] Página de contatos sem cursor válido; sincronização será repetida.');
+          break;
+        }
+        pageCursor = { updatedAt: lastRow.updated_at, id: lastRow.id };
       }
 
       if (newRows.length > 0 || !lastContactsSyncRef.current) {

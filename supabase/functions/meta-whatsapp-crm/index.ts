@@ -2154,7 +2154,13 @@ else if (message.type === "unsupported") {
         console.log(`[FLOW-LOG] Concurrent duplicate inbound message ${message.id} ignored for ${waId}`);
         return jsonResponse({ success: true, message: 'Duplicate inbound ignored' });
       }
-      console.error('[WEBHOOK] Failed to save inbound message', { waId, userId, error: insertMessageError.message });
+      console.error('[WEBHOOK] Failed to save inbound message', {
+        waId,
+        userId,
+        whatsapp_number_id: inboundNumberId,
+        phone_number_id: webhookPhoneNumberId,
+        error: insertMessageError.message,
+      });
       return jsonResponse({ success: false, error: insertMessageError.message }, 500);
     }
      savedInboundMessageId = insertedInboundMessage?.id ?? null;
@@ -2173,6 +2179,8 @@ else if (message.type === "unsupported") {
       userId,
       contact_id: contactForSave.id,
       meta_message_id: message.id,
+      whatsapp_number_id: inboundNumberId,
+      phone_number_id: webhookPhoneNumberId,
       content_source: extractedInboundText ? 'customer_payload' : 'meta_unavailable',
       referral_used_as_content: false,
     });

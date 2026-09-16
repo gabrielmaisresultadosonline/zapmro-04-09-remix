@@ -1534,11 +1534,10 @@ const CRM = () => {
       // Só avança até o fim da janela quando todas as páginas foram lidas.
       // Se o limite defensivo for atingido, continua do último registro na
       // próxima rodada em vez de pular mensagens ainda não processadas.
+      if (scopeVersion !== numberScopeVersionRef.current) return;
       realtimeFallbackCursorRef.current = fallbackWindowComplete
         ? windowEnd
         : rows.at(-1)?.created_at || firstCursor;
-
-      if (scopeVersion !== numberScopeVersionRef.current) return;
       if (rows.length === 0) return;
 
       const activeContactId = selectedContactRef.current?.id;
@@ -1611,6 +1610,7 @@ const CRM = () => {
         (payload) => {
           const row: any = payload.new;
           if (!row?.id || selectedContactRef.current?.id !== activeContactId) return;
+          if (!belongsToActiveNumber(row)) return;
 
           if (payload.eventType === 'INSERT') {
             setChatMessages(prev => {
@@ -1637,7 +1637,7 @@ const CRM = () => {
       )
       .subscribe((status) => {
         if (status !== 'SUBSCRIBED') {
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             setRealtimeStatus('reconnecting');
             void syncRecentRealtimeMessages();
           }
@@ -1879,7 +1879,7 @@ const CRM = () => {
               .eq('user_id', currentUserIdRef.current)
               .maybeSingle()
               .then(({ data: freshContact }) => {
-                if (!freshContact) return;
+                if (!freshContact || !belongsToActiveNumber(freshContact)) return;
                 setContacts(current => current.some(c => c.id === freshContact.id)
                   ? current
                   : deduplicateConversationContacts([freshContact, ...current]));
@@ -1970,7 +1970,7 @@ const CRM = () => {
       })
       .subscribe((status) => {
         if (status !== 'SUBSCRIBED') {
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             setRealtimeStatus('reconnecting');
             void syncRecentRealtimeMessages();
           }
@@ -2631,7 +2631,9 @@ const CRM = () => {
            : await fetchUserNumbers(user.id);
          setUserNumbersCount(numbers.length);
           const previousPrimaryNumberId = primaryNumberIdRef.current;
-          primaryNumberIdRef.current = numbers.find((number) => number.is_primary)?.id ?? numbers[0]?.id ?? null;
+           // A consulta já vem ordenada por criação; o primeiro número é a
+           // caixa principal que recebeu os registros anteriores ao multi-caixa.
+           primaryNumberIdRef.current = numbers[0]?.id ?? null;
          const stored = getActiveNumberId(user.id);
          const validStored = stored && numbers.some((n) => n.id === stored) ? stored : null;
           const numberChanged = activeNumberIdRef.current !== validStored;
@@ -3280,11 +3282,13 @@ const CRM = () => {
     }
 
     try {
-      const { data } = await supabase
-        .from('crm_messages')
-        .select('*')
-        .eq('contact_id', contactId)
-        .eq('user_id', currentUserIdRef.current ?? '')
+      const { data } = await scopeToNumber(
+        supabase
+          .from('crm_messages')
+          .select('*')
+          .eq('contact_id', contactId)
+          .eq('user_id', currentUserIdRef.current ?? '')
+      )
         .or('is_deleted.is.null,is_deleted.eq.false')
         .order('created_at', { ascending: true });
 
@@ -3335,11 +3339,13 @@ const CRM = () => {
       .filter((m: any) => !m.isOptimistic && m.created_at)
       .reduce((latest: number, m: any) => Math.max(latest, new Date(m.created_at).getTime()), 0);
 
-    let query = supabase
-      .from('crm_messages')
-      .select('*')
-      .eq('contact_id', contactId)
-      .eq('user_id', currentUserIdRef.current ?? '');
+    let query = scopeToNumber(
+      supabase
+        .from('crm_messages')
+        .select('*')
+        .eq('contact_id', contactId)
+        .eq('user_id', currentUserIdRef.current ?? '')
+    );
     if (latestPersistedTime > 0) {
       query = query.gt('created_at', new Date(latestPersistedTime).toISOString()).order('created_at', { ascending: true }).limit(25);
     } else {

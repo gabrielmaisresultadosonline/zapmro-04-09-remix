@@ -206,7 +206,7 @@ if docker ps --format '{{.Names}}' | grep -qx "$FN_CONTAINER"; then
   PADRAO="$ALVO"
   [ -n "$IDS" ] && PADRAO="$PADRAO|$IDS"
   docker logs --since 2h "$FN_CONTAINER" 2>&1 \
-    | grep -aiE "$PADRAO|\[WEBHOOK\].*(Failed|não encontrado|missing)|ON CONFLICT|PGRST|duplicate key" \
+    | grep -aiE "$PADRAO" \
     | tail -n 80 || warn "Nenhuma falha relacionada encontrada nas últimas 2 horas."
 else
   erro "Sem logs: $FN_CONTAINER está parado."
@@ -220,7 +220,7 @@ if docker ps --format '{{.Names}}' | grep -qx "$FN_CONTAINER"; then
   PADRAO="$ALVO"
   [ -n "$IDS" ] && PADRAO="$PADRAO|$IDS"
   timeout "$SEGUNDOS" docker logs -f --since 3s "$FN_CONTAINER" 2>&1 \
-    | grep --line-buffered -aiE "$PADRAO|\[WEBHOOK-INBOUND\]|\[AI-AUTO-WEBHOOK\]|\[TRIGGER-(START|ERROR|CLAIM)\]|Saved inbound message|Failed to save inbound|Event received but no CRM user" \
+    | grep --line-buffered -aiE "$PADRAO" \
     || true
 fi
 

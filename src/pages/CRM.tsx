@@ -1797,6 +1797,7 @@ const CRM = () => {
           contactsCacheKeyRef.current = `crm_contacts_cache_v3_${nextUserId}_${activeNumberIdRef.current || 'default'}`;
           contactsSeededRef.current = false;
           lastContactsSyncRef.current = null;
+          realtimeFallbackCursorRef.current = null;
         }
         currentUserIdRef.current = nextUserId;
         // A chave por usuário evita consultar por engano a caixa que ficou
@@ -2564,7 +2565,9 @@ const CRM = () => {
             setContacts([]);
             contactsSeededRef.current = false;
             lastContactsSyncRef.current = null;
+             realtimeFallbackCursorRef.current = null;
             contactsSyncPromise = fetchContacts();
+             void syncRecentRealtimeMessages();
           }
           restoreContactsFromCache(user.id, validStored);
        } catch (multiError) {

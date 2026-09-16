@@ -41,3 +41,12 @@ $$;
 
 ALTER TABLE public.crm_messages REPLICA IDENTITY FULL;
 ALTER TABLE public.crm_contacts REPLICA IDENTITY FULL;
+
+-- `updated_at` é o cursor da sincronização incremental. Garante que qualquer
+-- alteração futura no contato avance esse cursor, mesmo quando uma rotina
+-- antiga atualizar somente `last_interaction`.
+DROP TRIGGER IF EXISTS update_crm_contacts_updated_at ON public.crm_contacts;
+CREATE TRIGGER update_crm_contacts_updated_at
+  BEFORE UPDATE ON public.crm_contacts
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_updated_at();

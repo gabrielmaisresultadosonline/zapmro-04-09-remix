@@ -482,6 +482,17 @@ retention_response="$(curl -sS --max-time 300 -X POST \
   --data '{"source":"deploy","contact_limit":100,"max_batches":100}' 2>/dev/null || true)"
 if printf '%s' "$retention_response" | grep -q '"success":true'; then
   ok "primeira limpeza de históricos inativos concluída"
+  media_gc_response="$(curl -sS --max-time 300 -X POST \
+    "${PUBLIC_API_URL:-http://localhost:${GATEWAY_PORT:-8000}}/functions/v1/media-gc" \
+    -H "apikey: ${ANON_KEY}" \
+    -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+    -H "Content-Type: application/json" \
+    --data '{"limit":1000}' 2>/dev/null || true)"
+  if printf '%s' "$media_gc_response" | grep -q '"success":true'; then
+    ok "arquivos órfãos vencidos removidos após a verificação final"
+  else
+    warn "a limpeza física não respondeu; o media-gc diário tentará novamente às 04:25"
+  fi
 else
   warn "primeira limpeza não respondeu; o cron diário tentará novamente às 04:05"
 fi

@@ -84,6 +84,7 @@ BEGIN
   CREATE TEMP TABLE IF NOT EXISTS pg_temp.retention_removed_media (
     user_id uuid NOT NULL,
     public_url text NOT NULL,
+    removed_references integer NOT NULL DEFAULT 1,
     PRIMARY KEY (user_id, public_url)
   ) ON COMMIT DROP;
   TRUNCATE pg_temp.retention_removed_media;
@@ -96,10 +97,12 @@ BEGIN
          SELECT 1 FROM public.crm_messages recent
           WHERE recent.contact_id = c.contact_id AND recent.created_at >= v_cutoff
        )
-     RETURNING m.user_id, m.media_url, m.content, m.metadata
+     RETURNING m.id, m.user_id, m.media_url, m.content, m.metadata
   ), stored AS (
-    INSERT INTO pg_temp.retention_removed_media (user_id, public_url)
-    SELECT DISTINCT r.user_id, urls.public_url
+    INSERT INTO pg_temp.retention_removed_media (user_id, public_url, removed_references)
+    SELECT collected.user_id, collected.public_url, count(*)::integer
+      FROM (
+        SELECT DISTINCT r.id, r.user_id, urls.public_url
       FROM removed r
       CROSS JOIN LATERAL (
         SELECT r.media_url AS public_url
@@ -109,10 +112,18 @@ BEGIN
           FROM jsonb_path_query(COALESCE(r.metadata, '{}'::jsonb), '$.** ? (@.type() == "string")') value
       ) urls
      WHERE urls.public_url LIKE '%/storage/v1/object/public/%'
+      ) collected
+     GROUP BY collected.user_id, collected.public_url
     ON CONFLICT DO NOTHING
     RETURNING 1
   )
   SELECT count(*)::bigint INTO deleted_messages FROM removed;
+
+  UPDATE public.crm_media_assets a
+     SET reference_count = GREATEST(0, a.reference_count - r.removed_references),
+         updated_at = now()
+    FROM pg_temp.retention_removed_media r
+   WHERE a.user_id = r.user_id AND a.public_url = r.public_url;
 
   -- Arquivos registrados no catálogo entram imediatamente na lixeira. A remoção
   -- física continua condicionada à verificação final do worker media-gc.

@@ -12,7 +12,6 @@ interface CleanupResult {
   deleted_contacts: number
   deleted_messages: number
   queued_media: number
-  deleted_payload: unknown
 }
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {

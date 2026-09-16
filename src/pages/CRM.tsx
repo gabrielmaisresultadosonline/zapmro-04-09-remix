@@ -693,6 +693,7 @@ const CRM = () => {
   // Registros legados sem caixa pertencem somente à caixa principal. Exibi-los
   // em todas as caixas mistura contatos antigos entre números do mesmo cadastro.
   const primaryNumberIdRef = useRef<string | null>(null);
+  const numbersLoadedRef = useRef(false);
   const numberScopeVersionRef = useRef(0);
   /** Aplica o filtro do número aberto em qualquer query builder do Supabase. */
   const scopeToNumber = <T,>(query: T): T => {
@@ -713,7 +714,13 @@ const CRM = () => {
     const numberId = activeNumberIdRef.current;
     if (!numberId) return true;
     const rowNumber = row?.whatsapp_number_id;
-    return rowNumber === numberId || (!rowNumber && numberId === primaryNumberIdRef.current);
+    if (rowNumber === numberId) return true;
+    if (rowNumber) return false;
+    // Durante a restauração inicial ainda não sabemos qual é a caixa principal.
+    // Não descartamos eventos legados nessa curta janela; a reconciliação
+    // posterior remove qualquer registro que não pertença à caixa escolhida.
+    if (!numbersLoadedRef.current) return true;
+    return numberId === primaryNumberIdRef.current;
   };
   // Per-contact inbound message timestamps (last 7 days) used to compute
   // unread counts shown as a yellow badge on the conversation list.
@@ -1643,7 +1650,7 @@ const CRM = () => {
           }
           return;
         }
-        setRealtimeStatus('online');
+        setRealtimeStatus('connecting');
         // O canal pode reconectar depois de uma queda silenciosa. Reconciliar
         // imediatamente elimina o intervalo perdido sem depender do próximo
         // timer e sem recarregar a página.
@@ -1976,7 +1983,7 @@ const CRM = () => {
           }
           return;
         }
-        setRealtimeStatus('online');
+        setRealtimeStatus('connecting');
         // Eventos ocorridos durante uma queda do socket não são reenviados.
         // Reconciliamos banco e lista ao conectar/reconectar para não deixar
         // horários ou ordenação presos no último evento recebido.
@@ -2097,13 +2104,20 @@ const CRM = () => {
       if (activeContactId && document.visibilityState === 'visible') {
         fetchRecentActiveMessages(activeContactId);
       }
-    }, 4000);
+    }, 2500);
 
     const realtimeFallbackInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        syncRecentRealtimeMessages();
+        // O timestamp enviado pela Meta pode ser anterior ao instante em que o
+        // webhook grava a mensagem. Por isso o cursor de crm_messages sozinho
+        // pode ignorar uma chegada recente. O contato sempre recebe updated_at
+        // no servidor; reconciliar ambos torna a lista independente do socket.
+        void Promise.all([
+          syncRecentRealtimeMessages(),
+          fetchContacts(),
+        ]);
       }
-    }, 6000); // Polling de fallback (aliviado para não saturar o banco)
+    }, 3000);
 
 
 
@@ -2308,6 +2322,9 @@ const CRM = () => {
       // de sincronização — assim a próxima tentativa recupera o que faltou.
       if (!pageError) {
         lastContactsSyncRef.current = fetchStartedAt;
+        // A conexão do socket, sozinha, não prova que a lista está atualizada.
+        // O indicador só fica verde depois que a reconciliação com o banco termina.
+        setRealtimeStatus('online');
       } else if (newRows.length === 0) {
         toast({
           title: 'Não foi possível atualizar as conversas',
@@ -2634,6 +2651,7 @@ const CRM = () => {
            // A consulta já vem ordenada por criação; o primeiro número é a
            // caixa principal que recebeu os registros anteriores ao multi-caixa.
            primaryNumberIdRef.current = numbers[0]?.id ?? null;
+           numbersLoadedRef.current = true;
          const stored = getActiveNumberId(user.id);
          const validStored = stored && numbers.some((n) => n.id === stored) ? stored : null;
           const numberChanged = activeNumberIdRef.current !== validStored;
@@ -3329,11 +3347,6 @@ const CRM = () => {
   };
 
   const fetchRecentActiveMessages = async (contactId: string) => {
-    const cached = messagesCacheRef.current[contactId];
-    const now = Date.now();
-    // Se o cache é muito recente (menos de 10s), pular o fetch de background
-    if (cached && (now - cached.timestamp < 10000)) return;
-
     if (!contactId) return;
     const latestPersistedTime = chatMessagesRef.current
       .filter((m: any) => !m.isOptimistic && m.created_at)

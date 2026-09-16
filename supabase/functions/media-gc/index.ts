@@ -9,7 +9,7 @@
  * Segurança: qualquer dúvida (arquivo ainda referenciado, erro na remoção)
  * preserva o arquivo. Nada ativo é apagado.
  */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
 
 /** true quando alguma mensagem, fluxo ou template ainda aponta para o arquivo. */
 async function isStillReferenced(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   item: QueueItem,
 ): Promise<boolean> {
   const url = item.public_url;

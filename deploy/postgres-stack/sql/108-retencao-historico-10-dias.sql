@@ -3,31 +3,25 @@
 -- Idempotente e aditiva: preserva contatos, configurações e integrações.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS public.crm_retention_notice_views (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  notice_version text NOT NULL,
-  viewed_at timestamptz NOT NULL DEFAULT now(),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (user_id, notice_version)
-);
-
-GRANT SELECT, INSERT ON public.crm_retention_notice_views TO authenticated;
-GRANT ALL ON public.crm_retention_notice_views TO service_role;
-
-ALTER TABLE public.crm_retention_notice_views ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Users read own retention notices" ON public.crm_retention_notice_views;
-CREATE POLICY "Users read own retention notices"
-  ON public.crm_retention_notice_views
-  FOR SELECT TO authenticated
-  USING (auth.uid() = user_id);
-
-DROP POLICY IF EXISTS "Users register own retention notices" ON public.crm_retention_notice_views;
-CREATE POLICY "Users register own retention notices"
-  ON public.crm_retention_notice_views
-  FOR INSERT TO authenticated
-  WITH CHECK (auth.uid() = user_id);
+-- Usa o mecanismo de avisos já existente. O UUID fixo identifica esta versão e
+-- permite registrar a visualização uma única vez por usuário.
+INSERT INTO public.admin_announcements
+  (id, title, message, frequency, active, created_at, updated_at)
+VALUES (
+  '10810810-0000-4000-8000-000000000001',
+  'Atenção: mudamos algumas configurações de armazenamento',
+  'Retenção automática de históricos inativos por 10 dias.',
+  'once',
+  true,
+  now(),
+  now()
+)
+ON CONFLICT (id) DO UPDATE
+  SET title = EXCLUDED.title,
+      message = EXCLUDED.message,
+      frequency = EXCLUDED.frequency,
+      active = EXCLUDED.active,
+      updated_at = now();
 
 CREATE INDEX IF NOT EXISTS crm_messages_retention_contact_created_idx
   ON public.crm_messages (contact_id, created_at DESC)
@@ -120,7 +114,7 @@ BEGIN
       LEFT JOIN public.crm_media_assets a
         ON a.user_id = p.user_id AND a.public_url = p.public_url
      WHERE p.bucket <> '' AND p.path <> ''
-     WHERE NOT EXISTS (
+       AND NOT EXISTS (
        SELECT 1 FROM public.crm_media_gc_queue q
         WHERE q.user_id = p.user_id AND q.bucket = p.bucket
           AND q.path = p.path AND q.status = 'pending'

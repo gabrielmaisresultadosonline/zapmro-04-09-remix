@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-const NOTICE_VERSION = "history-retention-10-days-v1";
+const NOTICE_ID = "10810810-0000-4000-8000-000000000001";
 const NOTICE_DELAY_MS = 4 * 60 * 1000;
 
 export default function RetentionNoticePopup() {
@@ -19,22 +19,25 @@ export default function RetentionNoticePopup() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user || cancelled) return;
 
-      const untypedClient = supabase as unknown as {
-        from: (table: string) => ReturnType<typeof supabase.from>;
-      };
-      const { data: existing, error: readError } = await untypedClient
-        .from("crm_retention_notice_views")
+      const { data: existing, error: readError } = await supabase
+        .from("admin_announcement_views")
         .select("id")
         .eq("user_id", user.id)
-        .eq("notice_version", NOTICE_VERSION)
+        .eq("announcement_id", NOTICE_ID)
         .maybeSingle();
 
       if (readError || existing || cancelled) return;
 
       timer = setTimeout(async () => {
-        const { error: insertError } = await untypedClient
-          .from("crm_retention_notice_views")
-          .insert({ user_id: user.id, notice_version: NOTICE_VERSION });
+        const { error: insertError } = await supabase
+          .from("admin_announcement_views")
+          .insert({
+            user_id: user.id,
+            announcement_id: NOTICE_ID,
+            view_count: 1,
+            last_viewed_at: new Date().toISOString(),
+            dismissed_at: new Date().toISOString(),
+          });
 
         if (!insertError && !cancelled) setOpen(true);
       }, NOTICE_DELAY_MS);

@@ -20,6 +20,8 @@ type View = {
   dismissed_at: string | null;
 };
 
+const CUSTOM_RETENTION_NOTICE_ID = "10810810-0000-4000-8000-000000000001";
+
 export default function AnnouncementPopup() {
   const [queue, setQueue] = useState<Announcement[]>([]);
   const [current, setCurrent] = useState<Announcement | null>(null);
@@ -45,6 +47,7 @@ export default function AnnouncementPopup() {
       const viewMap = new Map<string, View>((views || []).map((v: any) => [v.announcement_id, v]));
 
       const eligible = (anns as Announcement[]).filter((a) => {
+        if (a.id === CUSTOM_RETENTION_NOTICE_ID) return false;
         if (a.frequency === "date_range") {
           if (a.start_date && now < a.start_date) return false;
           if (a.end_date && now > a.end_date) return false;

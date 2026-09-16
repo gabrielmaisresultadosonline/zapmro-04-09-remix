@@ -40,3 +40,4 @@
 - [x] Restaurar todos os gatilhos quando a função do webhook chegar antes da migration 104, mantendo reserva condicional contra disparos concorrentes.
 - [x] Recuperar conversas perdidas durante períodos offline, estabilizar a paginação concorrente e garantir Realtime na VPS.
 - [x] Alinhar conversas legadas sem caixa entre carga, polling e Realtime, reconciliando a lista após reconexões.
+- [x] Explicar mensagens sem conteúdo ou mídia disponibilizada pela Meta, eliminando bolhas que mostram somente o horário.

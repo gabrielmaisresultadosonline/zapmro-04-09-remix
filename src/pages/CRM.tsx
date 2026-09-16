@@ -7583,6 +7583,17 @@ const CRM = () => {
                                               </div>
                                             </div>
                                           )}
+                                          {['image', 'video', 'audio', 'voice', 'sticker', 'document'].includes(m.message_type) && !m.media_url && (
+                                            <div className="mb-2 rounded-lg border border-border/30 bg-muted/20 p-2.5 text-xs leading-relaxed text-muted-foreground">
+                                              <div className="flex items-start gap-2">
+                                                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                                <div>
+                                                  <p className="font-medium text-foreground">Arquivo não disponível nesta conversa</p>
+                                                  <p className="mt-0.5">O WhatsApp informou uma mensagem de {m.message_type === 'image' ? 'imagem' : m.message_type === 'video' ? 'vídeo' : m.message_type === 'document' ? 'documento' : m.message_type === 'sticker' ? 'figurinha' : 'áudio'}, mas não liberou o arquivo para carregamento.</p>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          )}
                                           {(m.message_text || m.content) && m.message_type !== 'reaction' && m.message_type !== 'audio' && m.message_type !== 'voice' && m.message_type !== 'unsupported' && !((m.message_text || m.content || '').trim() === '[Mensagem de Áudio]') && !/^\[(image|video|document|audio|sticker|imagem|vídeo|video|documento|áudio|audio)\]$/i.test((m.message_text || m.content || '').trim()) && (
                                             <div className="space-y-2">
                                               <div
@@ -7632,7 +7643,20 @@ const CRM = () => {
                                               </div>
                                             </div>
                                           )}
-                                          {m.message_type === 'unsupported' && !hasReadableUnsupportedContent(m) && null}
+                                          {m.message_type === 'unsupported' && !hasReadableUnsupportedContent(m) && (
+                                            <div className="rounded-lg border border-border/30 bg-muted/20 p-2.5 text-xs leading-relaxed text-muted-foreground">
+                                              <div className="flex items-start gap-2">
+                                                <LucideIcons.HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                                <div>
+                                                  <p className="font-medium text-foreground">Conteúdo não disponível</p>
+                                                  <p className="mt-0.5">{getUnsupportedMetaMessage(m)}</p>
+                                                  {getUnsupportedMetaDetails(m) && (
+                                                    <p className="mt-1 text-[10px] opacity-80">Detalhe informado: {getUnsupportedMetaDetails(m)}</p>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          )}
                                           {(() => {
                                             const ref = getAdReferral(m);
                                             if (!ref) return null;

@@ -153,6 +153,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import AnnouncementPopup from "@/components/AnnouncementPopup";
+import RetentionNoticePopup from "@/components/crm/RetentionNoticePopup";
 import FirstTutorialVideo from "@/components/sales/FirstTutorialVideo";
 import { WhatsAppNumberSelector } from "@/components/crm/WhatsAppNumberSelector";
 import {
@@ -5663,6 +5664,7 @@ const CRM = () => {
     <SidebarProvider>
       <div className={`h-[100dvh] w-full flex overflow-hidden bg-[#f0f2f5] dark:bg-[#0c1317] ${crmTheme === 'light' ? 'crm-theme-light' : ''}`}>
         <AnnouncementPopup />
+        <RetentionNoticePopup />
         {/* Varredura única por cliente: unifica arquivos idênticos já existentes. */}
         <MediaDedupeScanOverlay userId={currentUserId} onFinished={() => fetchData(false)} />
 

@@ -9,7 +9,7 @@
  * Segurança: qualquer dúvida (arquivo ainda referenciado, erro na remoção)
  * preserva o arquivo. Nada ativo é apagado.
  */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -108,11 +108,19 @@ Deno.serve(async (req) => {
 
 /** true quando alguma mensagem, fluxo ou template ainda aponta para o arquivo. */
 async function isStillReferenced(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   item: QueueItem,
 ): Promise<boolean> {
   const url = item.public_url;
   if (!url) return true; // sem URL não dá para conferir: preserva
+
+  const centralizedCheck = await supabase.rpc("crm_media_is_referenced", {
+    p_user_id: item.user_id,
+    p_public_url: url,
+    p_path: item.path,
+  });
+  if (centralizedCheck.error) return true;
+  if (centralizedCheck.data === true) return true;
 
   const byMedia = await supabase
     .from("crm_messages")
@@ -153,6 +161,16 @@ async function isStillReferenced(
     .eq("user_id", item.user_id);
   if (templates.error) return true;
   if (JSON.stringify(templates.data ?? []).includes(item.path)) return true;
+
+  // Mensagens agendadas ainda não foram enviadas, mas podem apontar para a
+  // mesma mídia. Em caso de erro, preserva o arquivo.
+  const scheduled = await supabase
+    .from("crm_scheduled_messages")
+    .select("message_data")
+    .eq("user_id", item.user_id)
+    .in("status", ["pending", "processing"]);
+  if (scheduled.error) return true;
+  if (JSON.stringify(scheduled.data ?? []).includes(item.path)) return true;
 
   return false;
 }

@@ -1643,7 +1643,7 @@ const CRM = () => {
           }
           return;
         }
-        setRealtimeStatus('online');
+        setRealtimeStatus('connecting');
         // O canal pode reconectar depois de uma queda silenciosa. Reconciliar
         // imediatamente elimina o intervalo perdido sem depender do próximo
         // timer e sem recarregar a página.
@@ -1976,7 +1976,7 @@ const CRM = () => {
           }
           return;
         }
-        setRealtimeStatus('online');
+        setRealtimeStatus('connecting');
         // Eventos ocorridos durante uma queda do socket não são reenviados.
         // Reconciliamos banco e lista ao conectar/reconectar para não deixar
         // horários ou ordenação presos no último evento recebido.

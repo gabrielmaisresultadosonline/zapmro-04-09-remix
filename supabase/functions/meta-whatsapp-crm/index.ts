@@ -1758,6 +1758,16 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
     }));
   };
   webhookAiLog('inbound_received');
+  console.log('[WEBHOOK-INBOUND]', JSON.stringify({
+    stage: 'inbound_routed',
+    phone_number_id: webhookPhoneNumberId,
+    waba_id: webhookWabaId,
+    whatsapp_number_id: inboundNumberId,
+    wa_id: waId || null,
+    user_id: userId,
+    message_id: message?.id || null,
+    message_type: message?.type || null,
+  }));
 
   // Skip if this single message is actually an echo we already handled above.
   if (businessPhone && String(waId || '').replace(/\D/g, '') === businessPhone) {

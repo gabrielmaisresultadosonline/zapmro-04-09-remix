@@ -1758,6 +1758,16 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
     }));
   };
   webhookAiLog('inbound_received');
+  console.log('[WEBHOOK-INBOUND]', JSON.stringify({
+    stage: 'inbound_routed',
+    phone_number_id: webhookPhoneNumberId,
+    waba_id: webhookWabaId,
+    whatsapp_number_id: inboundNumberId,
+    wa_id: waId || null,
+    user_id: userId,
+    message_id: message?.id || null,
+    message_type: message?.type || null,
+  }));
 
   // Skip if this single message is actually an echo we already handled above.
   if (businessPhone && String(waId || '').replace(/\D/g, '') === businessPhone) {
@@ -2144,7 +2154,13 @@ else if (message.type === "unsupported") {
         console.log(`[FLOW-LOG] Concurrent duplicate inbound message ${message.id} ignored for ${waId}`);
         return jsonResponse({ success: true, message: 'Duplicate inbound ignored' });
       }
-      console.error('[WEBHOOK] Failed to save inbound message', { waId, userId, error: insertMessageError.message });
+      console.error('[WEBHOOK] Failed to save inbound message', {
+        waId,
+        userId,
+        whatsapp_number_id: inboundNumberId,
+        phone_number_id: webhookPhoneNumberId,
+        error: insertMessageError.message,
+      });
       return jsonResponse({ success: false, error: insertMessageError.message }, 500);
     }
      savedInboundMessageId = insertedInboundMessage?.id ?? null;
@@ -2163,6 +2179,8 @@ else if (message.type === "unsupported") {
       userId,
       contact_id: contactForSave.id,
       meta_message_id: message.id,
+      whatsapp_number_id: inboundNumberId,
+      phone_number_id: webhookPhoneNumberId,
       content_source: extractedInboundText ? 'customer_payload' : 'meta_unavailable',
       referral_used_as_content: false,
     });

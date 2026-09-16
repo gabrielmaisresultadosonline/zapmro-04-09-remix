@@ -41,3 +41,4 @@
 - [x] Recuperar conversas perdidas durante períodos offline, estabilizar a paginação concorrente e garantir Realtime na VPS.
 - [x] Alinhar conversas legadas sem caixa entre carga, polling e Realtime, reconciliando a lista após reconexões.
 - [x] Explicar mensagens sem conteúdo ou mídia disponibilizada pela Meta, eliminando bolhas que mostram somente o horário.
+- [x] Criar diagnóstico seguro por número para conexão Meta, webhook, mensagens, agente, fluxos e tempo real na VPS.

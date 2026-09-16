@@ -557,6 +557,7 @@ const CRM = () => {
   const [activeNumberId, setActiveNumberId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [userNumbersCount, setUserNumbersCount] = useState<number>(0);
+  const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'online' | 'reconnecting'>('connecting');
   const [isMyDataOpen, setIsMyDataOpen] = useState(false);
   const [myDataEmail, setMyDataEmail] = useState('');
   const [myDataNewEmail, setMyDataNewEmail] = useState('');
@@ -689,16 +690,20 @@ const CRM = () => {
   // histórico próprios (coluna whatsapp_number_id), então TODA consulta e todo
   // insert de conversa é filtrado por ele.
   const activeNumberIdRef = useRef<string | null>(getActiveWhatsAppNumberId());
+  // Registros legados sem caixa pertencem somente à caixa principal. Exibi-los
+  // em todas as caixas mistura contatos antigos entre números do mesmo cadastro.
+  const primaryNumberIdRef = useRef<string | null>(null);
+  const numberScopeVersionRef = useRef(0);
   /** Aplica o filtro do número aberto em qualquer query builder do Supabase. */
   const scopeToNumber = <T,>(query: T): T => {
     const numberId = activeNumberIdRef.current;
     if (!numberId) return query;
-    // A leitura precisa incluir o legado sem caixa exatamente como o realtime.
-    // Sem isso, uma queda do socket deixa essas conversas congeladas porque a
-    // carga inicial e o polling nunca voltam a encontrá-las.
-    return (query as any).or(
-      `whatsapp_number_id.eq.${numberId},whatsapp_number_id.is.null`
-    ) as T;
+    if (numberId === primaryNumberIdRef.current) {
+      return (query as any).or(
+        `whatsapp_number_id.eq.${numberId},whatsapp_number_id.is.null`
+      ) as T;
+    }
+    return (query as any).eq('whatsapp_number_id', numberId) as T;
   };
   /** Campos de escopo para inserts de contatos/mensagens. */
   const numberScopePatch = (): { whatsapp_number_id?: string } =>
@@ -708,8 +713,7 @@ const CRM = () => {
     const numberId = activeNumberIdRef.current;
     if (!numberId) return true;
     const rowNumber = row?.whatsapp_number_id;
-    // Registros antigos (sem número) continuam visíveis até o backfill rodar.
-    return !rowNumber || rowNumber === numberId;
+    return rowNumber === numberId || (!rowNumber && numberId === primaryNumberIdRef.current);
   };
   // Per-contact inbound message timestamps (last 7 days) used to compute
   // unread counts shown as a yellow badge on the conversation list.
@@ -760,7 +764,9 @@ const CRM = () => {
 
       const ownedRows = parsed.rows.filter((contact: any) =>
         contact?.user_id === userId &&
-        (!numberId || !contact?.whatsapp_number_id || contact.whatsapp_number_id === numberId)
+        (!numberId ||
+          contact?.whatsapp_number_id === numberId ||
+          (!contact?.whatsapp_number_id && numberId === primaryNumberIdRef.current))
       );
       if (ownedRows.length === 0) return;
 
@@ -1489,6 +1495,7 @@ const CRM = () => {
     if (realtimeFallbackInFlightRef.current) return;
 
     realtimeFallbackInFlightRef.current = true;
+    const scopeVersion = numberScopeVersionRef.current;
 
     try {
       const cursor = realtimeFallbackCursorRef.current;
@@ -1531,6 +1538,7 @@ const CRM = () => {
         ? windowEnd
         : rows.at(-1)?.created_at || firstCursor;
 
+      if (scopeVersion !== numberScopeVersionRef.current) return;
       if (rows.length === 0) return;
 
       const activeContactId = selectedContactRef.current?.id;
@@ -1628,7 +1636,14 @@ const CRM = () => {
         }
       )
       .subscribe((status) => {
-        if (status !== 'SUBSCRIBED') return;
+        if (status !== 'SUBSCRIBED') {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setRealtimeStatus('reconnecting');
+            void syncRecentRealtimeMessages();
+          }
+          return;
+        }
+        setRealtimeStatus('online');
         // O canal pode reconectar depois de uma queda silenciosa. Reconciliar
         // imediatamente elimina o intervalo perdido sem depender do próximo
         // timer e sem recarregar a página.
@@ -1954,7 +1969,14 @@ const CRM = () => {
         }
       })
       .subscribe((status) => {
-        if (status !== 'SUBSCRIBED') return;
+        if (status !== 'SUBSCRIBED') {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setRealtimeStatus('reconnecting');
+            void syncRecentRealtimeMessages();
+          }
+          return;
+        }
+        setRealtimeStatus('online');
         // Eventos ocorridos durante uma queda do socket não são reenviados.
         // Reconciliamos banco e lista ao conectar/reconectar para não deixar
         // horários ou ordenação presos no último evento recebido.
@@ -2114,6 +2136,8 @@ const CRM = () => {
     // re-downloading 14k+ contacts on every reload / realtime event.
     if (contactsInFlightRef.current) return;
     contactsInFlightRef.current = true;
+    const scopeVersion = numberScopeVersionRef.current;
+    const requestedNumberId = activeNumberIdRef.current;
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -2140,12 +2164,24 @@ const CRM = () => {
       let pageCursor: { updatedAt: string; id: string } | null = null;
 
       for (let page = 0; page < MAX_PAGES; page++) {
-        let q = scopeToNumber(
-          supabase
-            .from('crm_contacts')
-            .select('*')
-            .eq('user_id', userId)
-        )
+        let q = requestedNumberId === primaryNumberIdRef.current
+          ? (supabase
+              .from('crm_contacts')
+              .select('*')
+              .eq('user_id', userId) as any).or(
+                `whatsapp_number_id.eq.${requestedNumberId},whatsapp_number_id.is.null`
+              )
+          : requestedNumberId
+            ? supabase
+                .from('crm_contacts')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('whatsapp_number_id', requestedNumberId)
+            : supabase
+                .from('crm_contacts')
+                .select('*')
+                .eq('user_id', userId);
+        q = q
           // Fecha a janela para atualizações novas não deslocarem registros
           // entre páginas durante esta mesma sincronização.
           .lte('updated_at', fetchStartedAt)
@@ -2179,7 +2215,7 @@ const CRM = () => {
         // Na carga completa, publica cada página assim que chega. A lista mais
         // recente aparece após a primeira consulta; o restante entra em segundo
         // plano sem bloquear a tela.
-        if (!lastContactsSyncRef.current) {
+         if (!lastContactsSyncRef.current && scopeVersion === numberScopeVersionRef.current) {
           const progressiveRows = [...newRows];
           setContacts(prev => {
             const changedDuringFetch = prev.filter((contact: any) =>
@@ -2200,6 +2236,7 @@ const CRM = () => {
         pageCursor = { updatedAt: lastRow.updated_at, id: lastRow.id };
       }
 
+      if (scopeVersion !== numberScopeVersionRef.current) return;
       if (newRows.length > 0 || !lastContactsSyncRef.current) {
         setContacts(prev => {
           const map = new Map<string, any>();
@@ -2593,14 +2630,18 @@ const CRM = () => {
            ? await syncSettingsIntoNumbers(user.id, settingsData)
            : await fetchUserNumbers(user.id);
          setUserNumbersCount(numbers.length);
+          const previousPrimaryNumberId = primaryNumberIdRef.current;
+          primaryNumberIdRef.current = numbers.find((number) => number.is_primary)?.id ?? numbers[0]?.id ?? null;
          const stored = getActiveNumberId(user.id);
          const validStored = stored && numbers.some((n) => n.id === stored) ? stored : null;
           const numberChanged = activeNumberIdRef.current !== validStored;
          activeNumberIdRef.current = validStored;
          setActiveWhatsAppNumberId(validStored);
          setActiveNumberId(validStored);
-          if (numberChanged) {
+          const legacyScopeChanged = previousPrimaryNumberId !== primaryNumberIdRef.current;
+          if (numberChanged || legacyScopeChanged) {
             await contactsSyncPromise;
+            numberScopeVersionRef.current += 1;
             setContacts([]);
             contactsSeededRef.current = false;
             lastContactsSyncRef.current = null;
@@ -5592,6 +5633,8 @@ const CRM = () => {
     if (!currentUserId) return;
     persistActiveNumberId(currentUserId, null);
     activeNumberIdRef.current = null;
+    numberScopeVersionRef.current += 1;
+    setRealtimeStatus('connecting');
     setActiveWhatsAppNumberId(null);
     // Nada da caixa anterior pode sobrar na tela ou no cache.
     setContacts([]);
@@ -5624,6 +5667,8 @@ const CRM = () => {
         onSelected={(record: WhatsAppNumberRecord) => {
           // Fixa o escopo ANTES de qualquer consulta para não misturar caixas.
           activeNumberIdRef.current = record.id;
+          numberScopeVersionRef.current += 1;
+          setRealtimeStatus('connecting');
           setForceNumberSelector(false);
           setActiveWhatsAppNumberId(record.id);
           setContacts([]);
@@ -6517,6 +6562,13 @@ const CRM = () => {
                                 setStatusFilter(trimmed === '' ? 'all' : trimmed);
                               }}
                             />
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground" aria-live="polite">
+                            <span className={cn(
+                              "h-2 w-2 rounded-full",
+                              realtimeStatus === 'online' ? "bg-primary" : "bg-muted-foreground animate-pulse"
+                            )} />
+                            {realtimeStatus === 'online' ? 'Sincronizado em tempo real' : 'Reconectando conversas...'}
                           </div>
                         </div>
                         <Accordion type="single" collapsible className="w-full">

@@ -23,6 +23,7 @@ export interface WhatsAppNumberRecord {
   meta_verified_name: string | null;
   access_pin: string | null;
   is_active: boolean;
+  is_primary?: boolean;
   created_at?: string;
 }
 

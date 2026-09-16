@@ -43,8 +43,7 @@ CREATE OR REPLACE FUNCTION public.crm_cleanup_inactive_histories(
 ) RETURNS TABLE (
   deleted_contacts integer,
   deleted_messages bigint,
-  queued_media integer,
-  deleted_payload jsonb
+  queued_media integer
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -71,43 +70,60 @@ BEGIN
   IF deleted_contacts = 0 THEN
     deleted_messages := 0;
     queued_media := 0;
-    deleted_payload := '[]'::jsonb;
     RETURN NEXT;
     RETURN;
   END IF;
+
+  CREATE TEMP TABLE IF NOT EXISTS pg_temp.retention_removed_media (
+    user_id uuid NOT NULL,
+    public_url text NOT NULL,
+    PRIMARY KEY (user_id, public_url)
+  ) ON COMMIT DROP;
+  TRUNCATE pg_temp.retention_removed_media;
 
   WITH removed AS (
     DELETE FROM public.crm_messages m
      USING pg_temp.retention_contacts c
      WHERE m.contact_id = c.contact_id
-     RETURNING m.id, m.user_id, m.media_url, m.content, m.metadata
-  ), payload AS (
-    SELECT count(*)::bigint AS amount,
-           COALESCE(jsonb_agg(to_jsonb(removed)), '[]'::jsonb) AS rows
-      FROM removed
+     RETURNING m.user_id, m.media_url, m.content, m.metadata
+  ), stored AS (
+    INSERT INTO pg_temp.retention_removed_media (user_id, public_url)
+    SELECT DISTINCT r.user_id, urls.public_url
+      FROM removed r
+      CROSS JOIN LATERAL (
+        SELECT r.media_url AS public_url
+        UNION ALL SELECT r.content
+        UNION ALL
+        SELECT trim(both '"' from value::text)
+          FROM jsonb_path_query(COALESCE(r.metadata, '{}'::jsonb), '$.** ? (@.type() == "string")') value
+      ) urls
+     WHERE urls.public_url LIKE '%/storage/v1/object/public/%'
+    ON CONFLICT DO NOTHING
+    RETURNING 1
   )
-  SELECT amount, rows INTO deleted_messages, deleted_payload FROM payload;
+  SELECT count(*)::bigint INTO deleted_messages FROM removed;
 
   -- Arquivos registrados no catálogo entram imediatamente na lixeira. A remoção
   -- física continua condicionada à verificação final do worker media-gc.
-  WITH removed_urls AS (
-    SELECT DISTINCT
-           row_data->>'user_id' AS user_id,
-           row_data->>'media_url' AS public_url
-      FROM jsonb_array_elements(deleted_payload) AS row_data
-     WHERE COALESCE(row_data->>'media_url', '') <> ''
+  WITH parsed_urls AS (
+    SELECT r.user_id, r.public_url,
+           split_part(split_part(r.public_url, '/storage/v1/object/public/', 2), '/', 1) AS bucket,
+           substring(split_part(r.public_url, '/storage/v1/object/public/', 2)
+             from position('/' in split_part(r.public_url, '/storage/v1/object/public/', 2)) + 1) AS path
+      FROM pg_temp.retention_removed_media r
   ), queued AS (
     INSERT INTO public.crm_media_gc_queue
       (media_asset_id, user_id, bucket, path, public_url, reason, purge_after)
-    SELECT a.id, a.user_id, a.bucket, a.path, a.public_url,
+    SELECT a.id, p.user_id, p.bucket, p.path, p.public_url,
            'retencao-historico-10-dias', now()
-      FROM public.crm_media_assets a
-      JOIN removed_urls r
-        ON r.user_id::uuid = a.user_id AND r.public_url = a.public_url
+      FROM parsed_urls p
+      LEFT JOIN public.crm_media_assets a
+        ON a.user_id = p.user_id AND a.public_url = p.public_url
+     WHERE p.bucket <> '' AND p.path <> ''
      WHERE NOT EXISTS (
        SELECT 1 FROM public.crm_media_gc_queue q
-        WHERE q.user_id = a.user_id AND q.bucket = a.bucket
-          AND q.path = a.path AND q.status = 'pending'
+        WHERE q.user_id = p.user_id AND q.bucket = p.bucket
+          AND q.path = p.path AND q.status = 'pending'
      )
     ON CONFLICT (user_id, bucket, path) WHERE status = 'pending' DO NOTHING
     RETURNING 1

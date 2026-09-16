@@ -19,7 +19,10 @@ export default function RetentionNoticePopup() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user || cancelled) return;
 
-      const { data: existing, error: readError } = await supabase
+      const untypedClient = supabase as unknown as {
+        from: (table: string) => ReturnType<typeof supabase.from>;
+      };
+      const { data: existing, error: readError } = await untypedClient
         .from("crm_retention_notice_views")
         .select("id")
         .eq("user_id", user.id)
@@ -29,7 +32,7 @@ export default function RetentionNoticePopup() {
       if (readError || existing || cancelled) return;
 
       timer = setTimeout(async () => {
-        const { error: insertError } = await supabase
+        const { error: insertError } = await untypedClient
           .from("crm_retention_notice_views")
           .insert({ user_id: user.id, notice_version: NOTICE_VERSION });
 
@@ -48,7 +51,7 @@ export default function RetentionNoticePopup() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-warning/15 text-warning">
+          <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">
             <AlertTriangle className="h-6 w-6" aria-hidden="true" />
           </div>
           <DialogTitle>Atenção: mudamos algumas configurações de armazenamento</DialogTitle>
@@ -68,9 +71,9 @@ export default function RetentionNoticePopup() {
               <p>O contato e a conversa continuam no CRM. Uma nova mensagem reinicia a contagem de 10 dias.</p>
             </div>
           </div>
-          <Alert className="border-warning/50 bg-warning/10 text-foreground">
-            <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />
-            <AlertTitle className="text-warning-foreground">Importante</AlertTitle>
+          <Alert className="border-destructive/40 bg-destructive/10 text-foreground">
+            <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />
+            <AlertTitle className="text-destructive">Importante</AlertTitle>
             <AlertDescription>
               Seu histórico continuará no seu celular. Aqui manteremos o histórico apenas das conversas ativas para economizar espaço e evitar sobrecarga.
             </AlertDescription>

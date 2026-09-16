@@ -154,5 +154,15 @@ async function isStillReferenced(
   if (templates.error) return true;
   if (JSON.stringify(templates.data ?? []).includes(item.path)) return true;
 
+  // Mensagens agendadas ainda não foram enviadas, mas podem apontar para a
+  // mesma mídia. Em caso de erro, preserva o arquivo.
+  const scheduled = await supabase
+    .from("crm_scheduled_messages")
+    .select("message_data")
+    .eq("user_id", item.user_id)
+    .in("status", ["pending", "processing"]);
+  if (scheduled.error) return true;
+  if (JSON.stringify(scheduled.data ?? []).includes(item.path)) return true;
+
   return false;
 }

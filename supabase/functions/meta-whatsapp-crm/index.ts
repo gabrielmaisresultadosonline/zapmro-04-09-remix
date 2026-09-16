@@ -309,8 +309,95 @@ async function claimAutomaticFlow(
     p_expected_node_id: contact.current_node_id || null,
     p_expected_flow_state: contact.flow_state || null,
   });
-  if (error) throw new Error(`Falha ao reservar gatilho: ${error.message}`);
-  return claimed === true;
+  if (!error) return claimed === true;
+
+  // Compatibilidade de implantação: algumas VPS receberam a Edge Function
+  // antes da migration 104. Nesse estado, interromper aqui silencia TODOS os
+  // gatilhos. O compare-and-swap abaixo mantém a mesma proteção atômica usando
+  // UPDATE condicional até a função SQL estar disponível no cache do REST.
+  console.warn('[TRIGGER-CLAIM] RPC indisponível; usando reserva condicional compatível', {
+    contactId: contact.id,
+    flowId: flow.id,
+    error: error.message,
+  });
+
+  let fallbackQuery = supabase
+    .from('crm_contacts')
+    .update({
+      current_flow_id: flow.id,
+      current_node_id: startNodeId,
+      flow_state: 'running',
+      ai_active: false,
+      next_execution_time: null,
+      last_flow_interaction: new Date().toISOString(),
+    })
+    .eq('id', contact.id)
+    .eq('user_id', contact.user_id);
+
+  fallbackQuery = contact.current_flow_id
+    ? fallbackQuery.eq('current_flow_id', contact.current_flow_id)
+    : fallbackQuery.is('current_flow_id', null);
+  fallbackQuery = contact.current_node_id
+    ? fallbackQuery.eq('current_node_id', contact.current_node_id)
+    : fallbackQuery.is('current_node_id', null);
+  fallbackQuery = contact.flow_state
+    ? fallbackQuery.eq('flow_state', contact.flow_state)
+    : fallbackQuery.is('flow_state', null);
+
+  const { data: fallbackClaim, error: fallbackError } = await fallbackQuery
+    .select('id')
+    .maybeSingle();
+  if (fallbackError) {
+    throw new Error(`Falha ao reservar gatilho: ${error.message}; fallback: ${fallbackError.message}`);
+  }
+  return Boolean(fallbackClaim?.id);
+}
+
+async function recordInboundContactActivity(
+  supabase: any,
+  contact: any,
+  userId: string,
+  messageAt: string,
+) {
+  const { error } = await supabase.rpc('crm_record_inbound_contact_activity', {
+    p_contact_id: contact.id,
+    p_user_id: userId,
+    p_message_at: messageAt,
+  });
+  if (!error) return;
+
+  // Mesma compatibilidade da reserva acima: sem a migration 104, o webhook
+  // não pode parar depois de salvar a mensagem e antes de avaliar os gatilhos.
+  const previousAt = contact.last_message_received_at
+    ? new Date(contact.last_message_received_at)
+    : null;
+  const receivedAt = new Date(messageAt);
+  const safeLastReceivedAt = previousAt && !Number.isNaN(previousAt.getTime()) && previousAt > receivedAt
+    ? previousAt.toISOString()
+    : messageAt;
+  const previousTotal = Number.isFinite(Number(contact.total_messages_received))
+    ? Number(contact.total_messages_received)
+    : 0;
+
+  console.warn('[TRIGGER-ACTIVITY] RPC indisponível; usando atualização compatível', {
+    contactId: contact.id,
+    error: error.message,
+  });
+  const { error: fallbackError } = await supabase
+    .from('crm_contacts')
+    .update({
+      last_interaction: safeLastReceivedAt,
+      last_message_received_at: safeLastReceivedAt,
+      total_messages_received: previousTotal + 1,
+      updated_at: new Date().toISOString(),
+      countdown_trigger_sent_at: null,
+      last_read_at: null,
+    })
+    .eq('id', contact.id)
+    .eq('user_id', userId);
+  if (fallbackError) {
+    throw new Error(`Falha ao atualizar atividade recebida: ${error.message}; fallback: ${fallbackError.message}`);
+  }
 }
 
 /**
@@ -2049,15 +2136,13 @@ else if (message.type === "unsupported") {
      const inboundMessageAt = message?.timestamp
        ? new Date(Number(message.timestamp) * 1000).toISOString()
        : new Date().toISOString();
-      const { error: activityError } = await supabase.rpc('crm_record_inbound_contact_activity', {
-        p_contact_id: contactForSave.id,
-        p_user_id: userId,
-        p_message_at: inboundMessageAt,
-      });
-      if (activityError) {
-        console.error('[WEBHOOK] Failed to update inbound contact activity', { waId, userId, error: activityError.message });
+       try {
+         await recordInboundContactActivity(supabase, contactForSave, userId, inboundMessageAt);
+       } catch (activityError) {
+         const activityMessage = activityError instanceof Error ? activityError.message : String(activityError);
+         console.error('[WEBHOOK] Failed to update inbound contact activity', { waId, userId, error: activityMessage });
         return jsonResponse({ success: false, error: activityError.message }, 500);
-      }
+       }
     console.log('[WEBHOOK] Saved inbound message and reset last_read_at', {
       waId,
       userId,

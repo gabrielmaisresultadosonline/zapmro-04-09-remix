@@ -723,6 +723,7 @@ const CRM = () => {
   const lastContactsSyncRef = useRef<string | null>(null);
   const contactsSeededRef = useRef<boolean>(false);
   const contactsInFlightRef = useRef<boolean>(false);
+  const contactsRetryTimerRef = useRef<number | null>(null);
   const realtimeFallbackCursorRef = useRef<string | null>(null);
   const realtimeFallbackInFlightRef = useRef<boolean>(false);
   const restoreContactsFromCache = (userId: string, numberId: string | null): void => {
@@ -2041,6 +2042,10 @@ const CRM = () => {
       clearInterval(scheduledInterval);
       clearInterval(activeChatSyncInterval);
       clearInterval(realtimeFallbackInterval);
+      if (contactsRetryTimerRef.current !== null) {
+        window.clearTimeout(contactsRetryTimerRef.current);
+        contactsRetryTimerRef.current = null;
+      }
     };
   }, [navigate]);
 
@@ -2136,6 +2141,16 @@ const CRM = () => {
             for (const c of prev) {
               if (c?.user_id === userId) map.set(c.id, c);
             }
+          } else {
+            // Preserva eventos realtime recebidos durante a paginação completa.
+            for (const c of prev) {
+              if (
+                c?.user_id === userId &&
+                new Date(c.updated_at || 0).getTime() > new Date(fetchStartedAt).getTime()
+              ) {
+                map.set(c.id, c);
+              }
+            }
           }
           // Atualizar com novos dados (upsert local)
           for (const c of newRows) {
@@ -2194,7 +2209,12 @@ const CRM = () => {
           description: 'Mantivemos a lista já carregada e tentaremos sincronizar novamente.',
           variant: 'destructive',
         });
-        window.setTimeout(() => void fetchContacts(), 5_000);
+      }
+      if (pageError && contactsRetryTimerRef.current === null) {
+        contactsRetryTimerRef.current = window.setTimeout(() => {
+          contactsRetryTimerRef.current = null;
+          void fetchContacts();
+        }, 5_000);
       }
       setLoading(false); // Garante que o loading saia após o fetch bem sucedido
     } finally {

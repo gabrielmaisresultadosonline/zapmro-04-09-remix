@@ -2097,13 +2097,20 @@ const CRM = () => {
       if (activeContactId && document.visibilityState === 'visible') {
         fetchRecentActiveMessages(activeContactId);
       }
-    }, 4000);
+    }, 2500);
 
     const realtimeFallbackInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        syncRecentRealtimeMessages();
+        // O timestamp enviado pela Meta pode ser anterior ao instante em que o
+        // webhook grava a mensagem. Por isso o cursor de crm_messages sozinho
+        // pode ignorar uma chegada recente. O contato sempre recebe updated_at
+        // no servidor; reconciliar ambos torna a lista independente do socket.
+        void Promise.all([
+          syncRecentRealtimeMessages(),
+          fetchContacts(),
+        ]);
       }
-    }, 6000); // Polling de fallback (aliviado para não saturar o banco)
+    }, 3000);
 
 
 
@@ -2308,6 +2315,9 @@ const CRM = () => {
       // de sincronização — assim a próxima tentativa recupera o que faltou.
       if (!pageError) {
         lastContactsSyncRef.current = fetchStartedAt;
+        // A conexão do socket, sozinha, não prova que a lista está atualizada.
+        // O indicador só fica verde depois que a reconciliação com o banco termina.
+        setRealtimeStatus('online');
       } else if (newRows.length === 0) {
         toast({
           title: 'Não foi possível atualizar as conversas',
@@ -3329,11 +3339,6 @@ const CRM = () => {
   };
 
   const fetchRecentActiveMessages = async (contactId: string) => {
-    const cached = messagesCacheRef.current[contactId];
-    const now = Date.now();
-    // Se o cache é muito recente (menos de 10s), pular o fetch de background
-    if (cached && (now - cached.timestamp < 10000)) return;
-
     if (!contactId) return;
     const latestPersistedTime = chatMessagesRef.current
       .filter((m: any) => !m.isOptimistic && m.created_at)

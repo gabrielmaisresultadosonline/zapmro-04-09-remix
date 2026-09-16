@@ -148,4 +148,43 @@ $$;
 REVOKE ALL ON FUNCTION public.crm_cleanup_inactive_histories(integer, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.crm_cleanup_inactive_histories(integer, integer) TO service_role;
 
+-- Verificação centralizada antes da remoção física: cobre também URLs guardadas
+-- dentro de metadados, mensagens agendadas, fluxos e templates.
+CREATE OR REPLACE FUNCTION public.crm_media_is_referenced(
+  p_user_id uuid,
+  p_public_url text,
+  p_path text
+) RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    EXISTS (
+      SELECT 1 FROM public.crm_messages m
+       WHERE m.user_id = p_user_id
+         AND (
+           m.media_url = p_public_url OR m.content = p_public_url OR
+           COALESCE(m.metadata::text, '') LIKE '%' || p_path || '%'
+         )
+    ) OR EXISTS (
+      SELECT 1 FROM public.crm_scheduled_messages s
+       WHERE s.user_id = p_user_id
+         AND s.status IN ('pending', 'processing')
+         AND s.message_data::text LIKE '%' || p_path || '%'
+    ) OR EXISTS (
+      SELECT 1 FROM public.crm_flows f
+       WHERE f.user_id = p_user_id
+         AND (f.nodes::text LIKE '%' || p_path || '%' OR f.edges::text LIKE '%' || p_path || '%')
+    ) OR EXISTS (
+      SELECT 1 FROM public.crm_templates t
+       WHERE t.user_id = p_user_id
+         AND t.components::text LIKE '%' || p_path || '%'
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.crm_media_is_referenced(uuid, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.crm_media_is_referenced(uuid, text, text) TO service_role;
+
 NOTIFY pgrst, 'reload schema';

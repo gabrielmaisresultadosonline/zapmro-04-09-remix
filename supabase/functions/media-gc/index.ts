@@ -114,6 +114,14 @@ async function isStillReferenced(
   const url = item.public_url;
   if (!url) return true; // sem URL não dá para conferir: preserva
 
+  const centralizedCheck = await supabase.rpc("crm_media_is_referenced", {
+    p_user_id: item.user_id,
+    p_public_url: url,
+    p_path: item.path,
+  });
+  if (centralizedCheck.error) return true;
+  if (centralizedCheck.data === true) return true;
+
   const byMedia = await supabase
     .from("crm_messages")
     .select("id")

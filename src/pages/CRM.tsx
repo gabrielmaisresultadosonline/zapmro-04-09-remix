@@ -693,6 +693,7 @@ const CRM = () => {
   // Registros legados sem caixa pertencem somente à caixa principal. Exibi-los
   // em todas as caixas mistura contatos antigos entre números do mesmo cadastro.
   const primaryNumberIdRef = useRef<string | null>(null);
+  const numbersLoadedRef = useRef(false);
   const numberScopeVersionRef = useRef(0);
   /** Aplica o filtro do número aberto em qualquer query builder do Supabase. */
   const scopeToNumber = <T,>(query: T): T => {
@@ -713,7 +714,13 @@ const CRM = () => {
     const numberId = activeNumberIdRef.current;
     if (!numberId) return true;
     const rowNumber = row?.whatsapp_number_id;
-    return rowNumber === numberId || (!rowNumber && numberId === primaryNumberIdRef.current);
+    if (rowNumber === numberId) return true;
+    if (rowNumber) return false;
+    // Durante a restauração inicial ainda não sabemos qual é a caixa principal.
+    // Não descartamos eventos legados nessa curta janela; a reconciliação
+    // posterior remove qualquer registro que não pertença à caixa escolhida.
+    if (!numbersLoadedRef.current) return true;
+    return numberId === primaryNumberIdRef.current;
   };
   // Per-contact inbound message timestamps (last 7 days) used to compute
   // unread counts shown as a yellow badge on the conversation list.
@@ -2644,6 +2651,7 @@ const CRM = () => {
            // A consulta já vem ordenada por criação; o primeiro número é a
            // caixa principal que recebeu os registros anteriores ao multi-caixa.
            primaryNumberIdRef.current = numbers[0]?.id ?? null;
+           numbersLoadedRef.current = true;
          const stored = getActiveNumberId(user.id);
          const validStored = stored && numbers.some((n) => n.id === stored) ? stored : null;
           const numberChanged = activeNumberIdRef.current !== validStored;

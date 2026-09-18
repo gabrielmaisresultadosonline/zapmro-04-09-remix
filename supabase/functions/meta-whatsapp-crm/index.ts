@@ -6719,6 +6719,9 @@ async function fetchAndStoreIncomingMedia(
       if (!scopedNumberId) {
         return jsonResponse({ success: false, code: 'WHATSAPP_NUMBER_REQUIRED', error: 'Selecione o WhatsApp antes de excluir o template.' }, 400);
       }
+      if (!meta_access_token || !settings?.meta_waba_id || !settings?.meta_phone_number_id) {
+        return jsonResponse({ success: false, code: 'META_NUMBER_CREDENTIALS_INCOMPLETE', error: 'Esta conexão não possui token, WABA e Phone Number ID completos. Reconecte somente este WhatsApp antes de excluir templates.' }, 400);
+      }
       const { meta_waba_id } = settings
       const { name } = params
       

@@ -2702,7 +2702,7 @@ const CRM = () => {
         templatesData?.some(t => t.status === 'PENDING' || t.status === 'pending')
       ) {
         console.log('Detectados templates pendentes, iniciando sincronização automática...');
-        supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } })
+        supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates', ...numberScopePatch() } })
           .then(({ data, error }) => {
             if (!error && data?.success) {
               scopeQueryToActiveNumberStrict(
@@ -4928,14 +4928,17 @@ const CRM = () => {
   const syncTemplates = async () => {
     setSyncingTemplates(true);
     try {
-      const { error } = await supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'getTemplates' } });
+      const { data, error } = await supabase.functions.invoke('meta-whatsapp-crm', {
+        body: { action: 'getTemplates', ...numberScopePatch() },
+      });
       if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Erro ao sincronizar templates');
       toast({ title: "Templates Sincronizados" });
       fetchData(false);
 
 
-    } catch (err) {
-      toast({ title: "Erro ao sincronizar", variant: "destructive" });
+    } catch (err: any) {
+      toast({ title: "Erro ao sincronizar", description: err?.message, variant: "destructive" });
     } finally {
       setSyncingTemplates(false);
     }
@@ -5023,7 +5026,7 @@ const CRM = () => {
     setSaving(true);
     try {
       const { data, error } = await supabase.functions.invoke('meta-whatsapp-crm', {
-        body: { action: 'createTemplate', ...template }
+        body: { action: 'createTemplate', ...template, ...numberScopePatch() }
       });
       if (error) throw error;
       if (!data.success) throw new Error(data.error || "Erro ao criar template na Meta");
@@ -5040,7 +5043,7 @@ const CRM = () => {
   const handleDeleteTemplate = async (name: string) => {
     try {
       const { error } = await supabase.functions.invoke('meta-whatsapp-crm', {
-        body: { action: 'deleteTemplate', name }
+        body: { action: 'deleteTemplate', name, ...numberScopePatch() }
       });
       if (error) throw error;
       toast({ title: "Template excluído" });

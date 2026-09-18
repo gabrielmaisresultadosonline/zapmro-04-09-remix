@@ -4106,20 +4106,26 @@ async function getWhatsAppNumberByPhoneId(
   return row || null;
 }
 
-/** Sobrepõe as credenciais de `crm_settings` com as do número informado. */
+/**
+ * Sobrepõe as credenciais de `crm_settings` com as do número informado.
+ *
+ * Os dados da Meta são deliberadamente ESTRITOS por caixa. Nunca herdamos
+ * WABA, App ID, segredo ou Business ID de `crm_settings`: essa linha pode
+ * representar outro número do mesmo cadastro. Misturar esses campos faz o
+ * token de uma caixa consultar/criar templates na WABA de outra caixa.
+ */
 function applyNumberToSettings(settings: any, numberRow: any) {
   if (!numberRow?.meta_access_token || !numberRow?.meta_phone_number_id) return settings;
   return {
     ...(settings || {}),
     meta_access_token: numberRow.meta_access_token,
     meta_phone_number_id: numberRow.meta_phone_number_id,
-    meta_waba_id: numberRow.meta_waba_id ?? settings?.meta_waba_id ?? null,
-    meta_business_id: numberRow.meta_business_id ?? settings?.meta_business_id ?? null,
-    meta_app_id: numberRow.meta_app_id ?? settings?.meta_app_id ?? null,
-    meta_app_secret: numberRow.meta_app_secret ?? settings?.meta_app_secret ?? null,
-    meta_display_phone_number:
-      numberRow.meta_display_phone_number ?? settings?.meta_display_phone_number ?? null,
-    meta_verified_name: numberRow.meta_verified_name ?? settings?.meta_verified_name ?? null,
+    meta_waba_id: numberRow.meta_waba_id ?? null,
+    meta_business_id: numberRow.meta_business_id ?? null,
+    meta_app_id: numberRow.meta_app_id ?? null,
+    meta_app_secret: numberRow.meta_app_secret ?? null,
+    meta_display_phone_number: numberRow.meta_display_phone_number ?? null,
+    meta_verified_name: numberRow.meta_verified_name ?? null,
   };
 }
 
@@ -5741,7 +5747,8 @@ async function fetchAndStoreIncomingMedia(
       // ---- Escopo por número de WhatsApp -------------------------------
       // O app envia `whatsapp_number_id` (número aberto na tela). Em execuções
       // internas (fluxos/agendamentos) herdamos o número do próprio contato.
-      let scopedNumberId: string | null = params.whatsapp_number_id || null;
+      const requestedNumberId: string | null = params.whatsapp_number_id || null;
+      let scopedNumberId: string | null = requestedNumberId;
       if (!scopedNumberId && params.contactId) {
         const { data: contactNumber } = await supabase
           .from('crm_contacts')
@@ -5761,9 +5768,14 @@ async function fetchAndStoreIncomingMedia(
             phone_number_id: numberRow.meta_phone_number_id,
           });
         } else {
-          // Número inexistente ou de outro cadastro: nunca reaproveitamos.
-          console.warn('[NUMBER] whatsapp_number_id ignorado (não pertence ao usuário)', scopedNumberId);
-          scopedNumberId = null;
+          // Um escopo explícito inválido jamais pode cair nas credenciais gerais:
+          // isso enviaria/sincronizaria usando outro número do mesmo cadastro.
+          console.warn('[NUMBER] whatsapp_number_id rejeitado (não pertence ao usuário)', scopedNumberId);
+          return jsonResponse({
+            success: false,
+            code: 'WHATSAPP_NUMBER_SCOPE_INVALID',
+            error: 'O WhatsApp selecionado não pertence a este cadastro. Volte à lista de números e abra a conexão novamente.',
+          }, 403);
         }
       }
 
@@ -6303,7 +6315,12 @@ async function fetchAndStoreIncomingMedia(
     const meta_phone_number_id = settings?.meta_phone_number_id;
 
     if (action === 'getTemplates') {
-      if (!meta_access_token) throw new Error('Meta API credentials not configured');
+      if (!scopedNumberId) {
+        return jsonResponse({ success: false, code: 'WHATSAPP_NUMBER_REQUIRED', error: 'Selecione o WhatsApp antes de sincronizar os templates.' }, 400);
+      }
+      if (!meta_access_token || !settings?.meta_waba_id || !settings?.meta_phone_number_id) {
+        return jsonResponse({ success: false, code: 'META_NUMBER_CREDENTIALS_INCOMPLETE', error: 'Esta conexão não possui token, WABA e Phone Number ID completos. Reconecte somente este WhatsApp para atualizar os dados.' }, 400);
+      }
       const { meta_waba_id } = settings
       console.log(`Fetching templates for WABA ${meta_waba_id}...`);
       
@@ -6443,6 +6460,12 @@ async function fetchAndStoreIncomingMedia(
     }
 
     if (action === 'createTemplate') {
+      if (!scopedNumberId) {
+        return jsonResponse({ success: false, code: 'WHATSAPP_NUMBER_REQUIRED', error: 'Selecione o WhatsApp antes de criar o template.' }, 400);
+      }
+      if (!meta_access_token || !settings?.meta_waba_id || !settings?.meta_phone_number_id) {
+        return jsonResponse({ success: false, code: 'META_NUMBER_CREDENTIALS_INCOMPLETE', error: 'Esta conexão não possui token, WABA e Phone Number ID completos. Reconecte somente este WhatsApp antes de criar templates.' }, 400);
+      }
       const { meta_waba_id } = settings
       const { name, category, language, components, contactId, waId } = params;
       
@@ -6693,6 +6716,12 @@ async function fetchAndStoreIncomingMedia(
     }
 
     if (action === 'deleteTemplate') {
+      if (!scopedNumberId) {
+        return jsonResponse({ success: false, code: 'WHATSAPP_NUMBER_REQUIRED', error: 'Selecione o WhatsApp antes de excluir o template.' }, 400);
+      }
+      if (!meta_access_token || !settings?.meta_waba_id || !settings?.meta_phone_number_id) {
+        return jsonResponse({ success: false, code: 'META_NUMBER_CREDENTIALS_INCOMPLETE', error: 'Esta conexão não possui token, WABA e Phone Number ID completos. Reconecte somente este WhatsApp antes de excluir templates.' }, 400);
+      }
       const { meta_waba_id } = settings
       const { name } = params
       

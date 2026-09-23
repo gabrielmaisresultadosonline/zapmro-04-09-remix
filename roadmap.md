@@ -46,3 +46,4 @@
 - [x] Corrigir o diagnóstico por phone_number_id/UUID e impedir que a escuta misture mensagens de outras caixas.
 - [x] Isolar contatos legados na caixa principal e mostrar a sincronização em tempo real das conversas.
 - [x] Impedir mistura de token, WABA, número e templates entre caixas do mesmo cadastro.
+- [x] Fazer o nó Aguardar respeitar segundos, minutos e horas e retomar automaticamente sem duplicar a execução.

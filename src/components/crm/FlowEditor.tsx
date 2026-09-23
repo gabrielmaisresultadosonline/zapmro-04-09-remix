@@ -1326,15 +1326,22 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
                       <Label className="text-xs">Tempo</Label>
                       <Input 
                         type="number" 
-                        value={selectedNode.data.delay as number} 
-                        onChange={(e) => updateNodeData(selectedNode.id, { delay: parseInt(e.target.value) })}
+                        min={1}
+                        step={1}
+                        value={(selectedNode.data.delay as number) || 1} 
+                        onChange={(e) => {
+                          const parsedDelay = Number.parseInt(e.target.value, 10);
+                          updateNodeData(selectedNode.id, {
+                            delay: Number.isFinite(parsedDelay) && parsedDelay > 0 ? parsedDelay : 1,
+                          });
+                        }}
                         className="text-xs h-8"
                       />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs">Unidade</Label>
                       <Select 
-                        value={selectedNode.data.unit as string} 
+                        value={(selectedNode.data.unit as string) || 'segundos'} 
                         onValueChange={(val) => updateNodeData(selectedNode.id, { unit: val })}
                       >
                         <SelectTrigger className="text-xs h-8">

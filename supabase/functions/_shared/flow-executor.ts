@@ -2,6 +2,25 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const DELAY_UNIT_MULTIPLIERS: Record<string, number> = {
+  segundos: 1,
+  minutos: 60,
+  horas: 3600,
+};
+
+export function resolveDelaySeconds(rawDelay: unknown, rawUnit: unknown): number {
+  const parsedDelay = typeof rawDelay === 'number'
+    ? rawDelay
+    : Number.parseInt(String(rawDelay ?? '5'), 10);
+  const safeDelay = Number.isFinite(parsedDelay) && parsedDelay > 0
+    ? Math.floor(parsedDelay)
+    : 5;
+  const unit = typeof rawUnit === 'string' ? rawUnit.toLowerCase() : 'segundos';
+  const multiplier = DELAY_UNIT_MULTIPLIERS[unit] ?? DELAY_UNIT_MULTIPLIERS.segundos;
+
+  return safeDelay * multiplier;
+}
+
 /**
  * Credenciais de envio isoladas por número de WhatsApp.
  * Cadastros com mais de um número têm bases separadas: o contato guarda
@@ -363,8 +382,10 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
         return { success: true, message: 'Template sent, waiting for response or timeout' };
       }
     } else if (node.type === 'delay') {
-      const waitTime = parseInt(node.data?.delay || '5');
-      const nextExecution = new Date(Date.now() + waitTime * 1000).toISOString();
+      // O editor persiste a unidade junto do valor. Fluxos antigos não têm
+      // `unit`, portanto continuam sendo interpretados em segundos.
+      const waitTimeSeconds = resolveDelaySeconds(node.data?.delay, node.data?.unit);
+      const nextExecution = new Date(Date.now() + waitTimeSeconds * 1000).toISOString();
       
       const edge = flow.edges?.find((e: any) => e.source === node.id);
       if (edge) {
@@ -374,8 +395,8 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
           flow_state: 'running'
         }).eq('id', contactId);
         
-        console.log(`Delay node ${node.id}: Scheduled next node ${edge.target} at ${nextExecution}`);
-        return { success: true, message: `Delay scheduled for ${waitTime}s` };
+        console.log(`Delay node ${node.id}: Scheduled next node ${edge.target} in ${waitTimeSeconds}s at ${nextExecution}`);
+        return { success: true, message: `Delay scheduled for ${waitTimeSeconds}s` };
       }
 
       // Um delay sem conexão de saída encerra o fluxo. Sem esta limpeza, o

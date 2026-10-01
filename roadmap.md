@@ -50,3 +50,4 @@
 - [x] Adicionar ao AdminCentral armazenamento por WhatsApp, limpeza manual segura, retenção de 30 dias e aviso ao usuário.
 - [x] Ampliar armazenamento com resíduos antigos, números desconectados/removidos, diagnóstico do VPS e retenção de backups.
 - [x] Impedir que a medição pesada de resíduos deixe toda a aba Armazenamento vazia.
+- [x] Exibir disco total da VPS, Docker, projeto, logs e inventário completo por cadastro sem apagar dados.

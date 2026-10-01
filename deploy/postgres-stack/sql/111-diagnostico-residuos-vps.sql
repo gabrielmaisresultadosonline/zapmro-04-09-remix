@@ -37,6 +37,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS crm_vps_maintenance_one_active_idx
   ON public.crm_vps_maintenance_requests (action)
   WHERE status IN ('pending', 'running');
 
+-- Mantém somente a identidade administrativa de caixas removidas. O conteúdo
+-- da conversa não é copiado: ele continua elegível para limpeza.
+CREATE TABLE IF NOT EXISTS public.crm_whatsapp_number_history (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  original_number_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  number_label text,
+  display_phone_number text,
+  verified_name text,
+  removed_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (original_number_id)
+);
+
+GRANT ALL ON public.crm_whatsapp_number_history TO service_role;
+ALTER TABLE public.crm_whatsapp_number_history ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS crm_whatsapp_number_history_user_idx
+  ON public.crm_whatsapp_number_history (user_id, removed_at DESC);
+
+CREATE OR REPLACE FUNCTION public.crm_archive_whatsapp_number_before_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.crm_whatsapp_number_history
+    (original_number_id, user_id, number_label, display_phone_number, verified_name, removed_at)
+  VALUES
+    (OLD.id, OLD.user_id, OLD.label, OLD.meta_display_phone_number, OLD.meta_verified_name, now())
+  ON CONFLICT (original_number_id) DO UPDATE
+    SET number_label = EXCLUDED.number_label,
+        display_phone_number = EXCLUDED.display_phone_number,
+        verified_name = EXCLUDED.verified_name,
+        removed_at = EXCLUDED.removed_at,
+        updated_at = now();
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS crm_archive_whatsapp_number_before_delete ON public.crm_whatsapp_numbers;
+CREATE TRIGGER crm_archive_whatsapp_number_before_delete
+  BEFORE DELETE ON public.crm_whatsapp_numbers
+  FOR EACH ROW EXECUTE FUNCTION public.crm_archive_whatsapp_number_before_delete();
+
 -- Resíduos que podem ser atribuídos a um cadastro, mas não a uma caixa ativa:
 -- mensagens de cadastros sem número e mídias catalogadas sem qualquer uso.
 CREATE OR REPLACE FUNCTION public.crm_admin_storage_residues()

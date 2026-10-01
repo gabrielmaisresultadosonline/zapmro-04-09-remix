@@ -103,6 +103,14 @@ psql "postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${PG_PORT:-5432}/${PO
   > "$DEST/contagens.txt" 2>/dev/null || warn "não consegui gerar contagens (opcional)"
 
 ok "backup concluído em $DEST"
+
+# Evita que cada atualização deixe para sempre mais uma cópia completa do banco.
+# Mantém os 7 backups mais recentes (e, portanto, várias opções de restauração).
+mapfile -t backups_antigos < <(ls -1dt /var/backups/zapmro/* 2>/dev/null | tail -n +8 || true)
+if [ "${#backups_antigos[@]}" -gt 0 ]; then
+  sudo_ rm -rf -- "${backups_antigos[@]}"
+  ok "retenção aplicada: mantidos os 7 backups mais recentes"
+fi
 echo
 echo "Para restaurar (só se precisar):"
 echo "  gunzip -c $DEST/banco.sql.gz | docker exec -i zapmro-db psql -U postgres"

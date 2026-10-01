@@ -63,9 +63,19 @@ serve(async (req) => {
     }
 
     if (action === "list_storage") {
-      const { data, error } = await supabase.rpc("crm_admin_storage_overview");
+      const [storage, residues, vps] = await Promise.all([
+        supabase.rpc("crm_admin_storage_overview"),
+        supabase.rpc("crm_admin_storage_residues"),
+        supabase.rpc("crm_admin_vps_storage_summary"),
+      ]);
+      const error = storage.error || residues.error || vps.error;
       if (error) return json({ success: false, error: error.message }, 500);
-      return json({ success: true, entries: data || [] });
+      return json({
+        success: true,
+        entries: storage.data || [],
+        residues: residues.data || [],
+        vps: vps.data || {},
+      });
     }
 
     if (action === "clear_number_storage") {
@@ -87,6 +97,32 @@ serve(async (req) => {
         freedBytes: Number(result?.estimated_freed_bytes || 0),
         queuedMedia: Number(result?.queued_media || 0),
       });
+    }
+
+    if (action === "clear_residual_storage") {
+      const userId = typeof body.userId === "string" ? body.userId : "";
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidPattern.test(userId)) return json({ success: false, error: "Cadastro inválido" }, 400);
+      const { data, error } = await supabase.rpc("crm_admin_clear_residual_storage", { p_user_id: userId });
+      if (error) return json({ success: false, error: error.message }, 500);
+      const result = Array.isArray(data) ? data[0] : data;
+      return json({
+        success: true,
+        deletedMessages: Number(result?.deleted_messages || 0),
+        queuedMedia: Number(result?.queued_media || 0),
+        freedBytes: Number(result?.estimated_freed_bytes || 0),
+      });
+    }
+
+    if (action === "request_vps_storage_cleanup") {
+      const { data, error } = await supabase
+        .from("crm_vps_maintenance_requests")
+        .insert({ action: "safe_cleanup" })
+        .select("id")
+        .single();
+      if (error?.code === "23505") return json({ success: true, alreadyPending: true });
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, requestId: data?.id });
     }
 
     /**

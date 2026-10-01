@@ -48,3 +48,4 @@
 - [x] Impedir mistura de token, WABA, número e templates entre caixas do mesmo cadastro.
 - [x] Fazer o nó Aguardar respeitar segundos, minutos e horas e retomar automaticamente sem duplicar a execução.
 - [x] Adicionar ao AdminCentral armazenamento por WhatsApp, limpeza manual segura, retenção de 30 dias e aviso ao usuário.
+- [x] Ampliar armazenamento com resíduos antigos, números desconectados/removidos, diagnóstico do VPS e retenção de backups.

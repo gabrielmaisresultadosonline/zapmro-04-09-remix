@@ -96,7 +96,7 @@ BEGIN
          COALESCE(rows.database_row_bytes, 0) + COALESCE(media.media_file_bytes, 0),
          COALESCE(rows.total_rows, 0),
          COALESCE(rows.categories, '{}'::jsonb),
-         COALESCE(rows.table_details, '{}'::jsonb),
+         COALESCE(detail.table_details, '{}'::jsonb),
          COALESCE(numbers.active_numbers, 0),
          COALESCE(numbers.disconnected_numbers, 0),
          COALESCE(history.removed_numbers, 0),

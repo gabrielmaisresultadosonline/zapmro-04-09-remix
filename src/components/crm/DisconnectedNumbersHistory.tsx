@@ -135,7 +135,7 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
         <div className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#202c33] rounded-2xl border border-white/10 p-6">
             <h2 className="text-white font-bold text-lg mb-1">Transferir fluxos</h2>
-            <p className="text-white/50 text-xs mb-4">De: {source.label}. Os fluxos chegam desligados; ligue-os depois de conferir.</p>
+            <p className="text-white/50 text-xs mb-4">De: {source.label}{source.removed ? ". Os fluxos chegam desligados; ligue-os depois de conferir." : ""}</p>
 
             <div className="max-h-56 overflow-y-auto space-y-1 mb-4">
               {flowsOf(source.id).map((flow) => (

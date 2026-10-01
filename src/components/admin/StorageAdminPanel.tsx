@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { StorageResiduesPanel, type StorageResidue } from "@/components/admin/StorageResiduesPanel";
+import { StorageSystemPanel, type VpsStorageSummary } from "@/components/admin/StorageSystemPanel";
 
 export interface StorageEntry {
   user_id: string;
@@ -63,16 +65,21 @@ function StorageRow({ entry, onClear, clearing }: { entry: StorageEntry; onClear
 
 export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
   const [entries, setEntries] = useState<StorageEntry[]>([]);
+  const [residues, setResidues] = useState<StorageResidue[]>([]);
+  const [vps, setVps] = useState<VpsStorageSummary>({});
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<StorageEntry | null>(null);
   const [clearingId, setClearingId] = useState<string | null>(null);
+  const [requestingVpsCleanup, setRequestingVpsCleanup] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await adminRead<{ entries?: StorageEntry[] }>("list_storage", creds);
+      const result = await adminRead<{ entries?: StorageEntry[]; residues?: StorageResidue[]; vps?: VpsStorageSummary }>("list_storage", creds);
       setEntries(result.entries || []);
+      setResidues(result.residues || []);
+      setVps(result.vps || {});
     } catch (error) {
       toast.error(adminErrorMessage(error, "Erro ao carregar armazenamento"));
     } finally {
@@ -102,6 +109,36 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
     }
   }
 
+  async function clearResidues(entry: StorageResidue) {
+    if (clearingId) return;
+    if (!window.confirm("Limpar mensagens antigas e mídias sem uso deste cadastro? Contatos, fluxos e templates serão preservados.")) return;
+    setClearingId(entry.user_id);
+    try {
+      const result = await adminCall<{ deletedMessages?: number }>("clear_residual_storage", creds, { userId: entry.user_id });
+      toast.success(`${Number(result.deletedMessages || 0).toLocaleString("pt-BR")} mensagens antigas removidas; contatos preservados.`);
+      await load();
+    } catch (error) {
+      toast.error(adminErrorMessage(error, "Erro ao limpar resíduos antigos"));
+    } finally {
+      setClearingId(null);
+    }
+  }
+
+  async function requestVpsCleanup() {
+    if (requestingVpsCleanup) return;
+    if (!window.confirm("Solicitar limpeza segura de arquivos órfãos, logs e backups antigos do VPS?")) return;
+    setRequestingVpsCleanup(true);
+    try {
+      await adminCall("request_vps_storage_cleanup", creds);
+      toast.success("Limpeza solicitada. A VPS executará em até 10 minutos.");
+      await load();
+    } catch (error) {
+      toast.error(adminErrorMessage(error, "Erro ao solicitar limpeza do VPS"));
+    } finally {
+      setRequestingVpsCleanup(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -113,6 +150,9 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
         <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Recarregar</Button>
       </div>
       <p className="text-sm text-muted-foreground">A limpeza automática remove históricos sem atividade há 30 dias. Contatos, números, configurações, fluxos e templates permanecem salvos.</p>
+      <StorageSystemPanel summary={vps} requesting={requestingVpsCleanup} onRequest={() => void requestVpsCleanup()} />
+      <StorageResiduesPanel entries={residues} clearingId={clearingId} onClear={(entry) => void clearResidues(entry)} />
+      <div><h3 className="text-lg font-semibold">Armazenamento por WhatsApp</h3><p className="text-sm text-muted-foreground">Mostra caixas conectadas e desconectadas que ainda permanecem cadastradas.</p></div>
       {loading ? <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div> : <div className="space-y-3">{filtered.map((entry) => <StorageRow key={entry.whatsapp_number_id} entry={entry} onClear={setTarget} clearing={clearingId === entry.whatsapp_number_id} />)}{filtered.length === 0 && <Card className="p-8 text-center text-muted-foreground">Nenhum armazenamento encontrado.</Card>}</div>}
       <Dialog open={target !== null} onOpenChange={(open) => !open && setTarget(null)}><DialogContent><DialogHeader><DialogTitle>Zerar o histórico deste WhatsApp?</DialogTitle><DialogDescription>As mensagens e mídias exclusivas serão apagadas. O cadastro, o número, os contatos, as configurações, os fluxos e os templates serão mantidos.</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setTarget(null)}>Cancelar</Button><Button variant="destructive" onClick={() => void clearStorage()} disabled={clearingId !== null}>{clearingId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Zerar agora</Button></DialogFooter></DialogContent></Dialog>
     </div>

@@ -26,7 +26,12 @@ docker exec "$ST_CONT" find /var/lib/storage -type f -mmin +120 -printf '%P\n' 2
 orphan_disk_bytes=0
 while IFS= read -r rel; do
   [ -n "$rel" ] || continue
-  if ! grep -Fqx -- "$rel" "$db_objects"; then
+  without_tenant="${rel#*/}"
+  if ! grep -Fqx -- "$rel" "$db_objects" \
+     && [ "$without_tenant" != "$rel" ] \
+     && ! grep -Fqx -- "$without_tenant" "$db_objects" \
+     && [[ "$without_tenant" == */* ]] \
+     && [[ "$rel" != *.metadata ]]; then
     size="$(docker exec "$ST_CONT" stat -c %s "/var/lib/storage/$rel" 2>/dev/null || echo 0)"
     orphan_disk_bytes=$((orphan_disk_bytes + size))
   fi
@@ -39,6 +44,12 @@ request_id="$(q "update public.crm_vps_maintenance_requests set status='running'
 
 before=$((database_bytes + storage_bytes + docker_logs_bytes + backups_bytes))
 if CONFIRMAR=1 IDADE_MIN=120 bash "$ROOT/deploy/limpar-armazenamento.sh" >/tmp/zapmro-storage-maintenance.log 2>&1; then
+  curl -sS --max-time 300 -X POST \
+    "${PUBLIC_API_URL:-http://localhost:${GATEWAY_PORT:-8000}}/functions/v1/media-gc" \
+    -H "apikey: ${ANON_KEY}" \
+    -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+    -H "Content-Type: application/json" \
+    --data '{"limit":1000}' >/dev/null 2>&1 || true
   # Backups automáticos são segurança, mas sem retenção viravam uma nova cópia
   # grande a cada atualização. Mantém os 7 mais recentes e nunca menos de 2.
   if [ -d /var/backups/zapmro ]; then

@@ -91,12 +91,12 @@ BEGIN
   SELECT u.id,
          u.email::text,
          p.full_name,
-         COALESCE(rows.database_row_bytes, 0),
+         COALESCE(agg.database_row_bytes, 0),
          COALESCE(media.media_file_bytes, 0),
-         COALESCE(rows.database_row_bytes, 0) + COALESCE(media.media_file_bytes, 0),
-         COALESCE(rows.total_rows, 0),
-         COALESCE(rows.categories, '{}'::jsonb),
-         COALESCE(rows.table_details, '{}'::jsonb),
+         COALESCE(agg.database_row_bytes, 0) + COALESCE(media.media_file_bytes, 0),
+         COALESCE(agg.total_rows, 0),
+         COALESCE(agg.categories, '{}'::jsonb),
+         COALESCE(detail.table_details, '{}'::jsonb),
          COALESCE(numbers.active_numbers, 0),
          COALESCE(numbers.disconnected_numbers, 0),
          COALESCE(history.removed_numbers, 0),
@@ -104,20 +104,32 @@ BEGIN
     FROM auth.users u
     LEFT JOIN public.crm_profiles p ON p.user_id = u.id
     LEFT JOIN LATERAL (
-      SELECT sum(r.row_bytes)::bigint AS database_row_bytes,
-             sum(r.row_count)::bigint AS total_rows,
-             jsonb_object_agg(r.category, r.category_bytes) AS categories,
-             jsonb_object_agg(r.table_name, jsonb_build_object('rows', r.table_rows, 'bytes', r.table_bytes)) AS table_details
+      -- Totais e categorias: uma chave por categoria (jsonb_object_agg exige
+      -- chaves distintas para não descartar silenciosamente valores).
+      SELECT sum(c.category_bytes)::bigint AS database_row_bytes,
+             sum(c.category_rows)::bigint AS total_rows,
+             jsonb_object_agg(c.category, c.category_bytes) AS categories
         FROM (
-          SELECT category, table_name,
-                 sum(row_count)::bigint AS table_rows,
-                 sum(row_bytes)::bigint AS table_bytes,
-                 sum(sum(row_bytes)) OVER (PARTITION BY category)::bigint AS category_bytes
+          SELECT category,
+                 sum(row_bytes)::bigint AS category_bytes,
+                 sum(row_count)::bigint AS category_rows
             FROM pg_temp.crm_storage_rows
            WHERE user_id = u.id
-           GROUP BY category, table_name
-        ) r
-    ) rows ON true
+           GROUP BY category
+        ) c
+    ) agg ON true
+    LEFT JOIN LATERAL (
+      SELECT jsonb_object_agg(t.table_name,
+               jsonb_build_object('rows', t.table_rows, 'bytes', t.table_bytes)) AS table_details
+        FROM (
+          SELECT table_name,
+                 sum(row_count)::bigint AS table_rows,
+                 sum(row_bytes)::bigint AS table_bytes
+            FROM pg_temp.crm_storage_rows
+           WHERE user_id = u.id
+           GROUP BY table_name
+        ) t
+    ) detail ON true
     LEFT JOIN LATERAL (
       SELECT COALESCE(sum(COALESCE(a.size_bytes, 0)), 0)::bigint AS media_file_bytes
         FROM public.crm_media_assets a WHERE a.user_id = u.id

@@ -18,6 +18,12 @@ database_bytes="$(q "select pg_database_size(current_database())" 2>/dev/null ||
 storage_bytes="$(docker exec "$ST_CONT" du -sb /var/lib/storage 2>/dev/null | awk '{print $1}' || echo 0)"
 docker_logs_bytes="$(du -cb /var/lib/docker/containers/*/*-json.log 2>/dev/null | tail -1 | cut -f1 || echo 0)"
 backups_bytes="$(bytes_dir /var/backups/zapmro)"
+root_total_bytes="$(df -B1 --output=size / | tail -1 | tr -d ' ')"
+root_used_bytes="$(df -B1 --output=used / | tail -1 | tr -d ' ')"
+root_available_bytes="$(df -B1 --output=avail / | tail -1 | tr -d ' ')"
+docker_total_bytes="$(bytes_dir /var/lib/docker)"
+project_bytes="$(bytes_dir "$ROOT")"
+system_logs_bytes="$(bytes_dir /var/log)"
 
 # Espaço órfão no disco: arquivo sem linha correspondente em storage.objects.
 db_objects="$(mktemp)"; disk_objects="$(mktemp)"; trap 'rm -f "$db_objects" "$disk_objects"' EXIT
@@ -37,7 +43,7 @@ while IFS= read -r rel; do
   fi
 done < "$disk_objects"
 
-q "insert into public.crm_vps_storage_snapshots(database_bytes,storage_bytes,docker_logs_bytes,backups_bytes,orphan_disk_bytes,details) values (${database_bytes:-0},${storage_bytes:-0},${docker_logs_bytes:-0},${backups_bytes:-0},${orphan_disk_bytes:-0},jsonb_build_object('host',current_setting('server_version'),'measured_at',now())); delete from public.crm_vps_storage_snapshots where created_at < now() - interval '90 days';" >/dev/null
+q "insert into public.crm_vps_storage_snapshots(database_bytes,storage_bytes,docker_logs_bytes,backups_bytes,orphan_disk_bytes,root_total_bytes,root_used_bytes,root_available_bytes,docker_total_bytes,project_bytes,system_logs_bytes,details) values (${database_bytes:-0},${storage_bytes:-0},${docker_logs_bytes:-0},${backups_bytes:-0},${orphan_disk_bytes:-0},${root_total_bytes:-0},${root_used_bytes:-0},${root_available_bytes:-0},${docker_total_bytes:-0},${project_bytes:-0},${system_logs_bytes:-0},jsonb_build_object('host',current_setting('server_version'),'measured_at',now())); select public.crm_refresh_customer_storage_snapshots(); delete from public.crm_vps_storage_snapshots where created_at < now() - interval '90 days';" >/dev/null
 
 request_id="$(q "update public.crm_vps_maintenance_requests set status='running',started_at=now(),updated_at=now() where id=(select id from public.crm_vps_maintenance_requests where status='pending' order by requested_at for update skip locked limit 1) returning id" 2>/dev/null | head -1 || true)"
 [ -n "$request_id" ] || exit 0

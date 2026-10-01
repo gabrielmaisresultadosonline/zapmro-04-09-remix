@@ -82,6 +82,12 @@ serve(async (req) => {
       return json({ success: true, residues: data || [] });
     }
 
+    if (action === "list_complete_customer_storage") {
+      const { data, error } = await supabase.rpc("crm_admin_complete_storage_overview");
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, customers: data || [] });
+    }
+
     if (action === "clear_number_storage") {
       const userId = typeof body.userId === "string" ? body.userId : "";
       const numberId = typeof body.numberId === "string" ? body.numberId : "";

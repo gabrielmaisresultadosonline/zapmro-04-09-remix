@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import { StorageResiduesPanel, type StorageResidue } from "@/components/admin/StorageResiduesPanel";
 import { StorageSystemPanel, type VpsStorageSummary } from "@/components/admin/StorageSystemPanel";
+import { StorageCustomerTotalsPanel, type CustomerStorageEntry } from "@/components/admin/StorageCustomerTotalsPanel";
 
 export interface StorageEntry {
   user_id: string;
@@ -67,6 +68,7 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
   const [entries, setEntries] = useState<StorageEntry[]>([]);
   const [residues, setResidues] = useState<StorageResidue[]>([]);
   const [vps, setVps] = useState<VpsStorageSummary>({});
+  const [customers, setCustomers] = useState<CustomerStorageEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<StorageEntry | null>(null);
@@ -89,6 +91,12 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
       setResidues(result.residues || []);
     } catch (error) {
       toast.error(adminErrorMessage(error, "Os resíduos antigos ainda estão sendo calculados"));
+    }
+    try {
+      const result = await adminRead<{ customers?: CustomerStorageEntry[] }>("list_complete_customer_storage", creds, {}, { timeoutMs: 120000 });
+      setCustomers(result.customers || []);
+    } catch (error) {
+      toast.error(adminErrorMessage(error, "O total completo por cadastro ainda não foi medido"));
     }
   }, [creds]);
 
@@ -157,6 +165,7 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
       <p className="text-sm text-muted-foreground">A limpeza automática remove históricos sem atividade há 30 dias. Contatos, números, configurações, fluxos e templates permanecem salvos.</p>
       <StorageSystemPanel summary={vps} requesting={requestingVpsCleanup} onRequest={() => void requestVpsCleanup()} />
       <StorageResiduesPanel entries={residues} clearingId={clearingId} onClear={(entry) => void clearResidues(entry)} />
+      <StorageCustomerTotalsPanel entries={customers} />
       <div><h3 className="text-lg font-semibold">Armazenamento por WhatsApp</h3><p className="text-sm text-muted-foreground">Mostra caixas conectadas e desconectadas que ainda permanecem cadastradas.</p></div>
       {loading ? <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div> : <div className="space-y-3">{filtered.map((entry) => <StorageRow key={entry.whatsapp_number_id} entry={entry} onClear={setTarget} clearing={clearingId === entry.whatsapp_number_id} />)}{filtered.length === 0 && <Card className="p-8 text-center text-muted-foreground">Nenhum armazenamento encontrado.</Card>}</div>}
       <Dialog open={target !== null} onOpenChange={(open) => !open && setTarget(null)}>

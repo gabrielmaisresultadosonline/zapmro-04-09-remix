@@ -2682,7 +2682,7 @@ const CRM = () => {
       
       if (metricsData) setMetrics(metricsData);
 
-      const { data: flowsData } = await scopeQueryToActiveNumber(supabase.from('crm_flows').select('*, crm_flow_steps(*)'));
+      const { data: flowsData } = await scopeQueryToActiveNumber(supabase.from('crm_flows').select('*, crm_flow_steps(*)').is('archived_from_number_id' as any, null));
       setFlows(flowsData || []);
 
        await contactsSyncPromise;

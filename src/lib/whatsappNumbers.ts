@@ -202,13 +202,15 @@ export interface SavedFlowSummary {
   id: string;
   name: string;
   whatsapp_number_id: string | null;
+  archived_from_number_id: string | null;
+  archived_from_label: string | null;
 }
 
 /** Lista os fluxos salvos do cadastro (com o número dono de cada um). */
 export async function fetchUserFlows(userId: string): Promise<SavedFlowSummary[]> {
   const { data, error } = await supabase
     .from("crm_flows" as any)
-    .select("id, name, whatsapp_number_id")
+    .select("id, name, whatsapp_number_id, archived_from_number_id, archived_from_label")
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
   if (error) {
@@ -230,7 +232,11 @@ export async function transferFlowsToNumber(
   if (flowIds.length === 0) return { success: false, count: 0, error: "Selecione ao menos um fluxo" };
   const { data, error } = await supabase
     .from("crm_flows" as any)
-    .update({ whatsapp_number_id: targetNumberId, updated_at: new Date().toISOString() } as any)
+    .update({
+      whatsapp_number_id: targetNumberId,
+      archived_from_number_id: null,
+      archived_from_label: null,
+      updated_at: new Date().toISOString() } as any)
     .eq("user_id", userId)
     .in("id", flowIds)
     .select("id");

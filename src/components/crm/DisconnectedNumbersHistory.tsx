@@ -10,6 +10,12 @@ import {
   type WhatsAppNumberRecord,
 } from "@/lib/whatsappNumbers";
 
+interface HistorySource {
+  id: string;
+  label: string;
+  removed: boolean;
+}
+
 export interface DisconnectedNumbersHistoryProps {
   userId: string;
   numbers: WhatsAppNumberRecord[];
@@ -22,7 +28,7 @@ export interface DisconnectedNumbersHistoryProps {
 export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumbersHistoryProps) {
   const [flows, setFlows] = useState<SavedFlowSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<WhatsAppNumberRecord | null>(null);
+  const [source, setSource] = useState<HistorySource | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [targetId, setTargetId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -41,11 +47,24 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, numbers.length]);
 
-  if (disconnected.length === 0) return null;
+  /** Desconectados (ainda no cadastro) + removidos (só restam os fluxos guardados). */
+  const sources = useMemo<HistorySource[]>(() => {
+    const list: HistorySource[] = disconnected.map((n) => ({ id: n.id, label: describeNumber(n), removed: false }));
+    const seen = new Set<string>();
+    for (const f of flows) {
+      if (f.whatsapp_number_id || !f.archived_from_number_id || seen.has(f.archived_from_number_id)) continue;
+      seen.add(f.archived_from_number_id);
+      list.push({ id: f.archived_from_number_id, label: f.archived_from_label || "WhatsApp removido", removed: true });
+    }
+    return list;
+  }, [disconnected, flows]);
 
-  const flowsOf = (id: string) => flows.filter((f) => f.whatsapp_number_id === id);
+  if (sources.length === 0) return null;
 
-  const openTransfer = (record: WhatsAppNumberRecord) => {
+  const flowsOf = (id: string) =>
+    flows.filter((f) => f.whatsapp_number_id === id || (!f.whatsapp_number_id && f.archived_from_number_id === id));
+
+  const openTransfer = (record: HistorySource) => {
     setSource(record);
     setSelected(new Set(flowsOf(record.id).map((f) => f.id)));
     setTargetId(connected[0]?.id ?? "");
@@ -86,14 +105,14 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
         </div>
       ) : (
         <div className="space-y-2">
-          {disconnected.map((record) => {
+          {sources.map((record) => {
             const count = flowsOf(record.id).length;
             return (
               <div key={record.id} className="rounded-xl border border-white/5 bg-[#111b21]/60 p-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-white/80 text-sm font-medium truncate">{describeNumber(record)}</p>
+                  <p className="text-white/80 text-sm font-medium truncate">{record.label}</p>
                   <p className="text-white/40 text-xs">
-                    Desconectado • {count} fluxo(s) salvo(s)
+                    {record.removed ? "Removido" : "Desconectado"} • {count} fluxo(s) salvo(s)
                   </p>
                 </div>
                 <button
@@ -116,7 +135,7 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
         <div className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#202c33] rounded-2xl border border-white/10 p-6">
             <h2 className="text-white font-bold text-lg mb-1">Transferir fluxos</h2>
-            <p className="text-white/50 text-xs mb-4">De: {describeNumber(source)}</p>
+            <p className="text-white/50 text-xs mb-4">De: {source.label}{source.removed ? ". Os fluxos chegam desligados; ligue-os depois de conferir." : ""}</p>
 
             <div className="max-h-56 overflow-y-auto space-y-1 mb-4">
               {flowsOf(source.id).map((flow) => (

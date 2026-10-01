@@ -76,14 +76,19 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await adminRead<{ entries?: StorageEntry[]; residues?: StorageResidue[]; vps?: VpsStorageSummary }>("list_storage", creds);
+      const result = await adminRead<{ entries?: StorageEntry[]; vps?: VpsStorageSummary }>("list_storage", creds);
       setEntries(result.entries || []);
-      setResidues(result.residues || []);
       setVps(result.vps || {});
     } catch (error) {
       toast.error(adminErrorMessage(error, "Erro ao carregar armazenamento"));
     } finally {
       setLoading(false);
+    }
+    try {
+      const result = await adminRead<{ residues?: StorageResidue[] }>("list_storage_residues", creds, {}, { timeoutMs: 120000 });
+      setResidues(result.residues || []);
+    } catch (error) {
+      toast.error(adminErrorMessage(error, "Os resíduos antigos ainda estão sendo calculados"));
     }
   }, [creds]);
 

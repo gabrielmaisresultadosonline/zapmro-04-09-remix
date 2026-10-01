@@ -440,7 +440,7 @@ SELECT cron.schedule('media-gc-daily', '25 4 * * *', \$job\$
 \$job\$);
 
 -- Remove diariamente históricos de conversas sem nenhuma mensagem nova por
--- mais de 10 dias. Contatos e configurações permanecem intactos.
+-- mais de 30 dias. Contatos e configurações permanecem intactos.
 SELECT cron.schedule('inactive-history-cleanup-daily', '5 4 * * *', \$job\$
   SELECT net.http_post(
     url := '${RETENTION_CLEANUP_URL}',
@@ -666,7 +666,7 @@ fi
 retention_function="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='crm_cleanup_inactive_histories'")"
 retention_cron="$(q "select count(*) from cron.job where jobname='inactive-history-cleanup-daily'")"
 if [ "$retention_function" = "1" ] && [ "$retention_cron" = "1" ]; then
-  echo -e "  Retenção de históricos : ${C_G}OK${N} (10 dias + cron diário)"
+  echo -e "  Retenção de históricos : ${C_G}OK${N} (30 dias + cron diário)"
 else
   die "Migration 108 incompleta; a retenção automática de históricos não foi ativada"
 fi

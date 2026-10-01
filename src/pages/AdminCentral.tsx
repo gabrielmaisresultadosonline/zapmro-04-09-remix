@@ -23,6 +23,7 @@ import SalesOrdersPanel from "@/components/admin/SalesOrdersPanel";
 import TutorialsAdminPanel from "@/components/admin/TutorialsAdminPanel";
 import TrialsPanel from "@/components/admin/TrialsPanel";
 import MigrationExtras from "@/components/admin/MigrationExtras";
+import StorageAdminPanel from "@/components/admin/StorageAdminPanel";
 import { toast } from "sonner";
 import {
   Loader2,
@@ -51,6 +52,7 @@ import {
   Shield,
   Lock,
   Unlock,
+  HardDrive,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -1201,6 +1203,9 @@ export default function AdminCentral() {
             <TabsTrigger value="sales" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Vendas</TabsTrigger>
             <TabsTrigger value="announcements" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Avisos (Popup)</TabsTrigger>
             <TabsTrigger value="tutorials" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Tutoriais</TabsTrigger>
+            <TabsTrigger value="storage" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white gap-1.5">
+              <HardDrive className="h-3.5 w-3.5" /> Armazenamento
+            </TabsTrigger>
             <TabsTrigger value="migration" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white gap-1.5">
               <Database className="h-3.5 w-3.5" /> Migração
             </TabsTrigger>
@@ -1417,6 +1422,10 @@ export default function AdminCentral() {
 
           <TabsContent value="tutorials" className="mt-4">
             <TutorialsAdminPanel />
+          </TabsContent>
+
+          <TabsContent value="storage" className="mt-4">
+            <StorageAdminPanel creds={creds} />
           </TabsContent>
 
           <TabsContent value="migration" className="mt-4">

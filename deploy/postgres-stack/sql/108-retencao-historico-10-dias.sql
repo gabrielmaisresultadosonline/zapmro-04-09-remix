@@ -1,5 +1,5 @@
 -- ============================================================
--- 108 - Retenção automática de históricos inativos por 10 dias
+-- 108 - Retenção automática de históricos inativos por 30 dias
 -- Idempotente e aditiva: preserva contatos, configurações e integrações.
 -- ============================================================
 
@@ -10,7 +10,7 @@ INSERT INTO public.admin_announcements
 VALUES (
   '10810810-0000-4000-8000-000000000001',
   'Atenção: mudamos algumas configurações de armazenamento',
-  'Retenção automática de históricos inativos por 10 dias.',
+  'Retenção automática de históricos inativos por 30 dias.',
   'once',
   true,
   now(),
@@ -28,11 +28,11 @@ CREATE INDEX IF NOT EXISTS crm_messages_retention_contact_created_idx
   WHERE contact_id IS NOT NULL;
 
 -- Remove um lote de históricos cuja mensagem mais recente, recebida OU enviada,
--- já tenha mais de 10 dias. O contato permanece intacto. As URLs catalogadas são
+-- já tenha mais de 30 dias. O contato permanece intacto. As URLs catalogadas são
 -- colocadas na lixeira para o media-gc fazer uma última verificação antes de
 -- remover o objeto físico do servidor.
 CREATE OR REPLACE FUNCTION public.crm_cleanup_inactive_histories(
-  p_inactive_days integer DEFAULT 10,
+  p_inactive_days integer DEFAULT 30,
   p_contact_limit integer DEFAULT 100
 ) RETURNS TABLE (
   deleted_contacts integer,
@@ -44,7 +44,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_cutoff timestamptz := now() - make_interval(days => GREATEST(1, COALESCE(p_inactive_days, 10)));
+  v_cutoff timestamptz := now() - make_interval(days => GREATEST(1, COALESCE(p_inactive_days, 30)));
 BEGIN
   CREATE TEMP TABLE IF NOT EXISTS pg_temp.retention_contacts (
     contact_id uuid PRIMARY KEY
@@ -137,7 +137,7 @@ BEGIN
     INSERT INTO public.crm_media_gc_queue
       (media_asset_id, user_id, bucket, path, public_url, reason, purge_after)
     SELECT a.id, p.user_id, p.bucket, p.path, p.public_url,
-           'retencao-historico-10-dias', now()
+           'retencao-historico-30-dias', now()
       FROM parsed_urls p
       LEFT JOIN public.crm_media_assets a
         ON a.user_id = p.user_id AND a.public_url = p.public_url

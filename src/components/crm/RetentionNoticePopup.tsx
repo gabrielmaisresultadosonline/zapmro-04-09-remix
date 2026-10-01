@@ -20,14 +20,10 @@ export default function RetentionNoticePopup() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user || cancelled) return;
 
-      const { data: cleanupEvent } = await supabase
-        .from("crm_storage_cleanup_events")
-        .select("id")
-        .eq("user_id", user.id)
-        .is("acknowledged_at", null)
-        .order("cleaned_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: noticeData } = await supabase.functions.invoke("crm-storage-notice", {
+        body: { action: "pending" },
+      });
+      const cleanupEvent = noticeData?.success ? noticeData.event : null;
 
       if (cleanupEvent?.id && !cancelled) {
         setCleanupEventId(cleanupEvent.id);
@@ -68,10 +64,9 @@ export default function RetentionNoticePopup() {
 
   const closeNotice = async () => {
     if (cleanupEventId) {
-      const { error } = await supabase
-        .from("crm_storage_cleanup_events")
-        .update({ acknowledged_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-        .eq("id", cleanupEventId);
+      const { error } = await supabase.functions.invoke("crm-storage-notice", {
+        body: { action: "acknowledge", eventId: cleanupEventId },
+      });
       if (error) return;
     }
     setOpen(false);

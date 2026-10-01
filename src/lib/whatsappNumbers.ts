@@ -192,3 +192,48 @@ export function describeNumber(record: WhatsAppNumberRecord): string {
     "WhatsApp"
   );
 }
+
+/** Número sem credenciais completas = desconectado (dados continuam no cadastro). */
+export function isNumberConnected(record: WhatsAppNumberRecord): boolean {
+  return Boolean(record.meta_access_token && record.meta_phone_number_id);
+}
+
+export interface SavedFlowSummary {
+  id: string;
+  name: string;
+  whatsapp_number_id: string | null;
+}
+
+/** Lista os fluxos salvos do cadastro (com o número dono de cada um). */
+export async function fetchUserFlows(userId: string): Promise<SavedFlowSummary[]> {
+  const { data, error } = await supabase
+    .from("crm_flows" as any)
+    .select("id, name, whatsapp_number_id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.warn("[whatsappNumbers] falha ao listar fluxos:", error.message);
+    return [];
+  }
+  return (data || []) as unknown as SavedFlowSummary[];
+}
+
+/**
+ * Move fluxos para outro número do MESMO cadastro. Os passos do fluxo
+ * seguem junto (ligados pelo flow_id). Filtra por user_id por segurança.
+ */
+export async function transferFlowsToNumber(
+  userId: string,
+  flowIds: string[],
+  targetNumberId: string
+): Promise<{ success: boolean; count: number; error?: string }> {
+  if (flowIds.length === 0) return { success: false, count: 0, error: "Selecione ao menos um fluxo" };
+  const { data, error } = await supabase
+    .from("crm_flows" as any)
+    .update({ whatsapp_number_id: targetNumberId, updated_at: new Date().toISOString() } as any)
+    .eq("user_id", userId)
+    .in("id", flowIds)
+    .select("id");
+  if (error) return { success: false, count: 0, error: error.message };
+  return { success: true, count: (data as unknown[] | null)?.length ?? 0 };
+}

@@ -10,6 +10,7 @@ import {
   setNumberPin,
   type WhatsAppNumberRecord,
 } from "@/lib/whatsappNumbers";
+import { DisconnectedNumbersHistory } from "@/components/crm/DisconnectedNumbersHistory";
 
 /** Contato do administrador para liberação de números extras. */
 const SUPPORT_WHATSAPP_URL =
@@ -199,6 +200,8 @@ export function WhatsAppNumberSelector({
                 ? "Conectar mais um WhatsApp"
                 : "Cadastrar número (limite atingido)"}
             </button>
+
+            <DisconnectedNumbersHistory userId={userId} numbers={numbers} />
           </div>
         )}
       </div>

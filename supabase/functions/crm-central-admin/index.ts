@@ -63,19 +63,23 @@ serve(async (req) => {
     }
 
     if (action === "list_storage") {
-      const [storage, residues, vps] = await Promise.all([
+      const [storage, vps] = await Promise.all([
         supabase.rpc("crm_admin_storage_overview"),
-        supabase.rpc("crm_admin_storage_residues"),
         supabase.rpc("crm_admin_vps_storage_summary"),
       ]);
-      const error = storage.error || residues.error || vps.error;
+      const error = storage.error || vps.error;
       if (error) return json({ success: false, error: error.message }, 500);
       return json({
         success: true,
         entries: storage.data || [],
-        residues: residues.data || [],
         vps: vps.data || {},
       });
+    }
+
+    if (action === "list_storage_residues") {
+      const { data, error } = await supabase.rpc("crm_admin_storage_residues");
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, residues: data || [] });
     }
 
     if (action === "clear_number_storage") {

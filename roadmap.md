@@ -49,3 +49,4 @@
 - [x] Fazer o nó Aguardar respeitar segundos, minutos e horas e retomar automaticamente sem duplicar a execução.
 - [x] Adicionar ao AdminCentral armazenamento por WhatsApp, limpeza manual segura, retenção de 30 dias e aviso ao usuário.
 - [x] Ampliar armazenamento com resíduos antigos, números desconectados/removidos, diagnóstico do VPS e retenção de backups.
+- [x] Impedir que a medição pesada de resíduos deixe toda a aba Armazenamento vazia.

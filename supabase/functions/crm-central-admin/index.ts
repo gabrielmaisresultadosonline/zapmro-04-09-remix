@@ -88,6 +88,24 @@ serve(async (req) => {
       return json({ success: true, customers: data || [] });
     }
 
+    if (action === "incoming_media_summary") {
+      const { data, error } = await supabase.rpc("crm_admin_incoming_media_summary");
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, summary: data || {} });
+    }
+
+    if (action === "expire_incoming_media") {
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+      const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/incoming-media-expire`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ batches: 20 }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result?.success === false) return json({ success: false, error: result?.error || `HTTP ${res.status}` }, 500);
+      return json({ success: true, files: Number(result.files || 0), bytes: Number(result.bytes || 0) });
+    }
+
     if (action === "clear_number_storage") {
       const userId = typeof body.userId === "string" ? body.userId : "";
       const numberId = typeof body.numberId === "string" ? body.numberId : "";

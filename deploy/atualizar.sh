@@ -381,6 +381,7 @@ ok "medição de armazenamento do VPS agendada a cada 10 minutos"
 info "reagendando cron das functions para a API local…"
 CRON_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/meta-whatsapp-crm"
 MEDIA_GC_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/media-gc"
+INCOMING_EXPIRE_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/incoming-media-expire"
 RETENTION_CLEANUP_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/retention-cleanup"
 BROADCAST_WORKER_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/broadcast-worker"
 psql "$DB" -q -c "ALTER DATABASE ${POSTGRES_DB:-postgres} SET app.settings.functions_url = '${PUBLIC_API_URL:-http://gateway}'" >/dev/null 2>&1 || true
@@ -443,6 +444,17 @@ SELECT cron.schedule('media-gc-daily', '25 4 * * *', \$job\$
     url := '${MEDIA_GC_URL}',
     headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
     body := '{"limit": 500}'::jsonb,
+    timeout_milliseconds := 300000
+  );
+\$job\$);
+
+-- Mídias recebidas (incoming) com mais de 15 dias e fora de fluxos/templates/
+-- agendamentos são apagadas em lotes; a mensagem vira "mídia expirada".
+SELECT cron.schedule('incoming-media-expire', '*/20 * * * *', \$job\$
+  SELECT net.http_post(
+    url := '${INCOMING_EXPIRE_URL}',
+    headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
+    body := '{"batches": 5}'::jsonb,
     timeout_milliseconds := 300000
   );
 \$job\$);

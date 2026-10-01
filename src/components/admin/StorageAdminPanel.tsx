@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import { StorageResiduesPanel, type StorageResidue } from "@/components/admin/StorageResiduesPanel";
 import { StorageSystemPanel, type VpsStorageSummary } from "@/components/admin/StorageSystemPanel";
+import { IncomingMediaPanel } from "@/components/admin/IncomingMediaPanel";
 import { StorageCustomerTotalsPanel, type CustomerStorageEntry } from "@/components/admin/StorageCustomerTotalsPanel";
 
 export interface StorageEntry {
@@ -163,6 +164,7 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
         <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Recarregar</Button>
       </div>
       <p className="text-sm text-muted-foreground">A limpeza automática remove históricos sem atividade há 30 dias. Contatos, números, configurações, fluxos e templates permanecem salvos.</p>
+      <IncomingMediaPanel creds={creds} />
       <StorageSystemPanel summary={vps} requesting={requestingVpsCleanup} onRequest={() => void requestVpsCleanup()} />
       <StorageResiduesPanel entries={residues} clearingId={clearingId} onClear={(entry) => void clearResidues(entry)} />
       <StorageCustomerTotalsPanel entries={customers} />

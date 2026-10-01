@@ -84,8 +84,23 @@ if [ "${#DISK_FILES[@]}" -gt 0 ]; then
   # Carrega o índice do banco uma vez (bucket/nome) — comparação local, sem N queries.
   psql_q "select bucket_id || '/' || name from storage.objects;" | sort -u > /tmp/zapmro-db-objects.txt
   printf '%s\n' "${DISK_FILES[@]}" | sort -u > /tmp/zapmro-disk-objects.txt
-  # O backend "file" pode versionar com sufixo; comparamos também sem o sufixo.
-  comm -23 /tmp/zapmro-disk-objects.txt /tmp/zapmro-db-objects.txt > "$ORFAOS_FILE" || true
+  # O backend "file" normalmente acrescenta o tenant antes de bucket/caminho.
+  # Só classificamos como órfão quando o caminho tem estrutura reconhecível e
+  # não existe no banco nem com nem sem o prefixo do tenant. Arquivos auxiliares
+  # desconhecidos são preservados: dúvida nunca pode virar exclusão.
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    candidate="$rel"
+    if ! grep -Fqx -- "$candidate" /tmp/zapmro-db-objects.txt; then
+      without_tenant="${candidate#*/}"
+      if [ "$without_tenant" != "$candidate" ] \
+         && ! grep -Fqx -- "$without_tenant" /tmp/zapmro-db-objects.txt \
+         && [[ "$without_tenant" == */* ]] \
+         && [[ "$candidate" != *.metadata ]]; then
+        printf '%s\n' "$rel" >> "$ORFAOS_FILE"
+      fi
+    fi
+  done < /tmp/zapmro-disk-objects.txt
 fi
 QTD_ORFAOS="$(wc -l < "$ORFAOS_FILE" | tr -d ' ')"
 info "órfãos identificados: $QTD_ORFAOS  (lista: $ORFAOS_FILE)"

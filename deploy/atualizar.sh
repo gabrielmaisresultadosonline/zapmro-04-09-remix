@@ -369,6 +369,14 @@ ok "schema Auth acessível pelo serviço (usuários, identidades e migrations)"
 tabelas="$(psql "$DB" -tAc "select count(*) from information_schema.tables where table_schema='public'" 2>/dev/null || echo '?')"
 ok "banco atualizado — ${aplicados} arquivo(s) aplicado(s), ${tabelas} tabelas públicas"
 
+# O AdminCentral cria pedidos de limpeza; este cron local mede o disco e executa
+# esses pedidos fora do navegador, onde logs, backups e volumes são acessíveis.
+sudo_ tee /etc/cron.d/zapmro-storage-maintenance >/dev/null <<EOF
+*/10 * * * * root cd $ROOT && bash deploy/manutencao-armazenamento-vps.sh >/var/log/zapmro-storage-maintenance.log 2>&1
+EOF
+sudo_ chmod 644 /etc/cron.d/zapmro-storage-maintenance
+ok "medição de armazenamento do VPS agendada a cada 10 minutos"
+
 # 5.1 — cron das Edge Functions apontando SEMPRE para esta VPS (nunca Supabase)
 info "reagendando cron das functions para a API local…"
 CRON_URL="${PUBLIC_API_URL:-http://gateway:${GATEWAY_PORT:-8000}}/functions/v1/meta-whatsapp-crm"

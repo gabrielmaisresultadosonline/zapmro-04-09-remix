@@ -117,7 +117,7 @@ BEGIN
            WHERE user_id = u.id
            GROUP BY category
         ) c
-    ) rows ON true
+    ) agg ON true
     LEFT JOIN LATERAL (
       SELECT jsonb_object_agg(t.table_name,
                jsonb_build_object('rows', t.table_rows, 'bytes', t.table_bytes)) AS table_details

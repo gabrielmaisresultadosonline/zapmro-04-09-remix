@@ -270,28 +270,4 @@ UPDATE public.admin_announcements
        updated_at = now()
  WHERE id = '10810810-0000-4000-8000-000000000001';
 
-ALTER FUNCTION public.crm_cleanup_inactive_histories(integer, integer)
-  RENAME TO crm_cleanup_inactive_histories_previous;
-
-CREATE OR REPLACE FUNCTION public.crm_cleanup_inactive_histories(
-  p_inactive_days integer DEFAULT 30,
-  p_contact_limit integer DEFAULT 100
-) RETURNS TABLE (
-  deleted_contacts integer,
-  deleted_messages bigint,
-  queued_media integer
-)
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT * FROM public.crm_cleanup_inactive_histories_previous(
-    GREATEST(30, COALESCE(p_inactive_days, 30)),
-    p_contact_limit
-  );
-$$;
-
-REVOKE ALL ON FUNCTION public.crm_cleanup_inactive_histories(integer, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.crm_cleanup_inactive_histories(integer, integer) TO service_role;
-
 NOTIFY pgrst, 'reload schema';

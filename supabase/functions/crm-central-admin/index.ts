@@ -62,6 +62,33 @@ serve(async (req) => {
       return json({ success: true });
     }
 
+    if (action === "list_storage") {
+      const { data, error } = await supabase.rpc("crm_admin_storage_overview");
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, entries: data || [] });
+    }
+
+    if (action === "clear_number_storage") {
+      const userId = typeof body.userId === "string" ? body.userId : "";
+      const numberId = typeof body.numberId === "string" ? body.numberId : "";
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidPattern.test(userId) || !uuidPattern.test(numberId)) {
+        return json({ success: false, error: "Cadastro ou número inválido" }, 400);
+      }
+      const { data, error } = await supabase.rpc("crm_admin_clear_number_storage", {
+        p_number_id: numberId,
+        p_user_id: userId,
+      });
+      if (error) return json({ success: false, error: error.message }, 500);
+      const result = Array.isArray(data) ? data[0] : data;
+      return json({
+        success: true,
+        deletedMessages: Number(result?.deleted_messages || 0),
+        freedBytes: Number(result?.estimated_freed_bytes || 0),
+        queuedMedia: Number(result?.queued_media || 0),
+      });
+    }
+
     /**
      * Dump em pedaços — evita estourar tempo/memória da edge function.
      * dump_structure: metadados + estrutura (leve)

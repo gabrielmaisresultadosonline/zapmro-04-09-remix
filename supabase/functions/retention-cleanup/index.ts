@@ -43,7 +43,7 @@ Deno.serve(async (req: Request) => {
   try {
     for (let batch = 0; batch < maxBatches; batch += 1) {
       const { data, error } = await admin.rpc('crm_cleanup_inactive_histories', {
-        p_inactive_days: 10,
+        p_inactive_days: 30,
         p_contact_limit: contactLimit,
       })
       if (error) throw error
@@ -59,7 +59,7 @@ Deno.serve(async (req: Request) => {
     }
 
     console.log('[RETENTION-CLEANUP] concluído', totals)
-    return json({ success: true, retention_days: 10, ...totals })
+    return json({ success: true, retention_days: 30, ...totals })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error('[RETENTION-CLEANUP] falha:', message)

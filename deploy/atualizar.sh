@@ -440,7 +440,7 @@ SELECT cron.schedule('media-gc-daily', '25 4 * * *', \$job\$
 \$job\$);
 
 -- Remove diariamente históricos de conversas sem nenhuma mensagem nova por
--- mais de 10 dias. Contatos e configurações permanecem intactos.
+-- mais de 30 dias. Contatos e configurações permanecem intactos.
 SELECT cron.schedule('inactive-history-cleanup-daily', '5 4 * * *', \$job\$
   SELECT net.http_post(
     url := '${RETENTION_CLEANUP_URL}',

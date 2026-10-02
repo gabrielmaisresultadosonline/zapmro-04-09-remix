@@ -4,6 +4,7 @@ import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import {
   buildServerTemplateComponents,
   parseServerTemplateSchema,
+  renderSentTemplateContent,
   summarizeSentComponents,
   validateComponentsAgainstSchema,
 } from "../_shared/template-variables.ts"
@@ -5180,13 +5181,23 @@ async function internalSendTemplate(
       }
     }
 
+    const sentComponentSummary = summarizeSentComponents(payload.template.components);
+    const renderedTemplateContent = renderSentTemplateContent(
+      approvedTemplateRow?.components || dbTemplate?.components,
+      payload.template.components,
+    );
+    const historyContent = renderedTemplateContent
+      ? `[Template: ${templateName}]\n${renderedTemplateContent}`
+      : `[Template: ${templateName}]`;
+
     const { data: savedMessage, error: insertError } = await supabase.from('crm_messages').insert({
       contact_id: contact.id,
       user_id: contact.user_id || null,
       ...(contact.whatsapp_number_id ? { whatsapp_number_id: contact.whatsapp_number_id } : {}),
       direction: 'outbound',
       message_type: isCarousel ? 'carousel' : 'template',
-      content: `[Template: ${templateName}]`,
+      content: historyContent,
+      ...(sentComponentSummary.header_media ? { media_url: sentComponentSummary.header_media } : {}),
       status: 'accepted',
       meta_message_id: result?.messages?.[0]?.id || null,
       metadata: { 
@@ -5195,7 +5206,7 @@ async function internalSendTemplate(
         language: languageCode,
         source: 'api_automation',
         broadcast_id: broadcastId || null,
-        ...summarizeSentComponents(payload.template.components),
+        ...sentComponentSummary,
         meta_raw_response: result || null,
         ...(carouselMetadata || {})
       }

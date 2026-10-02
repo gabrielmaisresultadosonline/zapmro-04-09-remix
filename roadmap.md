@@ -53,3 +53,4 @@
 - [x] Exibir disco total da VPS, Docker, projeto, logs e inventário completo por cadastro sem apagar dados.
 - [x] Expirar mídias recebidas após 15 dias (preserva fluxos/templates/agendadas) e mostrar no painel.
 - [x] Estabilizar avisos de mensagens não lidas até o usuário abrir a conversa.
+- [x] Exibir no histórico do CRM o template do disparo com a mídia e as variáveis realmente enviadas.

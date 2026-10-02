@@ -1,6 +1,13 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 import { z } from 'npm:zod@3.25.76'
+import {
+  buildServerTemplateComponents,
+  isMediaHeader,
+  parseServerTemplateSchema,
+  validateComponentsAgainstSchema,
+  type TemplateSendConfig,
+} from '../_shared/template-variables.ts'
 
 type JsonRecord = Record<string, unknown>
 
@@ -68,12 +75,12 @@ Deno.serve(async (req: Request) => {
     if (broadcastError || !broadcast) throw broadcastError || new Error('Campaign not found')
 
     const { data: template } = broadcast.type === 'template' && broadcast.template_id
-      ? await admin.from('crm_templates').select('name, language').eq('id', broadcast.template_id).eq('user_id', broadcast.user_id).maybeSingle()
+      ? await admin.from('crm_templates').select('name, language, components, is_carousel').eq('id', broadcast.template_id).eq('user_id', broadcast.user_id).maybeSingle()
       : { data: null }
 
-    let contact: { id: string; name?: string | null } | null = null
+    let contact: { id: string; name?: string | null; metadata?: unknown; status?: string | null } | null = null
     if (['message', 'template', 'flow'].includes(String(broadcast.type))) {
-      let contactQuery = admin.from('crm_contacts').select('id, name').eq('user_id', broadcast.user_id).eq('wa_id', item.wa_id)
+      let contactQuery = admin.from('crm_contacts').select('id, name, metadata, status').eq('user_id', broadcast.user_id).eq('wa_id', item.wa_id)
       if (broadcast.whatsapp_number_id) contactQuery = contactQuery.eq('whatsapp_number_id', broadcast.whatsapp_number_id)
       const found = await contactQuery.limit(1).maybeSingle()
       contact = found.data
@@ -102,6 +109,24 @@ Deno.serve(async (req: Request) => {
       payload.templateName = template.name
       payload.languageCode = template.language || 'pt_BR'
       payload.templateConfig = broadcast.template_config || null
+      // Monta os componentes a partir do template exato da campanha (por id) e
+      // dos valores salvos nela: a Meta recebe as variáveis/mídia desta campanha,
+      // nunca os exemplos da aprovação.
+      if (!template.is_carousel) {
+        const schema = parseServerTemplateSchema(template.components)
+        const isDynamic = isMediaHeader(schema.headerKind) || schema.headerVariables.length > 0
+          || schema.bodyVariables.length > 0 || schema.urlButtonIndexes.length > 0
+        if (isDynamic) {
+          const config = (broadcast.template_config && typeof broadcast.template_config === 'object')
+            ? broadcast.template_config as TemplateSendConfig : null
+          if (!config) throw new Error('A campanha não tem as variáveis do template salvas. Crie a campanha novamente preenchendo as variáveis.')
+          const recipient = { ...(contact || {}), wa_id: item.wa_id, name: contact?.name || item.recipient_name || item.wa_id }
+          const components = buildServerTemplateComponents(schema, config, recipient)
+          const issues = validateComponentsAgainstSchema(schema, components)
+          if (issues.length > 0) throw new Error(issues[0].message)
+          payload.components = components
+        }
+      }
     } else if (broadcast.type === 'flow') {
       if (!contact?.id || !broadcast.flow_id) throw new Error('Contato ou fluxo da campanha não foi encontrado')
       payload.contactId = contact.id

@@ -250,6 +250,17 @@ const getLatestIsoValue = (first: unknown, second: unknown): string | null => {
   return values[0]?.value ?? null;
 };
 
+/**
+ * `last_read_at` é um cursor monotônico: uma resposta atrasada do banco nunca
+ * pode apagar ou voltar a leitura que o usuário acabou de confirmar no clique.
+ * Novas mensagens continuam sendo detectadas pelo próprio `created_at` delas.
+ */
+const mergeConversationContact = (current: any, incoming: any): any => ({
+  ...current,
+  ...incoming,
+  last_read_at: getLatestIsoValue(current?.last_read_at, incoming?.last_read_at),
+});
+
 const compareConversationContacts = (a: any, b: any): number => {
   const now = Date.now();
   const windowDuration = 24 * 60 * 60 * 1000;
@@ -288,6 +299,7 @@ const deduplicateConversationContacts = (rows: any[]): any[] => {
       ...newest,
       last_interaction: getLatestIsoValue(oldest.last_interaction, newest.last_interaction),
       last_message_received_at: getLatestIsoValue(oldest.last_message_received_at, newest.last_message_received_at),
+      last_read_at: getLatestIsoValue(oldest.last_read_at, newest.last_read_at),
       total_messages_received: Math.max(oldest.total_messages_received ?? 0, newest.total_messages_received ?? 0),
       total_messages_sent: Math.max(oldest.total_messages_sent ?? 0, newest.total_messages_sent ?? 0),
     });
@@ -1583,7 +1595,10 @@ const CRM = () => {
         if (changedContacts?.length) {
           setContacts(prev => {
             const map = new Map(prev.map((contact: any) => [contact.id, contact]));
-            changedContacts.forEach((contact: any) => map.set(contact.id, { ...map.get(contact.id), ...contact }));
+            changedContacts.forEach((contact: any) => map.set(
+              contact.id,
+              mergeConversationContact(map.get(contact.id), contact)
+            ));
             return deduplicateConversationContacts(Array.from(map.values()));
           });
 
@@ -1626,16 +1641,14 @@ const CRM = () => {
             });
 
             if (row.direction === 'inbound') {
-              const nowIso = new Date().toISOString();
               setContacts(prev => prev.map(c => c.id === row.contact_id
-                ? { ...c, last_message_received_at: row.created_at, last_read_at: nowIso }
+                ? { ...c, last_message_received_at: row.created_at }
                 : c
               ));
               setSelectedContact((prev: any) => prev && prev.id === row.contact_id
-                ? { ...prev, last_message_received_at: row.created_at, last_read_at: nowIso }
+                ? { ...prev, last_message_received_at: row.created_at }
                 : prev
               );
-              supabase.from('crm_contacts').update({ last_read_at: nowIso }).eq('id', row.contact_id).then(() => {});
             }
           } else if (payload.eventType === 'UPDATE') {
             setChatMessages(prev => prev.map(m => m.id === row.id ? row : m));
@@ -1918,14 +1931,6 @@ const CRM = () => {
               return { ...prev, [newMessage.contact_id]: [newMessage.created_at, ...list].slice(0, 200) };
             });
 
-            if (selectedContactRef.current?.id === newMessage.contact_id) {
-              const nowIso = new Date().toISOString();
-              setContacts(prev => prev.map(c => c.id === newMessage.contact_id
-                ? { ...c, last_read_at: nowIso }
-                : c
-              ));
-              supabase.from('crm_contacts').update({ last_read_at: nowIso }).eq('id', newMessage.contact_id).then(() => {});
-            }
           } else if (newMessage.direction === 'outbound') {
             // Atualiza last_interaction para mensagens enviadas também aparecerem no topo
             setContacts(prev => prev.map(c => c.id === newMessage.contact_id
@@ -1965,14 +1970,14 @@ const CRM = () => {
               next = [newRow, ...prev];
             } else {
               next = prev.slice();
-              next[idx] = { ...next[idx], ...newRow };
+              next[idx] = mergeConversationContact(next[idx], newRow);
             }
             // Re-sort para garantir que o contato atualizado suba na lista
             return deduplicateConversationContacts(next);
           });
         }
         if (selectedContactRef.current && payload.new && (payload.new as any).id === selectedContactRef.current.id) {
-          setSelectedContact((prev: any) => ({ ...prev, ...payload.new }));
+          setSelectedContact((prev: any) => mergeConversationContact(prev, payload.new));
         }
       })
       .subscribe((status) => {
@@ -2275,7 +2280,7 @@ const CRM = () => {
           for (const c of newRows) {
             if (c?.user_id !== userId) continue;
             const existing = map.get(c.id);
-            map.set(c.id, existing ? { ...existing, ...c } : c);
+            map.set(c.id, existing ? mergeConversationContact(existing, c) : c);
           }
           
           const merged = deduplicateConversationContacts(Array.from(map.values()));
@@ -3338,7 +3343,6 @@ const CRM = () => {
         }
       }
       
-      await supabase.from('crm_contacts').update({ last_read_at: new Date().toISOString() }).eq('id', contactId);
     } catch (error) {
       console.error('[CRM] Erro ao carregar histórico:', error);
     } finally {
@@ -3385,12 +3389,10 @@ const CRM = () => {
 
     const lastInbound = [...rows].reverse().find((m: any) => m.direction === 'inbound');
     if (lastInbound) {
-      const nowIso = new Date().toISOString();
       setContacts(prev => prev.map(c => c.id === contactId
-        ? { ...c, last_message_received_at: lastInbound.created_at, last_read_at: nowIso }
+        ? { ...c, last_message_received_at: lastInbound.created_at }
         : c
       ));
-      await supabase.from('crm_contacts').update({ last_read_at: nowIso }).eq('id', contactId);
     }
   };
 

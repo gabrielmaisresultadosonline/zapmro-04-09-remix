@@ -4231,6 +4231,7 @@ async function syncOutboundStatusFromMeta(supabase: any, userId: string, statusE
   // Disparo em massa: falha assíncrona da Meta (ex.: 131026 — não entregue no
   // aparelho) não é cobrada e não pode contar como enviada. O item da fila vira
   // falha e os contadores da campanha são recalculados a partir da fila.
+  let handledByBroadcastQueue = false;
   if (nextStatus === 'failed') {
     try {
       const { data: failedItems, error: itemError } = await supabase
@@ -4249,6 +4250,7 @@ async function syncOutboundStatusFromMeta(supabase: any, userId: string, statusE
         console.error('[META-STATUS] Falha ao marcar item do disparo como falha', { metaMessageId, error: itemError.message });
       }
       const broadcastIds = Array.from(new Set((failedItems || []).map((row: any) => row.broadcast_id).filter(Boolean)));
+      handledByBroadcastQueue = broadcastIds.length > 0;
       for (const id of broadcastIds) {
         const { error: refreshError } = await supabase.rpc('crm_refresh_broadcast_progress', { p_broadcast_id: id });
         if (refreshError) console.error('[META-STATUS] Falha ao recalcular campanha', { id, error: refreshError.message });
@@ -4298,7 +4300,7 @@ async function syncOutboundStatusFromMeta(supabase: any, userId: string, statusE
   }
 
   const broadcastId = existing.metadata?.broadcast_id;
-  if (broadcastId && nextStatus === 'failed' && existing.status !== 'failed') {
+  if (broadcastId && nextStatus === 'failed' && existing.status !== 'failed' && !handledByBroadcastQueue) {
     const { error: broadcastError } = await supabase.rpc('increment_broadcast_failed', { b_id: broadcastId });
     if (broadcastError) {
       console.error('[META-STATUS] Falha ao atualizar contadores da campanha', {

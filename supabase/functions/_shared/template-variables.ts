@@ -175,3 +175,37 @@ export function summarizeSentComponents(components: any[]) {
       .map(c => ({ index: Number(c?.index ?? 0), sub_type: c?.sub_type || 'url', value: c?.parameters?.[0]?.text ?? c?.parameters?.[0]?.payload ?? '' })),
   };
 }
+
+/**
+ * Reproduz para o histórico o texto efetivamente enviado pela Cloud API.
+ * O esquema aprovado fornece o texto fixo; os componentes do envio fornecem
+ * os valores já resolvidos para aquele destinatário.
+ */
+export function renderSentTemplateContent(templateComponents: unknown, sentComponents: unknown): string {
+  const approved = Array.isArray(templateComponents) ? templateComponents : [];
+  const sent = Array.isArray(sentComponents) ? sentComponents : [];
+  const findApproved = (type: string) => approved.find(component => String(component?.type || '').toUpperCase() === type);
+  const findSent = (type: string) => sent.find(component => String(component?.type || '').toLowerCase() === type.toLowerCase());
+  const fill = (text: unknown, parameters: unknown): string => {
+    const values = Array.isArray(parameters) ? parameters : [];
+    return String(text || '').replace(VARIABLE_PATTERN, (_match, index: string) => {
+      const parameter = values[Number(index) - 1];
+      return String(parameter?.text ?? parameter?.payload ?? `{{${index}}}`);
+    });
+  };
+
+  const header = findApproved('HEADER');
+  const body = findApproved('BODY');
+  const footer = findApproved('FOOTER');
+  const sentHeader = findSent('header');
+  const sentBody = findSent('body');
+  const parts: string[] = [];
+
+  if (String(header?.format || '').toUpperCase() === 'TEXT' && header?.text) {
+    parts.push(fill(header.text, sentHeader?.parameters));
+  }
+  if (body?.text) parts.push(fill(body.text, sentBody?.parameters));
+  if (footer?.text) parts.push(String(footer.text));
+
+  return parts.map(part => part.trim()).filter(Boolean).join('\n\n');
+}

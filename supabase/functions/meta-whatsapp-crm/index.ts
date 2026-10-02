@@ -4228,6 +4228,36 @@ async function syncOutboundStatusFromMeta(supabase: any, userId: string, statusE
     return { updated: false, reason: lookupError.message };
   }
 
+  // Disparo em massa: falha assíncrona da Meta (ex.: 131026 — não entregue no
+  // aparelho) não é cobrada e não pode contar como enviada. O item da fila vira
+  // falha e os contadores da campanha são recalculados a partir da fila.
+  if (nextStatus === 'failed') {
+    try {
+      const { data: failedItems, error: itemError } = await supabase
+        .from('crm_broadcast_items')
+        .update({
+          status: 'failed',
+          error_code: String(firstError?.code || firstError?.error_code || 'META_ASYNC_FAILED'),
+          error_message: String(firstError?.message || firstError?.title || firstError?.error_data?.details || 'A Meta informou que a mensagem não foi entregue'),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('meta_message_id', metaMessageId)
+        .eq('user_id', userId)
+        .eq('status', 'sent')
+        .select('broadcast_id');
+      if (itemError) {
+        console.error('[META-STATUS] Falha ao marcar item do disparo como falha', { metaMessageId, error: itemError.message });
+      }
+      const broadcastIds = Array.from(new Set((failedItems || []).map((row: any) => row.broadcast_id).filter(Boolean)));
+      for (const id of broadcastIds) {
+        const { error: refreshError } = await supabase.rpc('crm_refresh_broadcast_progress', { p_broadcast_id: id });
+        if (refreshError) console.error('[META-STATUS] Falha ao recalcular campanha', { id, error: refreshError.message });
+      }
+    } catch (broadcastItemError) {
+      console.error('[META-STATUS] Erro ao sincronizar falha do disparo', (broadcastItemError as any)?.message);
+    }
+  }
+
   if (!existing?.id) {
     console.warn('[META-STATUS] Status recebido, mas mensagem local não encontrada', { userId, metaMessageId, metaStatus, statusEvent });
     return { updated: false, reason: 'local_message_not_found' };

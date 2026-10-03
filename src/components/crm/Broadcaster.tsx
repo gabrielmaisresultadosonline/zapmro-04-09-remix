@@ -598,10 +598,12 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
 
 
   const fetchBroadcasts = async () => {
-    const { data } = await supabase
-      .from('crm_broadcasts')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // Cada número tem seu próprio histórico de disparos: nunca misturar caixas.
+    const { data } = await scopeNumber(
+      supabase
+        .from('crm_broadcasts')
+        .select('*')
+    ).order('created_at', { ascending: false });
     setBroadcasts(data || []);
   };
 

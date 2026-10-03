@@ -207,13 +207,15 @@ const BroadcastFailureLogs = ({ broadcast, open, onOpenChange }: BroadcastFailur
     if (!broadcast) return;
     setLoading(true);
     try {
-      const base = () =>
-        supabase
+      // Falhas sempre restritas ao número (caixa) da campanha.
+      const base = () => {
+        let q = supabase
           .from("crm_messages")
           .select("id, created_at, error_code, error_message, metadata, contact_id, crm_contacts(name, wa_id)")
-          .eq("status", "failed")
-          .order("created_at", { ascending: false })
-          .limit(300);
+          .eq("status", "failed");
+        if (broadcast.whatsapp_number_id) q = q.eq("whatsapp_number_id", broadcast.whatsapp_number_id);
+        return q.order("created_at", { ascending: false }).limit(300);
+      };
 
       // 1) Tentamos vincular pelas mensagens marcadas com o broadcast_id
       let { data, error } = await base().eq("metadata->>broadcast_id", broadcast.id);

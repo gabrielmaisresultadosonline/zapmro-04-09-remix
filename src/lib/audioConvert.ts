@@ -27,7 +27,7 @@ export async function convertToWhatsAppVoice(input: Blob, onProgress?: (pct: num
     const data = await ffmpeg.readFile(outName);
     const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(data);
     if (bytes.byteLength < 100) throw new Error('O áudio convertido ficou vazio. Verifique o arquivo original.');
-    return new File([bytes], `audio_${id}.ogg`, { type: 'audio/ogg; codecs=opus' });
+    return new File([new Uint8Array(bytes)], `audio_${id}.ogg`, { type: 'audio/ogg; codecs=opus' });
   } finally {
     ffmpeg.off('progress', handler);
     await ffmpeg.deleteFile(inName).catch(() => undefined);

@@ -20,7 +20,7 @@ const RULE_ITEMS: RuleItem[] = [
     icon: Megaphone,
     title: "Anúncio Click-to-WhatsApp: janela de 72 horas",
     description:
-      "Quando a conversa começa por um anúncio Click-to-WhatsApp, a Meta pode liberar uma janela especial de 72 horas a partir da entrada pelo anúncio. O sistema identifica essa origem automaticamente. Se também houver uma mensagem recente do cliente, vale a janela que terminar mais tarde.",
+      "Quando a conversa começa por um anúncio Click-to-WhatsApp, a Meta pode liberar uma janela especial de 72 horas a partir da entrada pelo anúncio. O sistema identifica essa origem automaticamente. Se também houver uma mensagem recente do cliente, vale a janela que terminar mais tarde. Nessas 72 horas as mensagens da empresa não são cobradas pela Meta e não consomem as 1.000 respostas grátis do mês.",
   },
   {
     icon: FileCheck2,

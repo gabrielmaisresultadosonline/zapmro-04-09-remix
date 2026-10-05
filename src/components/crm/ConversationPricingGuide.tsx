@@ -52,14 +52,14 @@ export function ConversationPricingGuide() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {PRICE_ROWS.map((row) => (
-          <Card key={row.label} className="border-border shadow-sm">
+          <Card key={row.label} className="flex h-full flex-col border-border shadow-sm">
             <CardHeader className="space-y-2 p-5 pb-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <CircleDollarSign className="h-5 w-5" aria-hidden="true" />
               </div>
               <CardTitle className="text-base leading-snug">{row.label}</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 px-5 pb-5">
+            <CardContent className="flex flex-1 flex-col space-y-2 px-5 pb-5">
               <p className="flex gap-2 text-sm font-semibold leading-relaxed text-foreground">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                 {row.freeTier}
@@ -68,7 +68,7 @@ export function ConversationPricingGuide() {
                 <ArrowRightLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 {row.paidTier}
               </p>
-              <p className="border-t border-border pt-2 text-xs leading-relaxed text-muted-foreground">{row.note}</p>
+              <p className="mt-auto border-t border-border pt-2 text-xs leading-relaxed text-muted-foreground">{row.note}</p>
             </CardContent>
           </Card>
         ))}

@@ -2,6 +2,13 @@ import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from '@/lib/mediaStorage';
 import { resolveMediaUrl } from '@/lib/mediaUrl';
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
+import {
+  type ConvertedAudio,
+  getCachedConversion,
+  setCachedConversion,
+  isAlreadyWhatsAppVoice,
+  persistFlowNodeData,
+} from '@/lib/flowAudioPersist';
 
 import {
   ReactFlow,
@@ -516,9 +523,11 @@ interface FlowEditorProps {
   flow: any;
   onSave: (flow: any) => void;
   onClose: () => void;
+  /** Avisa a tela de fluxos quando blocos foram gravados direto na nuvem (ex.: áudio convertido). */
+  onNodesPersisted?: (flowId: string, nodes: any[]) => void;
 }
 
-const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) => {
+const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose, onNodesPersisted }) => {
   const { screenToFlowPosition } = useReactFlow();
   const { toast } = useToast();
   const [nodes, setNodes, onNodesChange] = useNodesState(flow?.nodes || []);
@@ -620,7 +629,7 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
   };
 
   /** Converte qualquer áudio para o padrão da Meta, sobe e grava no bloco. */
-  const convertAndStoreFlowAudio = async (source: Blob, nodeId: string, fileName: string) => {
+  const convertAndStoreFlowAudio = async (source: Blob, nodeId: string, fileName: string): Promise<ConvertedAudio> => {
     setAudioConvert({ label: fileName || 'áudio', progress: 0 });
     try {
       const converted = await convertToWhatsAppVoice(source, (pct) =>
@@ -635,9 +644,10 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
         extension: 'ogg',
       });
       const baseName = (fileName || 'audio').replace(/\.[^.]+$/, '');
-      updateNodeData(nodeId, { audioUrl: uploaded.url, fileName: `${baseName}.ogg`, audioConverted: true });
+      const result: ConvertedAudio = { audioUrl: uploaded.url, fileName: `${baseName}.ogg` };
+      updateNodeData(nodeId, { ...result, audioConverted: true });
       setAudioConvert((s) => (s ? { ...s, progress: 100 } : s));
-      return uploaded.url;
+      return result;
     } finally {
       window.setTimeout(() => setAudioConvert(null), 400);
     }
@@ -798,7 +808,8 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
 
 
   // Áudios antigos (mp3/ogg fora do padrão, inclusive reaproveitados) são
-  // convertidos UMA vez ao abrir o fluxo e substituídos no bloco.
+  // convertidos UMA única vez e gravados direto na nuvem — reabrir o fluxo
+  // não converte de novo.
   useEffect(() => {
     if (audioConvert) return;
     const pending = nodes.find((n: any) =>
@@ -808,13 +819,40 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
     if (!pending) return;
     const url = String(pending.data.audioUrl);
     autoConvertTriedRef.current.add(url);
+
+    const applyAndPersist = async (patch: Record<string, unknown>) => {
+      updateNodeData(pending.id, patch);
+      const saved = await persistFlowNodeData(flow?.id, pending.id, patch);
+      if (saved && flow?.id) onNodesPersisted?.(flow.id, saved);
+      return Boolean(saved);
+    };
+
     void (async () => {
       try {
+        // 1) Já convertido antes (neste navegador): reaproveita sem converter.
+        const cached = getCachedConversion(url);
+        if (cached) {
+          await applyAndPersist({ audioUrl: cached.audioUrl, fileName: cached.fileName, audioConverted: true });
+          return;
+        }
+        // 2) Arquivo já está em OGG + Opus + mono: só marca como aprovado.
+        if (await isAlreadyWhatsAppVoice(url)) {
+          await applyAndPersist({ audioConverted: true });
+          return;
+        }
+        // 3) Converte uma vez, grava na nuvem e lembra o resultado.
         const res = await fetch(resolveMediaUrl(url));
         if (!res.ok) throw new Error(`não foi possível baixar o áudio (${res.status})`);
         const blob = await res.blob();
-        await convertAndStoreFlowAudio(blob, pending.id, pending.data.fileName || 'áudio');
-        toast({ title: 'Áudio do fluxo convertido', description: 'Clique em Salvar para gravar o novo formato aprovado pela Meta.' });
+        const result = await convertAndStoreFlowAudio(blob, pending.id, pending.data.fileName || 'áudio');
+        setCachedConversion(url, result);
+        const saved = await applyAndPersist({ audioUrl: result.audioUrl, fileName: result.fileName, audioConverted: true });
+        toast({
+          title: 'Áudio convertido e salvo',
+          description: saved
+            ? 'O formato aprovado pela Meta já foi gravado no fluxo. Não será convertido de novo.'
+            : 'Clique em Salvar para gravar o novo formato no fluxo.',
+        });
       } catch (err: any) {
         toast({ title: 'Não foi possível converter um áudio do fluxo', description: err?.message || 'Envie o áudio novamente.', variant: 'destructive' });
       }

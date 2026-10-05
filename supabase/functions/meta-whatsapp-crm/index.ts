@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
+import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
 import {
   buildServerTemplateComponents,
   parseServerTemplateSchema,
@@ -2170,6 +2171,14 @@ else if (message.type === "unsupported") {
        : new Date().toISOString();
        try {
          await recordInboundContactActivity(supabase, contactForSave, userId, inboundMessageAt);
+         // Click-to-WhatsApp: guarda o evento do anúncio que abre a janela de 72h.
+         if (isClickToWhatsAppReferral(normalizedAdReferral)) {
+           const { error: ctwaError } = await supabase.from('crm_contacts').update({
+             ctwa_opened_at: inboundMessageAt,
+             ctwa_clid: normalizedAdReferral?.ctwa_clid || null,
+           }).eq('id', contactForSave.id).eq('user_id', userId);
+           if (ctwaError) console.warn('[WINDOW] Não foi possível registrar janela de anúncio:', ctwaError.message);
+         }
        } catch (activityError) {
          const activityMessage = activityError instanceof Error ? activityError.message : String(activityError);
          console.error('[WEBHOOK] Failed to update inbound contact activity', { waId, userId, error: activityMessage });
@@ -4505,6 +4514,26 @@ async function uploadMediaToMeta(accessToken: string, phoneNumberId: string, med
   return uploadResult.id
 }
 
+/** Lê do banco (sempre fresco) os marcadores da janela do contato. */
+async function resolveConversationWindow(supabase: any, contact: any, to: string, userId?: string | null, numberId?: string | null) {
+  const fields = ['last_message_received_at, ctwa_opened_at', 'last_message_received_at']
+  for (const select of fields) {
+    let query = supabase.from('crm_contacts').select(select)
+    if (contact?.id) query = query.eq('id', contact.id)
+    else {
+      const ownerId = userId || null
+      if (!ownerId) return getConversationWindow(null)
+      query = query.eq('user_id', ownerId).in('wa_id', getBrazilianPhoneVariants(to))
+      if (numberId) query = query.eq('whatsapp_number_id', numberId)
+      query = query.order('last_message_received_at', { ascending: false, nullsFirst: false })
+    }
+    const { data, error } = await query.limit(1)
+    if (error) continue // coluna nova ainda não aplicada: tenta sem ela
+    return getConversationWindow(Array.isArray(data) ? data[0] : null)
+  }
+  return getConversationWindow(contact)
+}
+
 async function handleInternalSendMessage(supabase: any, phoneNumberId: string, accessToken: string, params: any, contact: any, vpsTranscoderUrl?: string, userId?: string) {
   if (!phoneNumberId || !accessToken) {
     console.error('[SEND-MESSAGE] Falha: Credenciais ausentes', { phoneNumberId: !!phoneNumberId, accessToken: !!accessToken });
@@ -4514,6 +4543,31 @@ async function handleInternalSendMessage(supabase: any, phoneNumberId: string, a
   if (!to) {
     console.error('[SEND-MESSAGE] Falha: Telefone inválido', { to: params.to });
     throw new Error('Telefone inválido');
+  }
+
+  // Regra central da janela de atendimento: toda mensagem livre (texto,
+  // mídia, botões) de qualquer módulo passa por aqui. Fora da janela, só
+  // templates aprovados (internalSendTemplate) podem sair.
+  const convWindow = await resolveConversationWindow(supabase, contact, to, userId, params.whatsapp_number_id || null);
+  if (!convWindow.is_open) {
+    console.warn('[WINDOW] Envio livre bloqueado — janela fechada', { to, window: convWindow });
+    if (contact && !params.skipLocalSave) {
+      const media = guessMedia(params);
+      await supabase.from('crm_messages').insert({
+        contact_id: contact.id,
+        user_id: userId || contact.user_id || null,
+        ...(params.whatsapp_number_id || contact.whatsapp_number_id ? { whatsapp_number_id: params.whatsapp_number_id || contact.whatsapp_number_id } : {}),
+        direction: 'outbound',
+        message_type: params.interactive ? 'interactive' : (media?.type || 'text'),
+        content: media ? (params.text || `[${media.type}]`) : (params.interactive?.body?.text || params.text || ''),
+        media_url: media?.url || null,
+        status: 'failed',
+        error_code: 'WINDOW_CLOSED',
+        error_message: WINDOW_CLOSED_MESSAGE,
+        metadata: { ...(params.metadata || {}), conversation_window: convWindow },
+      });
+    }
+    return jsonResponse({ success: false, code: 'WINDOW_CLOSED', error: WINDOW_CLOSED_MESSAGE, message: WINDOW_CLOSED_MESSAGE, window: convWindow }, 200);
   }
 
   console.log(`[SEND-MESSAGE] Iniciando para ${to}. Action: ${params.action || 'default'}`);

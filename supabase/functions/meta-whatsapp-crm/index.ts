@@ -4514,6 +4514,26 @@ async function uploadMediaToMeta(accessToken: string, phoneNumberId: string, med
   return uploadResult.id
 }
 
+/** Lê do banco (sempre fresco) os marcadores da janela do contato. */
+async function resolveConversationWindow(supabase: any, contact: any, to: string, userId?: string | null, numberId?: string | null) {
+  const fields = ['last_message_received_at, ctwa_opened_at', 'last_message_received_at']
+  for (const select of fields) {
+    let query = supabase.from('crm_contacts').select(select)
+    if (contact?.id) query = query.eq('id', contact.id)
+    else {
+      const ownerId = userId || null
+      if (!ownerId) return getConversationWindow(null)
+      query = query.eq('user_id', ownerId).in('wa_id', getBrazilianPhoneVariants(to))
+      if (numberId) query = query.eq('whatsapp_number_id', numberId)
+      query = query.order('last_message_received_at', { ascending: false, nullsFirst: false })
+    }
+    const { data, error } = await query.limit(1)
+    if (error) continue // coluna nova ainda não aplicada: tenta sem ela
+    return getConversationWindow(Array.isArray(data) ? data[0] : null)
+  }
+  return getConversationWindow(contact)
+}
+
 async function handleInternalSendMessage(supabase: any, phoneNumberId: string, accessToken: string, params: any, contact: any, vpsTranscoderUrl?: string, userId?: string) {
   if (!phoneNumberId || !accessToken) {
     console.error('[SEND-MESSAGE] Falha: Credenciais ausentes', { phoneNumberId: !!phoneNumberId, accessToken: !!accessToken });
@@ -4528,9 +4548,9 @@ async function handleInternalSendMessage(supabase: any, phoneNumberId: string, a
   // Regra central da janela de atendimento: toda mensagem livre (texto,
   // mídia, botões) de qualquer módulo passa por aqui. Fora da janela, só
   // templates aprovados (internalSendTemplate) podem sair.
-  const window = await resolveConversationWindow(supabase, contact, to, userId, params.whatsapp_number_id || null);
-  if (!window.is_open) {
-    console.warn('[WINDOW] Envio livre bloqueado — janela fechada', { to, window });
+  const convWindow = await resolveConversationWindow(supabase, contact, to, userId, params.whatsapp_number_id || null);
+  if (!convWindow.is_open) {
+    console.warn('[WINDOW] Envio livre bloqueado — janela fechada', { to, window: convWindow });
     if (contact && !params.skipLocalSave) {
       const media = guessMedia(params);
       await supabase.from('crm_messages').insert({
@@ -4544,10 +4564,10 @@ async function handleInternalSendMessage(supabase: any, phoneNumberId: string, a
         status: 'failed',
         error_code: 'WINDOW_CLOSED',
         error_message: WINDOW_CLOSED_MESSAGE,
-        metadata: { ...(params.metadata || {}), conversation_window: window },
+        metadata: { ...(params.metadata || {}), conversation_window: convWindow },
       });
     }
-    return jsonResponse({ success: false, code: 'WINDOW_CLOSED', error: WINDOW_CLOSED_MESSAGE, message: WINDOW_CLOSED_MESSAGE, window }, 200);
+    return jsonResponse({ success: false, code: 'WINDOW_CLOSED', error: WINDOW_CLOSED_MESSAGE, message: WINDOW_CLOSED_MESSAGE, window: convWindow }, 200);
   }
 
   console.log(`[SEND-MESSAGE] Iniciando para ${to}. Action: ${params.action || 'default'}`);

@@ -1,3 +1,4 @@
+import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
 import AdReferralCard, { type AdReferralData } from '@/components/crm/AdReferralCard';
@@ -690,6 +691,7 @@ const CRM = () => {
   });
   const [conversationStats, setConversationStats] = useState({
     paidThisMonth: 0,
+    repliesThisMonth: 0,
     activeWindow24h: 0,
     monthLabel: '',
     paidThisWeek: 0,
@@ -1261,13 +1263,21 @@ const CRM = () => {
       const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-      const { data: monthMsgs } = await scopeToNumber(
-        supabase
-          .from('crm_messages')
-          .select('contact_id, direction, created_at, metadata')
-      )
-        .gte('created_at', startOfMonth)
-        .order('created_at', { ascending: true });
+      // Busca paginada: o limite padrão de 1000 linhas cortaria o mês.
+      const monthMsgs: any[] = [];
+      for (let from = 0; from < 50000; from += 1000) {
+        const { data: page, error: pageError } = await scopeToNumber(
+          supabase
+            .from('crm_messages')
+            .select('contact_id, direction, created_at, metadata, status, message_type')
+        )
+          .gte('created_at', startOfMonth)
+          .order('created_at', { ascending: true })
+          .range(from, from + 999);
+        if (pageError) throw pageError;
+        monthMsgs.push(...(page || []));
+        if (!page || page.length < 1000) break;
+      }
 
       const byContact: Record<string, any[]> = {};
       (monthMsgs || []).forEach((m: any) => {
@@ -1278,6 +1288,7 @@ const CRM = () => {
       const DAY = 24 * 60 * 60 * 1000;
       let paidCount = 0;
       let paidWeek = 0;
+      let repliesCount = 0;
       
       Object.values(byContact).forEach((msgs) => {
         let lastInbound = -Infinity;
@@ -1293,9 +1304,16 @@ const CRM = () => {
             // pela Meta — não contam como conversa paga.
             const src = (m as any)?.metadata?.source;
             const isEcho = src === 'echo_mobile_app' || src === 'meta_webhook_echo';
+            // Falhas nunca contam: nem como custo, nem como resposta consumida.
+            const st = String(m.status || '').toLowerCase();
+            const isFailed = st === 'failed' || st === 'error' || st === 'rejected' || st === 'undelivered';
+            if (isEcho || isFailed) continue;
+            // Resposta pela API oficial dentro da janela de 24h consome 1 da franquia mensal.
+            const isTemplate = m.message_type === 'template' || m.message_type === 'carousel';
+            if (!isTemplate && t - lastInbound < DAY) repliesCount++;
             const isManual = src === 'manual_send';
-            const isAutomation = src === 'api_automation' || m.message_type === 'template' || m.message_type === 'carousel';
-            if (isEcho || isManual || !isAutomation) continue;
+            const isAutomation = src === 'api_automation' || isTemplate;
+            if (isManual || !isAutomation) continue;
             // Regra oficial do WhatsApp: A janela de 24h só reseta quando o cliente responde.
             // O envio de mensagens outbound não estende a janela de atendimento livre.
             const inFreeWindow = t - lastInbound < DAY;
@@ -1333,6 +1351,7 @@ const CRM = () => {
 
       setConversationStats({
         paidThisMonth: paidCount,
+        repliesThisMonth: repliesCount,
         activeWindow24h: activeSet.size,
         monthLabel: now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }),
         paidThisWeek: paidWeek,
@@ -6130,7 +6149,7 @@ const CRM = () => {
                           </Button>
                         </div>
                         
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-5">
                           {/* Todas conversas atendidas */}
                           <Card 
                             className="relative overflow-hidden group hover:scale-[1.01] transition-all border border-white/5 bg-[#0c1317] cursor-pointer shadow-xl rounded-2xl p-1"
@@ -6191,6 +6210,11 @@ const CRM = () => {
                               </div>
                             </CardContent>
                           </Card>
+
+                          <FreeRepliesCard
+                            used={conversationStats.repliesThisMonth}
+                            onHelp={() => setActiveTab('rules')}
+                          />
                         </div>
                       </div>
                     </div>

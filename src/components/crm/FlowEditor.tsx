@@ -1,5 +1,7 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from '@/lib/mediaStorage';
+import { resolveMediaUrl } from '@/lib/mediaUrl';
+import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 
 import {
   ReactFlow,
@@ -535,6 +537,9 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
   const [triggerTag, setTriggerTag] = useState(flow?.trigger_tag || '');
   const [isActive, setIsActive] = useState(flow?.is_active !== false);
   const [uploading, setUploading] = useState(false);
+  // Conversão de áudio para OGG + Opus + 48 kHz + Mono (único formato de voz aceito pela Meta).
+  const [audioConvert, setAudioConvert] = useState<{ label: string; progress: number } | null>(null);
+  const autoConvertTriedRef = useRef<Set<string>>(new Set());
   const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
   const [availableFlows, setAvailableFlows] = useState<any[]>([]);
   const [availableStatuses, setAvailableStatuses] = useState<any[]>([]);
@@ -613,11 +618,40 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
     }
   };
 
+  /** Converte qualquer áudio para o padrão da Meta, sobe e grava no bloco. */
+  const convertAndStoreFlowAudio = async (source: Blob, nodeId: string, fileName: string) => {
+    setAudioConvert({ label: fileName || 'áudio', progress: 0 });
+    try {
+      const converted = await convertToWhatsAppVoice(source, (pct) =>
+        setAudioConvert((s) => (s ? { ...s, progress: Math.min(95, pct) } : s)),
+      );
+      setAudioConvert((s) => (s ? { ...s, progress: 97 } : s));
+      const uploaded = await uploadDedupedMedia({
+        bucket: 'crm-media',
+        folder: 'flow-media',
+        file: converted,
+        contentType: 'audio/ogg; codecs=opus',
+        extension: 'ogg',
+      });
+      const baseName = (fileName || 'audio').replace(/\.[^.]+$/, '');
+      updateNodeData(nodeId, { audioUrl: uploaded.url, fileName: `${baseName}.ogg`, audioConverted: true });
+      setAudioConvert((s) => (s ? { ...s, progress: 100 } : s));
+      return uploaded.url;
+    } finally {
+      window.setTimeout(() => setAudioConvert(null), 400);
+    }
+  };
+
   const doUploadFile = async (file: File, nodeId: string, type: 'audio' | 'video' | 'image') => {
     setUploading(true);
     try {
       if (type === 'video' && file.size > WHATSAPP_VIDEO_MAX_BYTES) {
         throw new Error('Vídeo ainda acima do limite de 16MB da Meta. Corte ou comprima mais um pouco.');
+      }
+      if (type === 'audio') {
+        await convertAndStoreFlowAudio(file, nodeId, file.name);
+        toast({ title: 'Áudio convertido e salvo!', description: 'Formato aprovado pela Meta: OGG Opus, 48 kHz, mono.' });
+        return;
       }
       const fileExt = type === 'video' ? 'mp4' : file.name.split('.').pop();
 
@@ -633,7 +667,6 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
       console.log('[FlowEditor] mídia pronta', { path: uploaded.path, reused: uploaded.reused });
 
       const updateData: any = { fileName: file.name };
-      if (type === 'audio') updateData.audioUrl = publicUrl;
       if (type === 'video') updateData.videoUrl = publicUrl;
       if (type === 'image') updateData.imageUrl = publicUrl;
 
@@ -762,6 +795,31 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
     collectStorageUrls(removed?.data ?? null).forEach((url) => pendingMediaCleanupRef.current.add(url));
   };
 
+
+  // Áudios antigos (mp3/ogg fora do padrão, inclusive reaproveitados) são
+  // convertidos UMA vez ao abrir o fluxo e substituídos no bloco.
+  useEffect(() => {
+    if (audioConvert) return;
+    const pending = nodes.find((n: any) =>
+      n.type === 'audio' && n.data?.audioUrl && !n.data?.audioConverted &&
+      !autoConvertTriedRef.current.has(String(n.data.audioUrl)),
+    ) as any;
+    if (!pending) return;
+    const url = String(pending.data.audioUrl);
+    autoConvertTriedRef.current.add(url);
+    void (async () => {
+      try {
+        const res = await fetch(resolveMediaUrl(url));
+        if (!res.ok) throw new Error(`não foi possível baixar o áudio (${res.status})`);
+        const blob = await res.blob();
+        await convertAndStoreFlowAudio(blob, pending.id, pending.data.fileName || 'áudio');
+        toast({ title: 'Áudio do fluxo convertido', description: 'Clique em Salvar para gravar o novo formato aprovado pela Meta.' });
+      } catch (err: any) {
+        toast({ title: 'Não foi possível converter um áudio do fluxo', description: err?.message || 'Envie o áudio novamente.', variant: 'destructive' });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, audioConvert]);
 
   const handleSave = () => {
     const pending = Array.from(pendingMediaCleanupRef.current);
@@ -1230,12 +1288,12 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
                 {selectedNode.type === 'audio' && (
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-xs">Upload de Áudio (.mp3, .ogg)</Label>
+                      <Label className="text-xs">Upload de Áudio (qualquer formato — convertido para OGG Opus automaticamente)</Label>
                     <div className="flex gap-2">
                       <Input 
                         type="file" 
-                        accept=".mp3,.ogg"
-                        disabled={uploading}
+                        accept="audio/*,.mp3,.ogg,.m4a,.wav,.aac,.opus,.amr"
+                        disabled={uploading || !!audioConvert}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) handleFileUpload(file, selectedNode.id, 'audio');
@@ -1955,6 +2013,23 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
           </ReactFlow>
         </main>
       </div>
+      {audioConvert && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="status" aria-live="polite">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-xl">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+              <p className="text-sm font-bold text-foreground">Convertendo áudio…</p>
+            </div>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{audioConvert.label}</p>
+            <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${audioConvert.progress}%` }} />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {audioConvert.progress}% • OGG + Opus + 48 kHz + Mono (formato aprovado pela Meta)
+            </p>
+          </div>
+        </div>
+      )}
       <VideoCompressDialog
         open={!!compressState}
         file={compressState?.file ?? null}

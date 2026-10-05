@@ -1,12 +1,18 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
+// Núcleo ESM servido pelo próprio site: o worker do ffmpeg é "module" e não
+// consegue carregar a versão UMD (era a causa de "failed to import ffmpeg-core.js").
+import ffmpegCoreURL from '@ffmpeg/core?url';
+import ffmpegWasmURL from '@ffmpeg/core/wasm?url';
 
 // Limite oficial da Meta/WhatsApp para vídeo: 16 MB decimais.
 // A compressão mira abaixo do limite porque a Meta reprova o arquivo de forma assíncrona
 // quando o MP4 fica sem trilha de vídeo ou com contêiner/codec fora do padrão esperado.
 export const WHATSAPP_VIDEO_MAX_BYTES = 16_000_000;
 const TARGET_BYTES = 15_500_000;
+const FFMPEG_LOAD_TIMEOUT_MS = 120_000;
 let ffmpegInstance: FFmpeg | null = null;
+let ffmpegLoading: Promise<FFmpeg> | null = null;
 
 export type CompressProgress = (pct: number) => void;
 
@@ -18,20 +24,45 @@ export interface CompressOptions {
   maxBytes?: number;
 }
 
-export async function getFfmpeg() {
-  if (!ffmpegInstance) {
-    ffmpegInstance = new FFmpeg();
-  }
+/**
+ * Carrega o ffmpeg.wasm uma única vez (chamadas simultâneas compartilham a
+ * mesma carga). Em falha, descarta a instância para a próxima tentativa
+ * começar limpa, e sempre devolve uma mensagem legível.
+ */
+export async function getFfmpeg(): Promise<FFmpeg> {
+  if (ffmpegInstance?.loaded) return ffmpegInstance;
+  if (ffmpegLoading) return ffmpegLoading;
 
-  if (!ffmpegInstance.loaded) {
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd';
-    await ffmpegInstance.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
-  }
+  ffmpegLoading = (async () => {
+    const instance = new FFmpeg();
+    let timer: number | undefined;
+    try {
+      await Promise.race([
+        instance.load({
+          coreURL: new URL(ffmpegCoreURL, window.location.href).href,
+          wasmURL: new URL(ffmpegWasmURL, window.location.href).href,
+        }),
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(
+            () => reject(new Error('O conversor demorou demais para carregar. Verifique a internet e tente de novo.')),
+            FFMPEG_LOAD_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      ffmpegInstance = instance;
+      return instance;
+    } catch (err) {
+      try { instance.terminate(); } catch { /* instância já encerrada */ }
+      ffmpegInstance = null;
+      const detail = err instanceof Error && err.message ? err.message : String(err || '');
+      throw new Error(`Não foi possível carregar o conversor de mídia${detail ? `: ${detail}` : ''}.`);
+    } finally {
+      if (timer) window.clearTimeout(timer);
+      ffmpegLoading = null;
+    }
+  })();
 
-  return ffmpegInstance;
+  return ffmpegLoading;
 }
 
 async function readFfmpegFileAsBytes(ffmpeg: FFmpeg, path: string) {

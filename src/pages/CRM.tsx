@@ -1285,6 +1285,22 @@ const CRM = () => {
         (byContact[m.contact_id] = byContact[m.contact_id] || []).push(m);
       });
 
+      // Contatos vindos de anúncio Click-to-WhatsApp: 72h sem cobrança e fora da franquia de 1.000.
+      const ctwaByContact: Record<string, number> = {};
+      const contactIds = Object.keys(byContact);
+      for (let i = 0; i < contactIds.length; i += 200) {
+        const { data: ctwaRows } = await supabase
+          .from('crm_contacts')
+          .select('id, ctwa_opened_at')
+          .in('id', contactIds.slice(i, i + 200))
+          .not('ctwa_opened_at', 'is', null);
+        (ctwaRows || []).forEach((c: any) => {
+          const t = Date.parse(c.ctwa_opened_at);
+          if (Number.isFinite(t)) ctwaByContact[c.id] = t;
+        });
+      }
+      const CTWA_FREE_MS = 72 * 60 * 60 * 1000;
+
       const DAY = 24 * 60 * 60 * 1000;
       let paidCount = 0;
       let paidWeek = 0;
@@ -1295,6 +1311,7 @@ const CRM = () => {
         let lastPaidStart = -Infinity;
         const weekTime = new Date(startOfWeek).getTime();
         
+        const ctwaAt = msgs[0]?.contact_id ? ctwaByContact[msgs[0].contact_id] : undefined;
         for (const m of msgs) {
           const t = new Date(m.created_at).getTime();
           if (m.direction === 'inbound') {
@@ -1308,6 +1325,8 @@ const CRM = () => {
             const st = String(m.status || '').toLowerCase();
             const isFailed = st === 'failed' || st === 'error' || st === 'rejected' || st === 'undelivered';
             if (isEcho || isFailed) continue;
+            // Janela de anúncio (72h): sem cobrança e não consome as 1.000 respostas.
+            if (ctwaAt !== undefined && t >= ctwaAt && t - ctwaAt < CTWA_FREE_MS) continue;
             // Resposta pela API oficial dentro da janela de 24h consome 1 da franquia mensal.
             const isTemplate = m.message_type === 'template' || m.message_type === 'carousel';
             if (!isTemplate && t - lastInbound < DAY) repliesCount++;

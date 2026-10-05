@@ -186,6 +186,7 @@ const FLOW_TRIGGER_LABELS: Record<string, string> = {
   keyword: 'Palavra-chave',
   exact_phrase: 'Frase exata',
   first_message: 'Primeira mensagem',
+  ctwa_ad: 'Veio de anúncio (Click-to-WhatsApp)',
   first_message_day: 'Primeira mensagem do dia',
   after_24h: 'Após 24 horas',
   '24h_inactivity': '24 horas inativo',

@@ -852,6 +852,22 @@ const CRM = () => {
   const selectedContactRef = useRef<any>(null);
   const sendQueueRef = useRef<Record<string, Promise<void>>>({});
   const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [retryingMediaId, setRetryingMediaId] = useState<string | null>(null);
+  /** Baixa de novo o arquivo de uma mensagem recebida sem mídia. */
+  const handleRetryMedia = async (messageId: string) => {
+    setRetryingMediaId(messageId);
+    try {
+      const { data, error } = await supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'retryMedia', messageId } });
+      if (error || !data?.success || !data?.media_url) {
+        toast({ title: 'Não foi possível baixar o arquivo', description: data?.error || 'A Meta não liberou o arquivo desta mensagem.', variant: 'destructive' });
+        return;
+      }
+      setChatMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, media_url: data.media_url, metadata: { ...(msg.metadata || {}), media_pending: false } } : msg));
+      toast({ title: 'Arquivo carregado' });
+    } finally {
+      setRetryingMediaId(null);
+    }
+  };
   const chatMessagesRef = useRef<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [sendingContacts, setSendingContacts] = useState<Record<string, boolean>>({});
@@ -7719,6 +7735,16 @@ const CRM = () => {
                                                     <>
                                                       <p className="font-medium text-foreground">Arquivo não disponível nesta conversa</p>
                                                       <p className="mt-0.5">O WhatsApp informou uma mensagem de {m.message_type === 'image' ? 'imagem' : m.message_type === 'video' ? 'vídeo' : m.message_type === 'document' ? 'documento' : m.message_type === 'sticker' ? 'figurinha' : 'áudio'}, mas não liberou o arquivo para carregamento.</p>
+                                                      {m.id && !String(m.id).startsWith('temp') && (
+                                                        <button
+                                                          type="button"
+                                                          className="mt-1.5 rounded-md border border-border/40 px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-muted/40 disabled:opacity-60"
+                                                          disabled={retryingMediaId === m.id}
+                                                          onClick={() => void handleRetryMedia(m.id)}
+                                                        >
+                                                          {retryingMediaId === m.id ? 'Baixando…' : 'Tentar baixar novamente'}
+                                                        </button>
+                                                      )}
                                                     </>
                                                   )}
                                                 </div>

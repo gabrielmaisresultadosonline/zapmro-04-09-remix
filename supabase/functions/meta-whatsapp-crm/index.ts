@@ -1855,6 +1855,7 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   let text = '';
   let buttonId = '';
   let mediaUrlForSave: string | null = null;
+  let deferredInboundMedia: { token: string; mediaId: string; node: any } | null = null;
   let mediaCaption = '';
   const extractedInboundText = extractInboundTextFromWebhookMessage(message);
   // AD_REFERRAL_EXACT_CONTENT_V2: anúncio e mensagem do cliente são dados
@@ -1912,13 +1913,23 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
     const mediaId = node?.id;
     if (mediaId) {
       try {
-        const { data: mediaSettings } = await supabase
-          .from('crm_settings')
-          .select('meta_access_token')
-          .eq('user_id', userId)
-          .maybeSingle();
-        const token = mediaSettings?.meta_access_token;
-        if (token) {
+        // O token correto é o da caixa que recebeu a mensagem. Usar apenas o de
+        // crm_settings fazia a Meta negar o download nas caixas extras (ou após
+        // trocar de número) e a imagem/documento aparecia como "não disponível".
+        let token: string | null = inboundNumberRow?.user_id === userId ? (inboundNumberRow?.meta_access_token || null) : null;
+        if (!token) {
+          const { data: mediaSettings } = await supabase
+            .from('crm_settings')
+            .select('meta_access_token')
+            .eq('user_id', userId)
+            .maybeSingle();
+          token = mediaSettings?.meta_access_token || null;
+        }
+        const inboundFileSize = Number(node?.file_size || 0);
+        if (token && inboundFileSize > DEFER_MEDIA_THRESHOLD && message?.id) {
+          // Arquivo grande: a mensagem é salva já e o arquivo chega em segundo plano.
+          deferredInboundMedia = { token, mediaId, node };
+        } else if (token) {
           mediaUrlForSave = await fetchAndStoreIncomingMedia(
             supabase,
             token,
@@ -2170,6 +2181,7 @@ else if (message.type === "unsupported") {
         content_source: extractedInboundText ? 'customer_payload' : 'meta_unavailable',
         referral_used_as_content: false,
         ...(templateButtonMeta || {}),
+        ...(deferredInboundMedia ? { media_pending: true } : {}),
       },
         user_id: userId,
         ...numberPatch,
@@ -2194,6 +2206,23 @@ else if (message.type === "unsupported") {
       return jsonResponse({ success: false, error: insertMessageError.message }, 500);
     }
      savedInboundMessageId = insertedInboundMessage?.id ?? null;
+     if (deferredInboundMedia && savedInboundMessageId) {
+       const pending = deferredInboundMedia;
+       const rowId = savedInboundMessageId;
+       runInBackground((async () => {
+         const storedUrl = await fetchAndStoreIncomingMedia(
+           supabase, pending.token, pending.mediaId,
+           message.type === 'voice' ? 'audio' : (message.type === 'ptv' ? 'video' : message.type),
+           `${waId}_${message.type}`, pending.node?.mime_type, pending.node?.filename
+         );
+         const { data: row } = await supabase.from('crm_messages').select('metadata').eq('id', rowId).maybeSingle();
+         await supabase.from('crm_messages').update({
+           media_url: storedUrl,
+           metadata: { ...(row?.metadata || {}), media_pending: false, ...(storedUrl ? {} : { media_unavailable: true }) },
+         }).eq('id', rowId);
+         console.log('[WEBHOOK] Deferred inbound media finished', { rowId, ok: Boolean(storedUrl) });
+       })());
+     }
      const inboundMessageAt = message?.timestamp
        ? new Date(Number(message.timestamp) * 1000).toISOString()
        : new Date().toISOString();
@@ -8319,6 +8348,42 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
       if (!converted) throw new Error('Não foi possível converter a mensagem');
 
       return jsonResponse({ success: true, converted });
+    }
+
+    if (action === 'retryMedia') {
+      // Baixa de novo o arquivo de uma mensagem que ficou sem mídia, usando o
+      // token da caixa da mensagem (a Meta mantém o arquivo por cerca de 30 dias).
+      const messageId = String(params?.messageId || '');
+      if (!messageId) return jsonResponse({ success: false, error: 'messageId é obrigatório' }, 400);
+      if (!userId) return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
+      const { data: msg } = await supabase.from('crm_messages')
+        .select('id, message_type, metadata, whatsapp_number_id, media_url')
+        .eq('id', messageId).eq('user_id', userId).maybeSingle();
+      if (!msg) return jsonResponse({ success: false, error: 'Mensagem não encontrada' }, 404);
+      if (msg.media_url) return jsonResponse({ success: true, media_url: msg.media_url });
+      const raw = (msg.metadata as any)?.raw || {};
+      const rawType = raw?.type || msg.message_type;
+      const node = raw?.[rawType] || {};
+      if (!node?.id) return jsonResponse({ success: false, error: 'A Meta não enviou o arquivo desta mensagem.' }, 422);
+      let token: string | null = null;
+      if (msg.whatsapp_number_id) {
+        const { data: num } = await supabase.from('crm_whatsapp_numbers')
+          .select('meta_access_token').eq('id', msg.whatsapp_number_id).eq('user_id', userId).maybeSingle();
+        token = num?.meta_access_token || null;
+      }
+      if (!token) {
+        const { data: st } = await supabase.from('crm_settings').select('meta_access_token').eq('user_id', userId).maybeSingle();
+        token = st?.meta_access_token || null;
+      }
+      if (!token) return jsonResponse({ success: false, error: 'WhatsApp desconectado: reconecte para baixar o arquivo.' }, 409);
+      const storageType = rawType === 'voice' ? 'audio' : (rawType === 'ptv' ? 'video' : rawType);
+      const storedUrl = await fetchAndStoreIncomingMedia(supabase, token, node.id, storageType, `retry_${msg.id}_${rawType}`, node?.mime_type, node?.filename);
+      if (!storedUrl) return jsonResponse({ success: false, error: 'A Meta não liberou mais este arquivo (pode ter expirado).' }, 410);
+      await supabase.from('crm_messages').update({
+        media_url: storedUrl,
+        metadata: { ...(msg.metadata as any || {}), media_pending: false, media_unavailable: false },
+      }).eq('id', msg.id).eq('user_id', userId);
+      return jsonResponse({ success: true, media_url: storedUrl });
     }
 
     if (action === 'clearHistory') {

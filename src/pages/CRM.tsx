@@ -153,6 +153,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getConversationWindow } from "@/lib/conversationWindow";
 import { ConversationWindowBadge } from "@/components/crm/ConversationWindowBadge";
+import ConversationRulesGuide from "@/components/crm/ConversationRulesGuide";
 import { Progress } from "@/components/ui/progress";
 import AnnouncementPopup from "@/components/AnnouncementPopup";
 import RetentionNoticePopup from "@/components/crm/RetentionNoticePopup";
@@ -5858,6 +5859,7 @@ const CRM = () => {
                      
                      { id: 'help', label: 'Ajuda', icon: LucideIcons.HelpCircle },
                     { id: 'settings', label: 'Ajustes', icon: Settings },
+                     { id: 'rules', label: 'Regras', icon: ShieldCheck },
                   ].map((item) => (
                     <SidebarMenuItem key={item.id}>
                       <SidebarMenuButton 
@@ -6019,6 +6021,7 @@ const CRM = () => {
                    activeTab === 'contacts' ? 'Conversas' : 
                    activeTab === 'google-synced' ? 'Sincronizados Google' :
                    activeTab === 'tutorials' ? 'Tutoriais' :
+                   activeTab === 'rules' ? 'Regras da Meta' :
                    activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
                  {userRole === 'super_admin' && (
                     <Button 
@@ -8923,6 +8926,10 @@ const CRM = () => {
 
             {activeTab === 'tutorials' && (
               <SalesTutorials variant="dark" />
+            )}
+
+            {activeTab === 'rules' && (
+              <ConversationRulesGuide />
             )}
 
             {activeTab === 'templates' && (

@@ -2014,6 +2014,23 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
           </ReactFlow>
         </main>
       </div>
+      {audioConvert && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm" role="status" aria-live="polite">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-xl">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+              <p className="text-sm font-bold text-foreground">Convertendo áudio…</p>
+            </div>
+            <p className="mt-1 truncate text-xs text-muted-foreground">{audioConvert.label}</p>
+            <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${audioConvert.progress}%` }} />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {audioConvert.progress}% • OGG + Opus + 48 kHz + Mono (formato aprovado pela Meta)
+            </p>
+          </div>
+        </div>
+      )}
       <VideoCompressDialog
         open={!!compressState}
         file={compressState?.file ?? null}

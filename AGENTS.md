@@ -7,3 +7,4 @@
 - Remover um número arquiva seus fluxos (desligados, whatsapp_number_id NULL, origem em archived_from_*) em vez de apagá-los; a tela de escolha de número permite transferi-los.
 - A leitura de uma conversa só avança por ação explícita do usuário; sincronizações automáticas preservam o cursor `last_read_at` monotônico.
 - O histórico de templates enviados guarda o texto final já interpolado e a mídia efetiva; a conversa nunca reconstrói novos envios pelos exemplos aprovados.
+- A janela de atendimento (24h desde a última mensagem recebida; 72h desde o evento Click-to-WhatsApp em ctwa_opened_at) é calculada só por getConversationWindow (_shared/conversation-window.ts, espelhada em src/lib/conversationWindow.ts) e aplicada no envio livre central (handleInternalSendMessage e crm-webhook); envios da empresa nunca estendem a janela.

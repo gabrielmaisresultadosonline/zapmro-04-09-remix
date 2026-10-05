@@ -667,7 +667,6 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
       console.log('[FlowEditor] mídia pronta', { path: uploaded.path, reused: uploaded.reused });
 
       const updateData: any = { fileName: file.name };
-      if (type === 'audio') updateData.audioUrl = publicUrl;
       if (type === 'video') updateData.videoUrl = publicUrl;
       if (type === 'image') updateData.imageUrl = publicUrl;
 

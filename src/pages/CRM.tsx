@@ -10990,6 +10990,10 @@ const CRM = () => {
                   if (nameChanged || phoneChanged) {
                     nextMetadata.google_dirty = true;
                   }
+                  // Só contatos renomeados pelo usuário vão para o Google.
+                  if (nameChanged && (contactToView.name || '').trim()) {
+                    nextMetadata.user_renamed = true;
+                  }
                   await supabase.from('crm_contacts').update({
                     name: contactToView.name,
                     metadata: nextMetadata,
@@ -11070,7 +11074,7 @@ const CRM = () => {
                             const newName = `${prefix} ${idx++}`;
                             return supabase.from('crm_contacts').update({
                               name: newName,
-                              metadata: { ...(c.metadata || {}), google_dirty: true },
+                              metadata: { ...(c.metadata || {}), google_dirty: true, user_renamed: true },
                             } as any).eq('id', c.id);
                           }));
                         }

@@ -1007,7 +1007,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     .select('id, content, direction, message_type, media_url')
     .eq('contact_id', contact.id)
     .order('created_at', { ascending: false })
-    .limit(60);
+    .limit(200); // conversa completa recente para a IA entender onde parou
 
   const processedRecentMessages = [];
   for (const msg of recentMessages || []) {
@@ -1028,30 +1028,38 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     .map((m: any) => `${m.direction === 'inbound' ? 'Cliente' : 'Assistente'}: ${describeMessageForHistory(m)}`)
     .join('\n');
     
-  let aiPrompt = contact.ai_agent_prompt || contact.metadata?.ai_agent_prompt || "";
+  let aiPrompt = "";
   let labelOnTransfer = contact.metadata?.ai_agent_label_on_transfer || "";
+  const globalPrompt = String(aiSettings?.ai_system_prompt || "").trim();
 
-  // Fallback essencial: se o contato ficou preso no nó de IA sem prompt salvo,
-  // busca o prompt diretamente do nó salvo no fluxo visual.
-  if (!aiPrompt && contact.current_flow_id && contact.current_node_id) {
-    console.log(`[AI-AGENT] Attempting to fetch prompt from node data for flow ${contact.current_flow_id} node ${contact.current_node_id}`);
+  // Prompt do bloco do fluxo: sempre lido do fluxo salvo (fonte da verdade),
+  // para que edições no bloco valham imediatamente e um prompt antigo
+  // gravado no contato não se sobreponha. O bloco escolhe a origem:
+  // 'node' (prompt do próprio bloco) ou 'global' (prompt geral do CRM).
+  const nodeId = contact.current_node_id || contact.metadata?.ai_agent_node_id;
+  let resolvedFromFlow = false;
+  if (contact.current_flow_id && nodeId) {
     const { data: flowConfig } = await supabase
       .from('crm_flows')
       .select('nodes')
       .eq('id', contact.current_flow_id)
       .maybeSingle();
-
-    const aiNode = flowConfig?.nodes?.find((n: any) => n.id === contact.current_node_id && n.type === 'aiAgent');
+    const aiNode = flowConfig?.nodes?.find((n: any) => n.id === nodeId && n.type === 'aiAgent');
     if (aiNode?.data) {
-      console.log(`[AI-AGENT] Found node data for ${contact.current_node_id}. Prompt length: ${aiNode.data.prompt?.length || 0}`);
-      aiPrompt = aiNode.data.prompt || "";
-      labelOnTransfer = aiNode.data.labelOnHumanTransfer || "";
-      
-      // Persiste o prompt no contato para as próximas mensagens
-      await supabase.from('crm_contacts').update({ ai_agent_prompt: aiPrompt }).eq('id', contact.id);
-    } else {
-      console.warn(`[AI-AGENT] No AI node found in flow config for id ${contact.current_node_id}`);
+      resolvedFromFlow = true;
+      const source = aiNode.data.promptSource === 'global' ? 'global' : 'node';
+      const nodePrompt = String(aiNode.data.prompt || "").trim();
+      aiPrompt = source === 'global' ? (globalPrompt || nodePrompt) : (nodePrompt || globalPrompt);
+      labelOnTransfer = aiNode.data.labelOnHumanTransfer || labelOnTransfer;
+      console.log(`[AI-AGENT] Flow node ${nodeId} prompt source=${source} length=${aiPrompt.length}`);
+      if (aiPrompt && aiPrompt !== contact.ai_agent_prompt) {
+        await supabase.from('crm_contacts').update({ ai_agent_prompt: aiPrompt }).eq('id', contact.id);
+      }
     }
+  }
+
+  if (!resolvedFromFlow) {
+    aiPrompt = contact.ai_agent_prompt || contact.metadata?.ai_agent_prompt || globalPrompt || "";
   }
 
   if (!aiPrompt) aiPrompt = "Você é um assistente prestativo.";

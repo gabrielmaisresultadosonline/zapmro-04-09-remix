@@ -6149,7 +6149,7 @@ const CRM = () => {
                           </Button>
                         </div>
                         
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-5">
                           {/* Todas conversas atendidas */}
                           <Card 
                             className="relative overflow-hidden group hover:scale-[1.01] transition-all border border-white/5 bg-[#0c1317] cursor-pointer shadow-xl rounded-2xl p-1"

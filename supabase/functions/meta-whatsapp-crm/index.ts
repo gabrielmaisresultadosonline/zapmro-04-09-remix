@@ -3716,7 +3716,11 @@ async function pushPendingContactsToGoogle(supabase: any, userId: string, settin
       const name = (c.name || '').trim();
       if (!name) return false;
       if (name === (c.wa_id || '').trim()) return false;
-      return true;
+      // Só sobe ao Google quem o usuário renomeou (ou alterou após sincronizar).
+      const meta = (c.metadata || {}) as Record<string, unknown>;
+      const renamed = meta.user_renamed === true || meta.user_renamed === 'true';
+      const dirty = meta.google_dirty === true || meta.google_dirty === 'true';
+      return dirty || (!c.google_sync_account_id && renamed);
     })
     .map((c: any) => {
       if (c.google_sync_account_id && !activeAccountIds.has(c.google_sync_account_id)) {

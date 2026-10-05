@@ -4642,7 +4642,7 @@ const CRM = () => {
 
     if (isColdList) {
       toast({ 
-        title: "Janela de 24h Expirada", 
+        title: "Janela de atendimento expirada", 
         description: "Não é possível iniciar fluxos em chats expirados. Use um Template Aprovado.", 
         variant: "destructive" 
       });
@@ -7024,9 +7024,6 @@ const CRM = () => {
                                 <div className="flex items-center gap-1 flex-wrap justify-end">
 
                                   <ConversationWindowBadge contact={selectedContact} now={now} />
-                                  {selectedContact.ctwa_opened_at && (
-                                    <span className="hidden" aria-hidden />
-                                  )}
                                   {(countdown !== null && countdown > 0 || selectedContact.flow_state === 'waiting_response') && (!selectedContact.last_message_received_at || (Date.now() - new Date(selectedContact.last_message_received_at).getTime()) < (24.5 * 60 * 60 * 1000)) && (
                                     <div className="text-[8px] font-black bg-red-600 text-white tabular-nums whitespace-nowrap px-1.5 py-0.5 rounded-sm shrink-0 shadow-sm flex items-center gap-1">
                                       <Clock className="w-2.5 h-2.5" />
@@ -11177,8 +11174,8 @@ const CRM = () => {
                           {contact.last_message_received_at && (
                             <div className={cn(
                               "ml-auto w-2 h-2 rounded-full",
-                              (Date.now() - new Date(contact.last_message_received_at).getTime() < 24 * 60 * 60 * 1000) ? "bg-emerald-500" : "bg-zinc-300"
-                            )} title={(Date.now() - new Date(contact.last_message_received_at).getTime() < 24 * 60 * 60 * 1000) ? "Janela Ativa" : "Janela Expirada"} />
+                              getConversationWindow(contact).is_open ? "bg-emerald-500" : "bg-zinc-300"
+                            )} title={getConversationWindow(contact).is_open ? `Janela ${getConversationWindow(contact).type} ativa` : "Janela expirada"} />
                           )}
                         </div>
                       ))}
@@ -11660,10 +11657,10 @@ const CRM = () => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl">
               <Clock className="w-5 h-5 text-amber-500" />
-              Janela de 24h Expirada
+              Janela de atendimento expirada
             </DialogTitle>
             <DialogDescription className="text-muted-foreground pt-1">
-              Esta conversa está fora da janela de 24h. Por isso o ZAPMRO não pode enviar uma mensagem comum agora.
+              Esta conversa está fora da janela de atendimento (24h após a última mensagem do cliente, ou 72h quando ele veio de um anúncio Click-to-WhatsApp). Por isso o ZAPMRO não pode enviar uma mensagem comum agora.
             </DialogDescription>
           </DialogHeader>
 

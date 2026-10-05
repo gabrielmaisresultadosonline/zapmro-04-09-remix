@@ -18,7 +18,7 @@ export interface CompressOptions {
   maxBytes?: number;
 }
 
-async function getFfmpeg() {
+export async function getFfmpeg() {
   if (!ffmpegInstance) {
     ffmpegInstance = new FFmpeg();
   }

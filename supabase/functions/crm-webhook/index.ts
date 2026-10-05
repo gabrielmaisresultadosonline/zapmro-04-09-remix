@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { getConversationWindow, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -134,6 +135,31 @@ serve(async (req) => {
     } else {
       // Send Text Message
       if (!finalMessageText) finalMessageText = 'Mensagem automática via Webhook';
+
+      // Janela de atendimento (24h / 72h anúncio): fora dela, só template.
+      const variants = Array.from(new Set([cleanTo,
+        cleanTo.startsWith('55') && cleanTo.length === 13 ? cleanTo.slice(0, 4) + cleanTo.slice(5) : cleanTo,
+        cleanTo.startsWith('55') && cleanTo.length === 12 ? cleanTo.slice(0, 4) + '9' + cleanTo.slice(4) : cleanTo]))
+      let windowQuery = await supabase.from('crm_contacts')
+        .select('last_message_received_at, ctwa_opened_at')
+        .eq('user_id', ownerId).in('wa_id', variants)
+        .order('last_message_received_at', { ascending: false, nullsFirst: false }).limit(1)
+      if (windowQuery.error) {
+        windowQuery = await supabase.from('crm_contacts')
+          .select('last_message_received_at')
+          .eq('user_id', ownerId).in('wa_id', variants)
+          .order('last_message_received_at', { ascending: false, nullsFirst: false }).limit(1)
+      }
+      const convWindow = getConversationWindow((windowQuery.data as any[] | null)?.[0] ?? null)
+      if (!convWindow.is_open) {
+        await supabase.from('crm_webhook_delivery_logs').insert([{
+          webhook_id, to_number: cleanTo, message: finalMessageText, status: 'error',
+          error_message: WINDOW_CLOSED_MESSAGE, order_id: order_id || null,
+        }])
+        return new Response(JSON.stringify({ success: false, code: 'WINDOW_CLOSED', error: WINDOW_CLOSED_MESSAGE, window: convWindow }), {
+          status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
       
       const response = await fetch(
         `https://graph.facebook.com/v20.0/${meta_phone_number_id}/messages`,

@@ -1428,15 +1428,20 @@ async function saveOutboundEcho(
     const type = echo?.type || 'text';
     let content = '';
     let echoMediaUrl: string | null = null;
+    let deferredEchoMedia: { mediaId: string; node: any } | null = null;
     if (type === 'text') {
       content = echo?.text?.body || '';
     } else if (type === 'interactive') {
       content = echo?.interactive?.button_reply?.title || echo?.interactive?.list_reply?.title || `[${type}]`;
     } else if (['image', 'video', 'ptv', 'audio', 'voice', 'sticker', 'document'].includes(type)) {
       const node = echo?.[type] || {};
-      content = node?.caption || '';
+      content = node?.caption || (type === 'document' ? (node?.filename || '') : '');
       const mediaId = node?.id;
-      if (mediaId) {
+      const echoFileSize = Number(node?.file_size || 0);
+      if (mediaId && echoFileSize > DEFER_MEDIA_THRESHOLD) {
+        // Arquivo grande: salva a mensagem já e baixa o arquivo em segundo plano.
+        deferredEchoMedia = { mediaId, node };
+      } else if (mediaId) {
         try {
           // Prioriza o token da própria caixa; crm_settings é só compatibilidade
           // para cadastros antigos de um único número.
@@ -1456,7 +1461,8 @@ async function saveOutboundEcho(
               mediaId,
               type === 'voice' ? 'audio' : (type === 'ptv' ? 'video' : type),
               `echo_${waId}_${type}`,
-              node?.mime_type
+              node?.mime_type,
+              node?.filename
             );
           }
         } catch (err) {
@@ -1475,7 +1481,7 @@ async function saveOutboundEcho(
       status: 'sent',
       meta_message_id: metaMessageId || null,
       media_url: echoMediaUrl,
-      metadata: { raw: echo, source: 'echo_mobile_app' },
+      metadata: { raw: echo, source: 'echo_mobile_app', ...(deferredEchoMedia ? { media_pending: true } : {}) },
       user_id: userId,
       ...echoNumberPatch,
 
@@ -1494,6 +1500,27 @@ async function saveOutboundEcho(
       }
       console.error('[WEBHOOK-ECHO] Failed to insert outbound echo', { waId, error: insertErr.message });
       return { success: false, error: insertErr.message };
+    }
+
+    if (deferredEchoMedia && metaMessageId) {
+      const pending = deferredEchoMedia;
+      runInBackground((async () => {
+        let token = numberAccessToken;
+        if (!token) {
+          const { data: st } = await supabase.from('crm_settings').select('meta_access_token').eq('user_id', userId).maybeSingle();
+          token = st?.meta_access_token || null;
+        }
+        const storedUrl = token ? await fetchAndStoreIncomingMedia(
+          supabase, token, pending.mediaId,
+          type === 'voice' ? 'audio' : (type === 'ptv' ? 'video' : type),
+          `echo_${waId}_${type}`, pending.node?.mime_type, pending.node?.filename
+        ) : null;
+        await supabase.from('crm_messages')
+          .update({ media_url: storedUrl, metadata: { raw: echo, source: 'echo_mobile_app', media_pending: false, ...(storedUrl ? {} : { media_unavailable: true }) } })
+          .eq('meta_message_id', metaMessageId)
+          .eq('user_id', userId);
+        console.log('[WEBHOOK-ECHO] Deferred media finished', { metaMessageId, ok: Boolean(storedUrl) });
+      })());
     }
 
     await supabase.from('crm_contacts').update({
@@ -1881,7 +1908,7 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
     }
   } else if (['image', 'video', 'ptv', 'audio', 'voice', 'sticker', 'document'].includes(message.type)) {
     const node = message[message.type] || {};
-    mediaCaption = node?.caption || '';
+    mediaCaption = node?.caption || (message.type === 'document' ? (node?.filename || '') : '');
     const mediaId = node?.id;
     if (mediaId) {
       try {
@@ -1898,7 +1925,8 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
             mediaId,
             message.type === 'voice' ? 'audio' : (message.type === 'ptv' ? 'video' : message.type),
             `${waId}_${message.type}`,
-            node?.mime_type
+            node?.mime_type,
+            node?.filename
           );
         } else {
           console.warn('[WEBHOOK] No meta_access_token to fetch inbound media', { userId, waId });
@@ -5649,13 +5677,25 @@ async function resolveTemplateMediaUrl(supabase: any, accessToken: string, media
 
 // Baixa mídia recebida via webhook (image/video/audio/sticker/document) usando media_id
 // e salva em storage público para que apareça na conversa do CRM.
+/** Acima disso o arquivo vai em streaming (sem carregar tudo na memória). */
+const STREAM_UPLOAD_THRESHOLD = 15 * 1024 * 1024;
+/** Arquivos grandes são baixados depois de a mensagem já aparecer na conversa. */
+const DEFER_MEDIA_THRESHOLD = 15 * 1024 * 1024;
+
+function runInBackground(task: Promise<unknown>) {
+  const runtime = (globalThis as any).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(task);
+  else task.catch((err) => console.error('[BACKGROUND] task failed', err));
+}
+
 async function fetchAndStoreIncomingMedia(
   supabase: any,
   accessToken: string,
   mediaId: string,
   type: string,
   name: string,
-  mimeHint?: string
+  mimeHint?: string,
+  fileNameHint?: string
 ): Promise<string | null> {
   try {
     if (!mediaId || !accessToken) return null;
@@ -5669,6 +5709,7 @@ async function fetchAndStoreIncomingMedia(
     }
     const metaJson = await metaRes.json();
     const url = metaJson?.url;
+    const declaredSize = Number(metaJson?.file_size || 0);
     const mimeType = metaJson?.mime_type || mimeHint || 'application/octet-stream';
     if (!url) return null;
 
@@ -5678,7 +5719,10 @@ async function fetchAndStoreIncomingMedia(
       console.error('[INCOMING-MEDIA] Failed to download media', mediaId, binRes.status);
       return null;
     }
-    const blob = await binRes.blob();
+    // Arquivos grandes (ex.: vídeo de 97 MB enviado como documento) estouravam a
+    // memória da função ao usar blob(); agora seguem em streaming direto ao Storage.
+    const contentLength = Number(binRes.headers.get('content-length') || declaredSize || 0);
+    const useStream = !contentLength || contentLength > STREAM_UPLOAD_THRESHOLD;
 
     // 3) Determina extensão
     let ext = 'bin';
@@ -5691,13 +5735,42 @@ async function fetchAndStoreIncomingMedia(
       ext = m?.[1] || 'pdf';
     }
 
-    const filePath = `incoming/${name}_${Date.now()}.${ext}`;
-    const { error: upErr } = await supabase.storage
-      .from('crm-media')
-      .upload(filePath, blob, { contentType: mimeType, upsert: true });
-    if (upErr) {
-      console.error('[INCOMING-MEDIA] Upload failed', upErr);
-      return null;
+    if (type === 'document' && fileNameHint) {
+      const m = /\.([a-zA-Z0-9]{1,8})$/.exec(fileNameHint);
+      if (m) ext = m[1].toLowerCase();
+    }
+    const safeName = String(name).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filePath = `incoming/${safeName}_${Date.now()}.${ext}`;
+    if (useStream && binRes.body) {
+      const baseUrl = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/$/, '');
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+        'Content-Type': mimeType,
+        'x-upsert': 'true',
+      };
+      if (contentLength) headers['Content-Length'] = String(contentLength);
+      const upRes = await fetch(`${baseUrl}/storage/v1/object/crm-media/${filePath}`, {
+        method: 'POST',
+        headers,
+        body: binRes.body,
+        // @ts-ignore - necessário para enviar corpo em streaming no Deno
+        duplex: 'half',
+      });
+      if (!upRes.ok) {
+        console.error('[INCOMING-MEDIA] Stream upload failed', upRes.status, await upRes.text().catch(() => ''));
+        return null;
+      }
+    } else {
+      const blob = await binRes.blob();
+      const { error: upErr } = await supabase.storage
+        .from('crm-media')
+        .upload(filePath, blob, { contentType: mimeType, upsert: true });
+      if (upErr) {
+        console.error('[INCOMING-MEDIA] Upload failed', upErr);
+        return null;
+      }
     }
     const { data: { publicUrl } } = supabase.storage.from('crm-media').getPublicUrl(filePath);
     const finalUrl = toPublicMediaUrl(publicUrl);

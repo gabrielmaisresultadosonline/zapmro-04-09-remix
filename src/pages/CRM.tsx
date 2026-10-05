@@ -165,6 +165,7 @@ import {
   getActiveNumberId,
   setActiveNumberId as persistActiveNumberId,
   syncSettingsIntoNumbers,
+  disconnectNumber,
   type WhatsAppNumberRecord,
 } from "@/lib/whatsappNumbers";
 import {
@@ -10033,12 +10034,8 @@ const CRM = () => {
                                     };
                                     let remaining = 0;
                                     if (disconnectedNumberId) {
-                                      const { data, error } = await (supabase as any).rpc(
-                                        'crm_delete_whatsapp_number',
-                                        { p_number_id: disconnectedNumberId, p_user_id: user.id }
-                                      );
-                                      if (error) throw error;
-                                      remaining = Number(data?.remaining ?? 0);
+                                      const result = await disconnectNumber(user.id, disconnectedNumberId);
+                                      if (!result.success) throw new Error(result.error || 'Não foi possível desconectar este WhatsApp.');
                                     } else {
                                       const { error } = await supabase
                                         .from('crm_settings')
@@ -10046,8 +10043,7 @@ const CRM = () => {
                                         .eq('user_id', user.id);
                                       if (error) throw error;
                                     }
-                                    // A operação atômica remove somente a caixa atual.
-                                    // Os outros números do cadastro continuam disponíveis no seletor.
+                                    // Desconectar preserva a caixa, os fluxos, templates e históricos.
                                     try {
                                       const numbers = await fetchUserNumbers(user.id);
                                       remaining = numbers.length;

@@ -833,12 +833,12 @@ serve(async (req) => {
       if (numberError) throw numberError;
 
       if (number?.id) {
-        const { data, error } = await supabase.rpc("crm_admin_delete_whatsapp_number", {
+        const { data, error } = await supabase.rpc("crm_disconnect_whatsapp_number", {
           p_number_id: number.id,
           p_user_id: userId,
         });
         if (error) throw error;
-        console.log("[disconnect_whatsapp] caixa removida com segurança", { userId, numberId: number.id });
+        console.log("[disconnect_whatsapp] caixa preservada e credenciais removidas", { userId, numberId: number.id });
         return json({ success: true, result: data });
       }
 

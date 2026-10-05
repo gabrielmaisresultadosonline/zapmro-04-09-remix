@@ -55,3 +55,4 @@
 - [x] Estabilizar avisos de mensagens não lidas até o usuário abrir a conversa.
 - [x] Exibir no histórico do CRM o template do disparo com a mídia e as variáveis realmente enviadas.
 - [x] Adicionar ao menu do CRM um guia responsivo das janelas de 24h, 72h, templates e coexistência.
+- [x] Preservar números desconectados e permitir cópia de fluxos e templates entre WhatsApps.

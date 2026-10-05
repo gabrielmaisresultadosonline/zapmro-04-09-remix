@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
-import { Loader2, Lock, MessageSquare, Plus, ShieldCheck } from "lucide-react";
+import { Copy, Loader2, Lock, MessageSquare, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   activateNumber,
+  deleteNumberPermanently,
   describeNumber,
   fetchUserNumbers,
   isNumberUnlocked,
+  isNumberConnected,
   setNumberPin,
   type WhatsAppNumberRecord,
 } from "@/lib/whatsappNumbers";
 import { DisconnectedNumbersHistory } from "@/components/crm/DisconnectedNumbersHistory";
+import { NumberContentCopyDialog } from "@/components/crm/NumberContentCopyDialog";
 
 /** Contato do administrador para liberação de números extras. */
 const SUPPORT_WHATSAPP_URL =
@@ -47,6 +50,8 @@ export function WhatsAppNumberSelector({
   const [newPinTarget, setNewPinTarget] = useState<WhatsAppNumberRecord | null>(null);
   const [newPinValue, setNewPinValue] = useState("");
   const [showLimit, setShowLimit] = useState(false);
+  const [copySource, setCopySource] = useState<WhatsAppNumberRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WhatsAppNumberRecord | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -105,6 +110,20 @@ export function WhatsAppNumberSelector({
 
   const canConnectMore = numbers.length < maxNumbers;
 
+  const removePermanently = async () => {
+    if (!deleteTarget) return;
+    setBusyId(deleteTarget.id);
+    const result = await deleteNumberPermanently(userId, deleteTarget.id);
+    setBusyId(null);
+    if (!result.success) {
+      toast.error(result.error || "Não foi possível excluir este WhatsApp");
+      return;
+    }
+    toast.success("WhatsApp excluído definitivamente");
+    setDeleteTarget(null);
+    await load();
+  };
+
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-[#0c1317] via-[#111b21] to-[#0c1317] p-4 sm:p-6">
@@ -136,7 +155,7 @@ export function WhatsAppNumberSelector({
             {numbers.map((record) => (
               <div
                 key={record.id}
-                className="rounded-xl border border-white/10 bg-[#111b21] p-4 flex items-center gap-3"
+                className="rounded-xl border border-white/10 bg-[#111b21] p-4 flex flex-wrap sm:flex-nowrap items-center gap-3"
               >
                 <div className="w-10 h-10 rounded-full bg-[#00a884]/15 flex items-center justify-center shrink-0">
                   <MessageSquare className="w-5 h-5 text-[#00a884]" />
@@ -149,8 +168,20 @@ export function WhatsAppNumberSelector({
                     {record.label || record.meta_verified_name || "WhatsApp Business"}
                     {record.access_pin ? " • protegido por senha" : ""}
                   </p>
+                  {!isNumberConnected(record) && (
+                    <p className="mt-1 text-xs font-semibold text-amber-400">Desconectado • conteúdos preservados</p>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0">
+                  <button
+                    type="button"
+                    title="Copiar fluxos e templates"
+                    aria-label={`Copiar conteúdos de ${describeNumber(record)}`}
+                    onClick={() => setCopySource(record)}
+                    className="p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
                   <button
                     type="button"
                     title={record.access_pin ? "Alterar senha" : "Definir senha"}
@@ -162,19 +193,27 @@ export function WhatsAppNumberSelector({
                   >
                     <Lock className="w-4 h-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleOpen(record)}
-                    disabled={busyId === record.id}
-                    className="h-9 px-4 rounded-lg bg-[#00a884] hover:bg-[#02916f] text-white text-sm font-semibold flex items-center gap-2 transition disabled:opacity-60"
-                  >
-                    {busyId === record.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <ShieldCheck className="w-4 h-4" />
-                    )}
-                    Abrir
-                  </button>
+                  {isNumberConnected(record) ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpen(record)}
+                      disabled={busyId === record.id}
+                      className="h-9 px-4 rounded-lg bg-[#00a884] hover:bg-[#02916f] text-white text-sm font-semibold flex items-center gap-2 transition disabled:opacity-60"
+                    >
+                      {busyId === record.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                      Abrir
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      title="Excluir definitivamente"
+                      aria-label={`Excluir definitivamente ${describeNumber(record)}`}
+                      onClick={() => setDeleteTarget(record)}
+                      className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -233,6 +272,28 @@ export function WhatsAppNumberSelector({
             >
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {copySource && (
+        <NumberContentCopyDialog userId={userId} source={copySource} numbers={numbers} onClose={() => setCopySource(null)} />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[220] bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#202c33] rounded-2xl border border-white/10 p-6">
+            <div className="w-12 h-12 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center mb-4"><Trash2 className="w-6 h-6" /></div>
+            <h2 className="text-white font-bold text-lg">Excluir este WhatsApp?</h2>
+            <p className="text-white/60 text-sm mt-2 leading-relaxed">
+              {describeNumber(deleteTarget)} será removido definitivamente. Contatos, conversas e conteúdos que não foram copiados não poderão ser recuperados.
+            </p>
+            <div className="flex gap-2 mt-5">
+              <button type="button" onClick={() => setDeleteTarget(null)} className="flex-1 h-10 rounded-lg bg-white/10 hover:bg-white/15 text-white text-sm font-semibold">Cancelar</button>
+              <button type="button" onClick={removePermanently} disabled={busyId === deleteTarget.id} className="flex-1 h-10 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+                {busyId === deleteTarget.id && <Loader2 className="w-4 h-4 animate-spin" />} Excluir
+              </button>
+            </div>
           </div>
         </div>
       )}

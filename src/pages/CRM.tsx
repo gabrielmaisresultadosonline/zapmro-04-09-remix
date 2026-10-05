@@ -151,6 +151,8 @@ import {
   SidebarTrigger
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { getConversationWindow } from "@/lib/conversationWindow";
+import { ConversationWindowBadge } from "@/components/crm/ConversationWindowBadge";
 import { Progress } from "@/components/ui/progress";
 import AnnouncementPopup from "@/components/AnnouncementPopup";
 import RetentionNoticePopup from "@/components/crm/RetentionNoticePopup";
@@ -3500,13 +3502,8 @@ const CRM = () => {
     }
   };
 
-  const isConversationExpired = (contact: any) => {
-    const lastInbound = getLastInboundTime(contact);
-    if (!lastInbound) return false;
-    const DAY = 24 * 60 * 60 * 1000;
-    const TOLERANCE = 30 * 60 * 1000;
-    return Date.now() - lastInbound > DAY + TOLERANCE;
-  };
+  /** Regra central (24h comum / 72h anúncio): fechada = só template. */
+  const isConversationExpired = (contact: any) => !getConversationWindow(contact).is_open;
 
   const [resendingMessageId, setResendingMessageId] = useState<string | null>(null);
   const [expandedErrorMessageId, setExpandedErrorMessageId] = useState<string | null>(null);
@@ -7026,13 +7023,9 @@ const CRM = () => {
                                 </Button>
                                 <div className="flex items-center gap-1 flex-wrap justify-end">
 
-                                  {selectedContact.last_message_received_at && (
-                                    <div className="flex items-center gap-1 bg-white/50 dark:bg-black/20 px-1 sm:px-1.5 py-0.5 rounded border border-border/10 shadow-sm shrink-0">
-                                      <Clock className={cn("w-2.5 h-2.5", getWindowInfo(selectedContact.last_message_received_at)?.isExpired ? 'text-destructive animate-pulse' : 'text-[#00a884]')} />
-                                      <span className={cn("text-[8px] font-bold tabular-nums", getWindowInfo(selectedContact.last_message_received_at)?.isExpired ? 'text-destructive' : 'text-[#00a884]')}>
-                                        {getWindowInfo(selectedContact.last_message_received_at)?.label}
-                                      </span>
-                                    </div>
+                                  <ConversationWindowBadge contact={selectedContact} now={now} />
+                                  {selectedContact.ctwa_opened_at && (
+                                    <span className="hidden" aria-hidden />
                                   )}
                                   {(countdown !== null && countdown > 0 || selectedContact.flow_state === 'waiting_response') && (!selectedContact.last_message_received_at || (Date.now() - new Date(selectedContact.last_message_received_at).getTime()) < (24.5 * 60 * 60 * 1000)) && (
                                     <div className="text-[8px] font-black bg-red-600 text-white tabular-nums whitespace-nowrap px-1.5 py-0.5 rounded-sm shrink-0 shadow-sm flex items-center gap-1">

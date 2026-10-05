@@ -8418,7 +8418,17 @@ const CRM = () => {
                                           // Coleta a mídia antes de apagar: depois do delete
                                           // não há como saber quais arquivos ficaram órfãos.
                                           const flowMedia = Array.from(collectStorageUrls([flow.nodes, flow.edges]));
-                                          await supabase.from('crm_flows').delete().eq('id', flow.id);
+                                          const { data: deletedRows, error: deleteError } = await supabase
+                                            .from('crm_flows').delete().eq('id', flow.id).select('id');
+                                          if (deleteError || !deletedRows?.length) {
+                                            toast({
+                                              title: 'Não foi possível excluir o fluxo',
+                                              description: deleteError?.message || 'Você não tem permissão para excluir este fluxo.',
+                                              variant: 'destructive',
+                                            });
+                                            return;
+                                          }
+                                          toast({ title: 'Fluxo excluído' });
                                           await deleteMediaUrlsIfUnused(flowMedia, { userId: currentUserIdRef.current, reason: 'fluxo-excluido' });
                                           fetchData(false);
                                         }

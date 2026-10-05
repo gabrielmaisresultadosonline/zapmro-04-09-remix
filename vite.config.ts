@@ -15,6 +15,14 @@ export default defineConfig(({ mode }) => ({
     mode === 'development' &&
     componentTagger(),
   ].filter(Boolean),
+  // O ffmpeg.wasm cria um Web Worker relativo ao próprio pacote; o pré-bundle
+  // do Vite quebra esse caminho (worker.js 404) e a conversão nunca termina.
+  optimizeDeps: {
+    exclude: ["@ffmpeg/ffmpeg", "@ffmpeg/util"],
+  },
+  worker: {
+    format: "es",
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

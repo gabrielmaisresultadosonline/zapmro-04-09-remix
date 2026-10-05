@@ -1,3 +1,4 @@
+import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
@@ -4382,6 +4383,14 @@ const CRM = () => {
 
       const isAudio = type === 'audio';
       setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 10 }));
+
+      // Áudio enviado de arquivo (mp3, m4a, wav, ogg vorbis...): converte na hora
+      // para OGG + Opus + 48 kHz + Mono, o único formato de voz que a Meta aceita.
+      if (isAudio && file instanceof File) {
+        toast({ title: 'Convertendo áudio…', description: 'Ajustando para o formato aceito pelo WhatsApp (OGG Opus, 48 kHz, mono).' });
+        file = await convertToWhatsAppVoice(file);
+        setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 20 }));
+      }
       
       let fileExt = 'ogg';
       let contentType = 'audio/ogg; codecs=opus';

@@ -1592,6 +1592,33 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose, onN
                     </div>
 
                     <div className="space-y-2">
+                      <Label className="text-xs font-bold">Qual prompt a I.A deve usar?</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { value: 'node', title: 'Prompt deste bloco', desc: 'Usa as instruções escritas abaixo' },
+                          { value: 'global', title: 'Prompt geral', desc: 'Usa o prompt do Agente I.A do CRM' },
+                        ] as const).map((opt) => {
+                          const current = selectedNode.data.promptSource === 'global' ? 'global' : 'node';
+                          const active = current === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => updateNodeData(selectedNode.id, { promptSource: opt.value })}
+                              className={`text-left p-2 rounded-lg border transition-colors ${active ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-500' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                            >
+                              <span className="block text-[11px] font-bold text-slate-900">{opt.title}</span>
+                              <span className="block text-[9px] text-slate-600">{opt.desc}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[9px] text-muted-foreground italic">
+                        Em ambos os casos a I.A lê a conversa inteira para entender onde parou antes de responder.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <Label className="text-xs font-bold flex items-center gap-2">
                           <BrainCircuit className="w-3.5 h-3.5 text-violet-500" /> Instruções de Venda e Atendimento

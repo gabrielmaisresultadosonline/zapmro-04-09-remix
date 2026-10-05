@@ -10855,6 +10855,11 @@ const CRM = () => {
           flow={editingFlow} 
           onSave={handleSaveFlow} 
           onClose={() => { setIsFlowEditorOpen(false); setEditingFlow(null); }} 
+          onNodesPersisted={(flowId, nodes) => {
+            // Áudio convertido já gravado na nuvem: atualiza a lista para que
+            // reabrir o fluxo não traga a versão antiga.
+            setFlows((prev: any[]) => prev.map((f: any) => (f.id === flowId ? { ...f, nodes } : f)));
+          }}
         />
       )}
       <FlowSaveOverlay open={flowSaveOverlay.open} done={flowSaveOverlay.done} />

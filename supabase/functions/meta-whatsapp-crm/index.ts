@@ -1855,6 +1855,7 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   let text = '';
   let buttonId = '';
   let mediaUrlForSave: string | null = null;
+  let deferredInboundMedia: { token: string; mediaId: string; node: any } | null = null;
   let mediaCaption = '';
   const extractedInboundText = extractInboundTextFromWebhookMessage(message);
   // AD_REFERRAL_EXACT_CONTENT_V2: anúncio e mensagem do cliente são dados
@@ -1912,13 +1913,23 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
     const mediaId = node?.id;
     if (mediaId) {
       try {
-        const { data: mediaSettings } = await supabase
-          .from('crm_settings')
-          .select('meta_access_token')
-          .eq('user_id', userId)
-          .maybeSingle();
-        const token = mediaSettings?.meta_access_token;
-        if (token) {
+        // O token correto é o da caixa que recebeu a mensagem. Usar apenas o de
+        // crm_settings fazia a Meta negar o download nas caixas extras (ou após
+        // trocar de número) e a imagem/documento aparecia como "não disponível".
+        let token: string | null = inboundNumberRow?.user_id === userId ? (inboundNumberRow?.meta_access_token || null) : null;
+        if (!token) {
+          const { data: mediaSettings } = await supabase
+            .from('crm_settings')
+            .select('meta_access_token')
+            .eq('user_id', userId)
+            .maybeSingle();
+          token = mediaSettings?.meta_access_token || null;
+        }
+        const inboundFileSize = Number(node?.file_size || 0);
+        if (token && inboundFileSize > DEFER_MEDIA_THRESHOLD && message?.id) {
+          // Arquivo grande: a mensagem é salva já e o arquivo chega em segundo plano.
+          deferredInboundMedia = { token, mediaId, node };
+        } else if (token) {
           mediaUrlForSave = await fetchAndStoreIncomingMedia(
             supabase,
             token,
@@ -2170,6 +2181,7 @@ else if (message.type === "unsupported") {
         content_source: extractedInboundText ? 'customer_payload' : 'meta_unavailable',
         referral_used_as_content: false,
         ...(templateButtonMeta || {}),
+        ...(deferredInboundMedia ? { media_pending: true } : {}),
       },
         user_id: userId,
         ...numberPatch,
@@ -2194,6 +2206,23 @@ else if (message.type === "unsupported") {
       return jsonResponse({ success: false, error: insertMessageError.message }, 500);
     }
      savedInboundMessageId = insertedInboundMessage?.id ?? null;
+     if (deferredInboundMedia && savedInboundMessageId) {
+       const pending = deferredInboundMedia;
+       const rowId = savedInboundMessageId;
+       runInBackground((async () => {
+         const storedUrl = await fetchAndStoreIncomingMedia(
+           supabase, pending.token, pending.mediaId,
+           message.type === 'voice' ? 'audio' : (message.type === 'ptv' ? 'video' : message.type),
+           `${waId}_${message.type}`, pending.node?.mime_type, pending.node?.filename
+         );
+         const { data: row } = await supabase.from('crm_messages').select('metadata').eq('id', rowId).maybeSingle();
+         await supabase.from('crm_messages').update({
+           media_url: storedUrl,
+           metadata: { ...(row?.metadata || {}), media_pending: false, ...(storedUrl ? {} : { media_unavailable: true }) },
+         }).eq('id', rowId);
+         console.log('[WEBHOOK] Deferred inbound media finished', { rowId, ok: Boolean(storedUrl) });
+       })());
+     }
      const inboundMessageAt = message?.timestamp
        ? new Date(Number(message.timestamp) * 1000).toISOString()
        : new Date().toISOString();

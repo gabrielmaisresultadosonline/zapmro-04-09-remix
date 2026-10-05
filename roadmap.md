@@ -56,3 +56,4 @@
 - [x] Exibir no histórico do CRM o template do disparo com a mídia e as variáveis realmente enviadas.
 - [x] Adicionar ao menu do CRM um guia responsivo das janelas de 24h, 72h, templates e coexistência.
 - [x] Preservar números desconectados e permitir cópia de fluxos e templates entre WhatsApps.
+- [x] Explicar no guia Regras do CRM a cobrança por mensagem de out/2026: 1.000 grátis por número/mês, R$ 0,0350 depois e envio pelo celular fora da cobrança da API.

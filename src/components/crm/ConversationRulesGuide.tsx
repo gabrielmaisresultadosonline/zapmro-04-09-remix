@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clock, FileCheck2, Megaphone, Smartphone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import ConversationPricingGuide from "./ConversationPricingGuide";
 
 interface RuleItem {
   icon: typeof Clock;
@@ -40,8 +41,9 @@ export function ConversationRulesGuide() {
           <div className="max-w-3xl space-y-2">
             <h2 className="text-2xl font-bold text-foreground md:text-3xl">Janelas de atendimento do WhatsApp</h2>
             <p className="text-sm leading-relaxed text-muted-foreground md:text-base">
-              Estas regras definem quando você pode enviar uma mensagem livre e quando precisa usar um template aprovado.
-              Elas são determinadas pela Meta e valem para qualquer ferramenta conectada à API oficial do WhatsApp.
+              Estas regras definem quando você pode enviar uma mensagem livre, quando precisa usar um template aprovado
+              e quanto cada envio custa. Elas são determinadas pela Meta e valem para qualquer ferramenta conectada à
+              API oficial do WhatsApp.
             </p>
           </div>
         </header>
@@ -93,6 +95,8 @@ export function ConversationRulesGuide() {
             </div>
           </div>
         </section>
+
+        <ConversationPricingGuide />
 
         <section aria-labelledby="coexistencia" className="rounded-lg border border-accent/30 bg-accent/10 p-5 md:p-6">
           <div className="flex flex-col gap-4 sm:flex-row">

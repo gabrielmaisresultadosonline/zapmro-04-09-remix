@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Copy, History, Loader2, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import {
-  describeNumber,
   fetchUserFlows,
-  isNumberConnected,
   copyFlowsToNumber,
   type SavedFlowSummary,
   type WhatsAppNumberRecord,

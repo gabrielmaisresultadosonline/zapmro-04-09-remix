@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import { BookOpen } from "lucide-react";
 import PurchaseDialog, { type PlanKey } from "@/components/sales/PurchaseDialog";
 import SalesTutorials from "@/components/sales/SalesTutorials";
+import WindowRulesSection from "@/components/sales/WindowRulesSection";
 import { useState } from "react";
  import whatsappGirlBgImg from "@/assets/whatsapp-meta-hero.png";
  const metaBgImg = "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&q=80&w=2000";
@@ -850,6 +851,8 @@ const appDashboardImg = "https://images.unsplash.com/photo-1675271591211-126ad94
            </div>
          </div>
        </section>
+
+        <WindowRulesSection />
  
          {/* Tutoriais movidos para /vendas/tutoriais */}
 

@@ -1155,7 +1155,7 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose, onN
                           value={(selectedNode.data.repeatMessage as string) ?? 'Responda nos botões acima 👆'}
                           onChange={(e) => updateNodeData(selectedNode.id, { repeatMessage: e.target.value })}
                           placeholder="Responda nos botões acima 👆"
-                          className="text-xs min-h-[60px] bg-white"
+                          className="text-xs min-h-[60px] bg-white text-slate-900 placeholder:text-slate-400"
                         />
                         <p className="text-[9px] text-amber-700/70">Enviada quando o contato responde fora dos botões, logo antes da pergunta repetir.</p>
                       </div>

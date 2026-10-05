@@ -1106,9 +1106,22 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
                       </div>
                       <Switch
                         checked={Boolean(selectedNode.data.repeatUntilButton)}
-                        onCheckedChange={(checked) => updateNodeData(selectedNode.id, { repeatUntilButton: checked, ...(checked ? { anyResponse: false } : {}) })}
+                        onCheckedChange={(checked) => updateNodeData(selectedNode.id, { repeatUntilButton: checked, ...(checked ? { anyResponse: false, repeatMessage: 'Responda nos botões acima 👆' } : {}) })}
                       />
                     </div>
+
+                    {Boolean(selectedNode.data.repeatUntilButton) && (
+                      <div className="space-y-1.5 p-3 bg-amber-50/60 rounded-lg border border-amber-100">
+                        <Label className="text-[11px] font-bold text-amber-700">Mensagem de aviso antes de repetir</Label>
+                        <Textarea
+                          value={(selectedNode.data.repeatMessage as string) ?? 'Responda nos botões acima 👆'}
+                          onChange={(e) => updateNodeData(selectedNode.id, { repeatMessage: e.target.value })}
+                          placeholder="Responda nos botões acima 👆"
+                          className="text-xs min-h-[60px] bg-white"
+                        />
+                        <p className="text-[9px] text-amber-700/70">Enviada quando o contato responde fora dos botões, logo antes da pergunta repetir.</p>
+                      </div>
+                    )}
 
                     <div className="space-y-3">
                       <Label className="text-xs">Botões (Máx 3)</Label>

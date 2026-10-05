@@ -7389,6 +7389,37 @@ async function fetchAndStoreIncomingMedia(
               last_flow_interaction: new Date().toISOString(),
               flow_state: 'running',
             }).eq('id', contactId);
+
+            // Mensagem de aviso configurável antes de repetir a pergunta.
+            const repeatMsg = (typeof currentNode.data?.repeatMessage === 'string' && currentNode.data.repeatMessage.trim())
+              ? currentNode.data.repeatMessage.trim()
+              : 'Responda nos botões acima 👆';
+            try {
+              let warnPhoneId: string | null = null;
+              let warnToken: string | null = null;
+              const warnBoxId = contact?.whatsapp_number_id || params.whatsapp_number_id || null;
+              if (warnBoxId) {
+                const { data: warnBox } = await supabase
+                  .from('crm_whatsapp_numbers')
+                  .select('meta_phone_number_id, meta_access_token')
+                  .eq('id', warnBoxId)
+                  .maybeSingle();
+                warnPhoneId = warnBox?.meta_phone_number_id || null;
+                warnToken = warnBox?.meta_access_token || null;
+              }
+              if (!warnPhoneId || !warnToken) {
+                warnPhoneId = settings?.meta_phone_number_id || null;
+                warnToken = settings?.meta_access_token || null;
+              }
+              if (warnPhoneId && warnToken) {
+                await handleInternalSendMessage(supabase, warnPhoneId, warnToken, { to: waId, text: repeatMsg }, contact, settings?.vps_transcoder_url, contact?.user_id || userId);
+              } else {
+                console.warn('[FLOW-LOG] Sem credenciais para enviar o aviso de repetição.');
+              }
+            } catch (warnErr: any) {
+              console.error('[FLOW-LOG] Falha ao enviar aviso de repetição (seguindo com a pergunta):', warnErr?.message || warnErr);
+            }
+
             const repeatRes = await executeVisualNode(supabase, flow, currentNode, contactId, waId);
             return jsonResponse({ ...(repeatRes || {}), repeated_question: true });
           }

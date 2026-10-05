@@ -833,32 +833,13 @@ serve(async (req) => {
       if (numberError) throw numberError;
 
       if (number?.id) {
-        const { error } = await supabase
-          .from("crm_whatsapp_numbers")
-          .update({
-            meta_access_token: null,
-            meta_waba_id: null,
-            meta_business_id: null,
-            meta_app_id: null,
-            meta_app_secret: null,
-            is_active: false,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", number.id)
-          .eq("user_id", userId);
+        const { data, error } = await supabase.rpc("crm_disconnect_whatsapp_number", {
+          p_number_id: number.id,
+          p_user_id: userId,
+        });
         if (error) throw error;
-        await supabase.from("crm_settings").update({
-          meta_access_token: null,
-          meta_phone_number_id: null,
-          meta_waba_id: null,
-          meta_business_id: null,
-          meta_app_id: null,
-          meta_app_secret: null,
-          meta_display_phone_number: null,
-          meta_verified_name: null,
-        }).eq("user_id", userId);
         console.log("[disconnect_whatsapp] caixa preservada e credenciais removidas", { userId, numberId: number.id });
-        return json({ success: true, result: { number_id: number.id } });
+        return json({ success: true, result: data });
       }
 
       const { error } = await supabase.from("crm_settings").update({

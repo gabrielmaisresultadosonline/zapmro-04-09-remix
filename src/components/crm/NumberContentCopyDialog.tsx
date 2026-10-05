@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { Copy, FileText, Loader2, Workflow, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -56,7 +56,7 @@ export function NumberContentCopyDialog({ userId, source, numbers, onClose }: Nu
     return () => { active = false; };
   }, [source.id, targets, userId]);
 
-  const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) => {
+  const toggle = (setter: Dispatch<SetStateAction<Set<string>>>, id: string) => {
     setter((previous) => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);

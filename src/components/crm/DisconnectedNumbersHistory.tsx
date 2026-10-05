@@ -34,7 +34,6 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
   const [saving, setSaving] = useState(false);
 
   const connected = useMemo(() => numbers.filter(isNumberConnected), [numbers]);
-  const disconnected = useMemo(() => numbers.filter((n) => !isNumberConnected(n)), [numbers]);
 
   const load = async () => {
     setLoading(true);
@@ -47,9 +46,9 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, numbers.length]);
 
-  /** Desconectados (ainda no cadastro) + removidos (só restam os fluxos guardados). */
+  /** Removidos antigos: só restam os fluxos guardados. Desconectados ficam na lista principal. */
   const sources = useMemo<HistorySource[]>(() => {
-    const list: HistorySource[] = disconnected.map((n) => ({ id: n.id, label: describeNumber(n), removed: false }));
+    const list: HistorySource[] = [];
     const seen = new Set<string>();
     for (const f of flows) {
       if (f.whatsapp_number_id || !f.archived_from_number_id || seen.has(f.archived_from_number_id)) continue;
@@ -57,7 +56,7 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
       list.push({ id: f.archived_from_number_id, label: f.archived_from_label || "WhatsApp removido", removed: true });
     }
     return list;
-  }, [disconnected, flows]);
+  }, [flows]);
 
   if (sources.length === 0) return null;
 

@@ -20,6 +20,7 @@ DECLARE
   v_owner_id uuid;
   v_phone_id text;
   v_caller_id uuid := auth.uid();
+  v_role text := COALESCE(current_setting('request.jwt.claim.role', true), '');
 BEGIN
   SELECT user_id, meta_phone_number_id
     INTO v_owner_id, v_phone_id
@@ -30,7 +31,8 @@ BEGIN
   IF v_owner_id IS NULL THEN
     RAISE EXCEPTION 'Número de WhatsApp não encontrado';
   END IF;
-  IF p_user_id IS DISTINCT FROM v_owner_id OR v_caller_id IS DISTINCT FROM v_owner_id THEN
+  IF p_user_id IS DISTINCT FROM v_owner_id
+     OR (v_role <> 'service_role' AND v_caller_id IS DISTINCT FROM v_owner_id) THEN
     RAISE EXCEPTION 'Sem permissão para desconectar este número';
   END IF;
 

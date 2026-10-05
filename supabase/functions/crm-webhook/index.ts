@@ -140,7 +140,7 @@ serve(async (req) => {
       const variants = Array.from(new Set([cleanTo,
         cleanTo.startsWith('55') && cleanTo.length === 13 ? cleanTo.slice(0, 4) + cleanTo.slice(5) : cleanTo,
         cleanTo.startsWith('55') && cleanTo.length === 12 ? cleanTo.slice(0, 4) + '9' + cleanTo.slice(4) : cleanTo]))
-      let windowQuery = await supabase.from('crm_contacts')
+      let windowQuery: any = await supabase.from('crm_contacts')
         .select('last_message_received_at, ctwa_opened_at')
         .eq('user_id', ownerId).in('wa_id', variants)
         .order('last_message_received_at', { ascending: false, nullsFirst: false }).limit(1)

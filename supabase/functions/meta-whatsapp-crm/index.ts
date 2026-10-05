@@ -8350,6 +8350,42 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
       return jsonResponse({ success: true, converted });
     }
 
+    if (action === 'retryMedia') {
+      // Baixa de novo o arquivo de uma mensagem que ficou sem mídia, usando o
+      // token da caixa da mensagem (a Meta mantém o arquivo por cerca de 30 dias).
+      const messageId = String(params?.messageId || '');
+      if (!messageId) return jsonResponse({ success: false, error: 'messageId é obrigatório' }, 400);
+      if (!userId) return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
+      const { data: msg } = await supabase.from('crm_messages')
+        .select('id, message_type, metadata, whatsapp_number_id, media_url')
+        .eq('id', messageId).eq('user_id', userId).maybeSingle();
+      if (!msg) return jsonResponse({ success: false, error: 'Mensagem não encontrada' }, 404);
+      if (msg.media_url) return jsonResponse({ success: true, media_url: msg.media_url });
+      const raw = (msg.metadata as any)?.raw || {};
+      const rawType = raw?.type || msg.message_type;
+      const node = raw?.[rawType] || {};
+      if (!node?.id) return jsonResponse({ success: false, error: 'A Meta não enviou o arquivo desta mensagem.' }, 422);
+      let token: string | null = null;
+      if (msg.whatsapp_number_id) {
+        const { data: num } = await supabase.from('crm_whatsapp_numbers')
+          .select('meta_access_token').eq('id', msg.whatsapp_number_id).eq('user_id', userId).maybeSingle();
+        token = num?.meta_access_token || null;
+      }
+      if (!token) {
+        const { data: st } = await supabase.from('crm_settings').select('meta_access_token').eq('user_id', userId).maybeSingle();
+        token = st?.meta_access_token || null;
+      }
+      if (!token) return jsonResponse({ success: false, error: 'WhatsApp desconectado: reconecte para baixar o arquivo.' }, 409);
+      const storageType = rawType === 'voice' ? 'audio' : (rawType === 'ptv' ? 'video' : rawType);
+      const storedUrl = await fetchAndStoreIncomingMedia(supabase, token, node.id, storageType, `retry_${msg.id}_${rawType}`, node?.mime_type, node?.filename);
+      if (!storedUrl) return jsonResponse({ success: false, error: 'A Meta não liberou mais este arquivo (pode ter expirado).' }, 410);
+      await supabase.from('crm_messages').update({
+        media_url: storedUrl,
+        metadata: { ...(msg.metadata as any || {}), media_pending: false, media_unavailable: false },
+      }).eq('id', msg.id).eq('user_id', userId);
+      return jsonResponse({ success: true, media_url: storedUrl });
+    }
+
     if (action === 'clearHistory') {
       const { contactId } = params;
       if (!contactId) throw new Error('contactId is required');

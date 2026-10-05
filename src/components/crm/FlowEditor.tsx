@@ -1092,7 +1092,20 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
                       </div>
                       <Switch 
                         checked={selectedNode.data.anyResponse as boolean}
-                        onCheckedChange={(checked) => updateNodeData(selectedNode.id, { anyResponse: checked })}
+                        onCheckedChange={(checked) => updateNodeData(selectedNode.id, { anyResponse: checked, ...(checked ? { repeatUntilButton: false } : {}) })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-amber-50 rounded-lg border border-amber-100 shadow-sm">
+                      <div className="space-y-0.5">
+                        <Label className="text-[11px] font-bold text-amber-700 flex items-center gap-1">
+                          <RefreshCw className="w-3 h-3" /> Repetir caso não responda nos botões
+                        </Label>
+                        <p className="text-[9px] text-amber-700/70">Se o contato escrever outra coisa, a mesma pergunta com os botões é enviada de novo até ele clicar.</p>
+                      </div>
+                      <Switch
+                        checked={Boolean(selectedNode.data.repeatUntilButton)}
+                        onCheckedChange={(checked) => updateNodeData(selectedNode.id, { repeatUntilButton: checked, ...(checked ? { anyResponse: false } : {}) })}
                       />
                     </div>
 

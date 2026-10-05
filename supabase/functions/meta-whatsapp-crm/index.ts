@@ -2373,7 +2373,10 @@ else if (message.type === "unsupported") {
           || (temporalTypes.has('inactivity_1h') && gapMs >= 60 * 60 * 1000)
           || (temporalTypes.has('inactivity_2h') && gapMs >= 2 * 60 * 60 * 1000)
           || ((temporalTypes.has('after_24h') || temporalTypes.has('24h_inactivity')) && gapMs >= 24 * 60 * 60 * 1000);
-        const dayTriggerMatched = temporalTypes.has('first_message_day') && isNewDay;
+        // "Primeira mensagem do dia" também reenvia o fluxo quando o contato
+        // volta a escrever após 30 minutos sem mandar mensagem (pedido do usuário:
+        // o mesmo fluxo deve ser enviado de novo nesses dois casos).
+        const dayTriggerMatched = temporalTypes.has('first_message_day') && (isNewDay || gapMs >= 30 * 60 * 1000);
         // Entrada nova por anúncio Click-to-WhatsApp também libera o fluxo anterior.
         const adTriggerMatched = temporalTypes.has('ctwa_ad') && isClickToWhatsAppReferral(normalizedAdReferral);
         if (dayTriggerMatched || elapsedTriggerMatched || adTriggerMatched) {
@@ -2776,8 +2779,11 @@ else if (message.type === "unsupported") {
             return isNewContact;
           }
           if (t === 'first_message_day') {
-            console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=first_message_day => matched=${isFirstOfDay}`);
-            return isFirstOfDay;
+            // Dispara na primeira mensagem do dia E sempre que o contato voltar
+            // a escrever após 30 minutos de inatividade — o mesmo fluxo é enviado de novo.
+            const m = isFirstOfDay || inactivityGapMs >= 30 * 60 * 1000;
+            console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=first_message_day firstOfDay=${isFirstOfDay} inactivityMin=${inactivityMinutes} => matched=${m}`);
+            return m;
           }
           if (t === 'after_24h') {
             console.log(`[TRIGGER-EVAL] flow="${flow.name}" type=after_24h matched=${isAfter24h}`);

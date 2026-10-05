@@ -263,6 +263,7 @@ function flowMatchesIncomingTrigger(flow: any, allCandidateTexts: string[]) {
 const AUTOMATIC_TRIGGER_PRIORITY = [
   'exact_phrase',
   'keyword',
+  'ctwa_ad',
   'first_message',
   'new_contact',
   'first_message_day',
@@ -2360,7 +2361,7 @@ else if (message.type === "unsupported") {
           .select('trigger_type')
           .eq('user_id', userId)
           .eq('is_active', true)
-          .in('trigger_type', ['first_message_day', 'after_24h', '24h_inactivity', 'inactivity_30m', 'inactivity_1h', 'inactivity_2h']);
+          .in('trigger_type', ['first_message_day', 'after_24h', '24h_inactivity', 'inactivity_30m', 'inactivity_1h', 'inactivity_2h', 'ctwa_ad']);
         if (inboundNumberId) {
           temporalFlowsQuery = temporalFlowsQuery.or(`whatsapp_number_id.eq.${inboundNumberId},whatsapp_number_id.is.null`);
         }
@@ -2373,7 +2374,9 @@ else if (message.type === "unsupported") {
           || (temporalTypes.has('inactivity_2h') && gapMs >= 2 * 60 * 60 * 1000)
           || ((temporalTypes.has('after_24h') || temporalTypes.has('24h_inactivity')) && gapMs >= 24 * 60 * 60 * 1000);
         const dayTriggerMatched = temporalTypes.has('first_message_day') && isNewDay;
-        if (dayTriggerMatched || elapsedTriggerMatched) {
+        // Entrada nova por anúncio Click-to-WhatsApp também libera o fluxo anterior.
+        const adTriggerMatched = temporalTypes.has('ctwa_ad') && isClickToWhatsAppReferral(normalizedAdReferral);
+        if (dayTriggerMatched || elapsedTriggerMatched || adTriggerMatched) {
           console.log(`[TRIGGER-GUARD] Releasing previous flow for eligible temporal trigger contact=${contact.id} gapMs=${gapMs} newDay=${isNewDay} types=${JSON.stringify([...temporalTypes])}`);
           const releaseQuery = supabase.from('crm_contacts').update({
             current_flow_id: null,
@@ -2755,6 +2758,12 @@ else if (message.type === "unsupported") {
           if (t === 'keyword') {
             const m = flowMatchesIncomingTrigger(flow, allCandidateTexts);
             console.log(`[TRIGGER-AUTO] eval flow="${flow.name}" type=keyword kws=${JSON.stringify(kws)} => matched=${m}`);
+            return m;
+          }
+          if (t === 'ctwa_ad') {
+            // Mensagem recebida com referral de anúncio Click-to-WhatsApp.
+            const m = isClickToWhatsAppReferral(normalizedAdReferral);
+            console.log(`[TRIGGER-EVAL] flow="${flow.name}" type=ctwa_ad matched=${m}`);
             return m;
           }
           if (t === 'first_message') {

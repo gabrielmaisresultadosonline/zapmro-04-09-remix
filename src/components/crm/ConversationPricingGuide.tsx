@@ -59,15 +59,17 @@ export function ConversationPricingGuide() {
               </div>
               <CardTitle className="text-base leading-snug">{row.label}</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-1 flex-col space-y-2 px-5 pb-5">
-              <p className="flex gap-2 text-sm font-semibold leading-relaxed text-foreground">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                {row.freeTier}
-              </p>
-              <p className="flex gap-2 text-sm leading-relaxed text-muted-foreground">
-                <ArrowRightLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                {row.paidTier}
-              </p>
+            <CardContent className="flex flex-1 flex-col px-5 pb-5">
+              <div className="space-y-2">
+                <p className="flex gap-2 text-sm font-semibold leading-relaxed text-foreground">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                  {row.freeTier}
+                </p>
+                <p className="flex gap-2 text-sm leading-relaxed text-muted-foreground">
+                  <ArrowRightLeft className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  {row.paidTier}
+                </p>
+              </div>
               <p className="mt-auto border-t border-border pt-2 text-xs leading-relaxed text-muted-foreground">{row.note}</p>
             </CardContent>
           </Card>

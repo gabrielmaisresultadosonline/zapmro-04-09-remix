@@ -7701,8 +7701,17 @@ const CRM = () => {
                                               <div className="flex items-start gap-2">
                                                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                                                 <div>
-                                                  <p className="font-medium text-foreground">Arquivo não disponível nesta conversa</p>
-                                                  <p className="mt-0.5">O WhatsApp informou uma mensagem de {m.message_type === 'image' ? 'imagem' : m.message_type === 'video' ? 'vídeo' : m.message_type === 'document' ? 'documento' : m.message_type === 'sticker' ? 'figurinha' : 'áudio'}, mas não liberou o arquivo para carregamento.</p>
+                                                  {(m as any)?.metadata?.media_pending ? (
+                                                    <>
+                                                      <p className="font-medium text-foreground">Carregando arquivo grande…</p>
+                                                      <p className="mt-0.5">O arquivo está sendo baixado do WhatsApp e aparecerá aqui em instantes.</p>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <p className="font-medium text-foreground">Arquivo não disponível nesta conversa</p>
+                                                      <p className="mt-0.5">O WhatsApp informou uma mensagem de {m.message_type === 'image' ? 'imagem' : m.message_type === 'video' ? 'vídeo' : m.message_type === 'document' ? 'documento' : m.message_type === 'sticker' ? 'figurinha' : 'áudio'}, mas não liberou o arquivo para carregamento.</p>
+                                                    </>
+                                                  )}
                                                 </div>
                                               </div>
                                             </div>

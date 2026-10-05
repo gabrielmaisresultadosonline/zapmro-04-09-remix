@@ -7379,6 +7379,20 @@ async function fetchAndStoreIncomingMedia(
             currentNode.type === 'question' ||
             currentNode.type === 'followup';
 
+          // "Repetir caso não responda nos botões": resposta fora dos botões
+          // reenvia a mesma pergunta e mantém o contato parado neste bloco.
+          if (!nextEdge && currentNode.type === 'question' && currentNode.data?.repeatUntilButton === true
+              && Array.isArray(currentNode.data?.buttons) && currentNode.data.buttons.length > 0) {
+            console.log(`[FLOW-LOG] Resposta fora dos botões no nó ${currentNode.id}; repetindo a pergunta.`);
+            await supabase.from('crm_contacts').update({
+              current_node_id: currentNode.id,
+              last_flow_interaction: new Date().toISOString(),
+              flow_state: 'running',
+            }).eq('id', contactId);
+            const repeatRes = await executeVisualNode(supabase, flow, currentNode, contactId, waId);
+            return jsonResponse({ ...(repeatRes || {}), repeated_question: true });
+          }
+
           if (!nextEdge) {
             if (isWaitLikeNode) {
               // Só segue se o handle "responded"/"any_response" estiver conectado

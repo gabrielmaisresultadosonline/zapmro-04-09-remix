@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, History, Loader2, Workflow } from "lucide-react";
+import { Copy, History, Loader2, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import {
   describeNumber,
   fetchUserFlows,
   isNumberConnected,
-  transferFlowsToNumber,
+  copyFlowsToNumber,
   type SavedFlowSummary,
   type WhatsAppNumberRecord,
 } from "@/lib/whatsappNumbers";
@@ -81,13 +81,13 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
   const confirm = async () => {
     if (!source || !targetId) return;
     setSaving(true);
-    const result = await transferFlowsToNumber(userId, [...selected], targetId);
+    const result = await copyFlowsToNumber(userId, [...selected], targetId);
     setSaving(false);
     if (!result.success) {
-      toast.error(result.error || "Não foi possível transferir os fluxos");
+      toast.error(result.error || "Não foi possível copiar os fluxos");
       return;
     }
-    toast.success(`${result.count} fluxo(s) transferido(s)`);
+    toast.success(`${result.count} fluxo(s) copiado(s)`);
     setSource(null);
     void load();
   };
@@ -122,8 +122,8 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
                   title={connected.length === 0 ? "Conecte um número para receber os fluxos" : undefined}
                   className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-semibold flex items-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <ArrowRightLeft className="w-4 h-4" />
-                  Transferir fluxos
+                   <Copy className="w-4 h-4" />
+                   Copiar fluxos
                 </button>
               </div>
             );
@@ -134,8 +134,8 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
       {source && (
         <div className="fixed inset-0 z-[200] bg-black/70 flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-[#202c33] rounded-2xl border border-white/10 p-6">
-            <h2 className="text-white font-bold text-lg mb-1">Transferir fluxos</h2>
-            <p className="text-white/50 text-xs mb-4">De: {source.label}{source.removed ? ". Os fluxos chegam desligados; ligue-os depois de conferir." : ""}</p>
+             <h2 className="text-white font-bold text-lg mb-1">Copiar fluxos</h2>
+             <p className="text-white/50 text-xs mb-4">De: {source.label}. Os originais permanecem guardados e as cópias chegam desligadas.</p>
 
             <div className="max-h-56 overflow-y-auto space-y-1 mb-4">
               {flowsOf(source.id).map((flow) => (
@@ -170,7 +170,7 @@ export function DisconnectedNumbersHistory({ userId, numbers }: DisconnectedNumb
                 className="flex-1 h-10 rounded-lg bg-[#00a884] hover:bg-[#02916f] text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                Transferir {selected.size > 0 ? `(${selected.size})` : ""}
+                 Copiar {selected.size > 0 ? `(${selected.size})` : ""}
               </button>
             </div>
           </div>

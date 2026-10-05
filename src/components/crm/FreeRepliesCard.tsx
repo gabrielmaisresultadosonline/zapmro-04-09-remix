@@ -56,7 +56,7 @@ export function FreeRepliesCard({ used, onHelp }: FreeRepliesCardProps) {
           <div className={cn('h-full transition-all duration-1000', exhausted ? 'bg-red-500' : 'bg-sky-500')} style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-2 text-[11px] text-white/50">
-          {safeUsed.toLocaleString('pt-BR')} usada(s) pela API oficial. Respostas pelo celular não contam.
+          {safeUsed.toLocaleString('pt-BR')} usada(s) pela API oficial. Respostas pelo celular e na janela de anúncio (72h) não contam.
         </p>
         {extra > 0 && (
           <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-200">

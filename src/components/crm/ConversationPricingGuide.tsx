@@ -1,4 +1,4 @@
-import { ArrowRightLeft, CheckCircle2, CircleDollarSign, Info, Lightbulb, Smartphone } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, CircleDollarSign, Info, Lightbulb, Megaphone, Smartphone } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -82,6 +82,19 @@ export function ConversationPricingGuide() {
           A franquia é contada <b className="text-foreground">por número e por mês</b>: cada WhatsApp conectado tem
           suas 1.000 mensagens gratuitas e o contador recomeça no início de cada mês.
         </p>
+      </div>
+
+      <div className="flex gap-3 rounded-lg border border-primary/30 bg-primary/10 p-4">
+        <Megaphone className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-foreground">Cliente que veio de anúncio: 72 horas sem cobrança</p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Se a pessoa vier de um anúncio Click-to-WhatsApp e iniciar a conversa pelo anúncio, você pode ter uma janela
+            de 72 horas em que as mensagens enviadas pela sua empresa continuam sem cobrança da Meta. Isso é separado das
+            1.000 mensagens de serviço gratuitas mensais: a janela de anúncio <b className="text-foreground">não consome</b>{" "}
+            as 1.000 mensagens, e o painel do CRM não diminui o contador por essas respostas.
+          </p>
+        </div>
       </div>
 
       <div className="rounded-lg border border-primary/30 bg-primary/10 p-5 md:p-6">

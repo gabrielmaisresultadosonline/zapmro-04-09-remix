@@ -206,6 +206,19 @@ export interface SavedFlowSummary {
   archived_from_label: string | null;
 }
 
+export interface SavedTemplateSummary {
+  id: string;
+  name: string;
+  category: string | null;
+  language: string | null;
+  status: string | null;
+  components: unknown[];
+  is_pix: boolean;
+  pix_code: string | null;
+  is_carousel: boolean;
+  whatsapp_number_id: string | null;
+}
+
 /** Lista os fluxos salvos do cadastro (com o número dono de cada um). */
 export async function fetchUserFlows(userId: string): Promise<SavedFlowSummary[]> {
   const { data, error } = await supabase
@@ -218,6 +231,55 @@ export async function fetchUserFlows(userId: string): Promise<SavedFlowSummary[]
     return [];
   }
   return (data || []) as unknown as SavedFlowSummary[];
+}
+
+export async function fetchUserTemplates(userId: string): Promise<SavedTemplateSummary[]> {
+  const { data, error } = await supabase
+    .from("crm_templates" as any)
+    .select("id, name, category, language, status, components, is_pix, pix_code, is_carousel, whatsapp_number_id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.warn("[whatsappNumbers] falha ao listar templates:", error.message);
+    return [];
+  }
+  return (data || []) as unknown as SavedTemplateSummary[];
+}
+
+export async function copyFlowsToNumber(
+  userId: string,
+  flowIds: string[],
+  targetNumberId: string,
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const { data, error } = await (supabase as any).rpc("crm_copy_flows_to_number", {
+    p_user_id: userId,
+    p_flow_ids: flowIds,
+    p_target_number_id: targetNumberId,
+  });
+  if (error) return { success: false, count: 0, error: error.message };
+  return { success: true, count: Number(data?.copied ?? 0) };
+}
+
+export async function disconnectNumber(
+  userId: string,
+  numberId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await (supabase as any).rpc("crm_disconnect_whatsapp_number", {
+    p_number_id: numberId,
+    p_user_id: userId,
+  });
+  return { success: !error, error: error?.message };
+}
+
+export async function deleteNumberPermanently(
+  userId: string,
+  numberId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const { error } = await (supabase as any).rpc("crm_delete_whatsapp_number", {
+    p_number_id: numberId,
+    p_user_id: userId,
+  });
+  return { success: !error, error: error?.message };
 }
 
 /**

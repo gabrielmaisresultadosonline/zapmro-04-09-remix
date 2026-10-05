@@ -1865,7 +1865,7 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose }) =
                     <SelectContent>
                       <SelectItem value="manual">🔘 Apenas Manual</SelectItem>
                       <SelectItem value="first_message">👋 Primeira mensagem do contato</SelectItem>
-                      <SelectItem value="ctwa_ad">📣 Veio de anúncio (Click-to-WhatsApp)</SelectItem>
+                      <SelectItem value="ctwa_ad">📣 Anúncio WhatsApp</SelectItem>
                       <SelectItem value="first_message_day">☀️ Primeira mensagem do dia</SelectItem>
                       <SelectItem value="inactivity_30m">⏱️ 1ª mensagem após 30 minutos inativo</SelectItem>
                       <SelectItem value="inactivity_1h">🕐 1ª mensagem após 1 hora inativo</SelectItem>

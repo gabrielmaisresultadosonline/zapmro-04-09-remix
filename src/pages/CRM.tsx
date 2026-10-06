@@ -527,6 +527,16 @@ const CRM = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
+  // Proteção contra tela de carregamento infinita (internet instável, sessão
+  // expirada ou requisição travada): após 12s mostramos opções de saída e,
+  // após 30s, liberamos a tela mesmo sem todos os dados.
+  const [loadingSlow, setLoadingSlow] = useState(false);
+  useEffect(() => {
+    if (!loading) { setLoadingSlow(false); return; }
+    const slow = window.setTimeout(() => setLoadingSlow(true), 12000);
+    const hard = window.setTimeout(() => setLoading(false), 30000);
+    return () => { window.clearTimeout(slow); window.clearTimeout(hard); };
+  }, [loading]);
   const [saving, setSaving] = useState(false);
   /**
    * Resultado da checagem da chave da OpenAI. Sem isto, uma chave errada só
@@ -5680,6 +5690,45 @@ const CRM = () => {
             <p className="text-white/40 text-xs uppercase tracking-widest font-medium">
               Carregando conexões oficiais da Meta
             </p>
+            {loadingSlow && (
+              <div className="pt-4 space-y-3 max-w-xs mx-auto">
+                <p className="text-white/70 text-sm">
+                  {typeof navigator !== 'undefined' && navigator.onLine === false
+                    ? 'Sem internet no momento. Verifique sua conexão.'
+                    : 'Está demorando mais que o normal.'}
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="rounded-md bg-[#00a884] hover:bg-[#019072] text-white text-sm font-semibold py-2"
+                  >
+                    Tentar novamente
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoading(false)}
+                    className="rounded-md border border-white/20 text-white/80 hover:bg-white/5 text-sm py-2"
+                  >
+                    Abrir mesmo assim
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        localStorage.removeItem('crm_access_status');
+                        await supabase.auth.signOut({ scope: 'local' });
+                      } finally {
+                        window.location.href = '/crm/login';
+                      }
+                    }}
+                    className="text-white/50 hover:text-white/80 text-xs pt-1"
+                  >
+                    Sair e entrar de novo
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

@@ -145,8 +145,8 @@ if [ -z "$NUMEROS" ]; then
        from public.crm_whatsapp_numbers n
       order by n.is_active desc, n.is_primary desc, n.created_at;"
 else
-  q "\set alvo '$ALVO'
-    \set alvo_uuid '$ALVO_UUID'
+  q "
+    
     select coalesce(u.email,'(sem e-mail)') as cadastro,
            coalesce(n.label,'(sem nome)') as caixa,
            coalesce(n.meta_display_phone_number,'-') as telefone,
@@ -164,7 +164,7 @@ MATCH_SELECTED="n.id::text = any(string_to_array('$SELECTED_IDS', ','))"
 
 titulo "3) Agente, fluxos e recebimento"
 if [ -n "$NUMEROS" ]; then
-  q "\set ids '$SELECTED_IDS'
+  q "
     select coalesce(u.email,'(sem e-mail)') as cadastro,
            s.ai_agent_enabled as agente_geral,
            s.ai_agent_trigger as gatilho_agente,
@@ -183,7 +183,7 @@ if [ -n "$NUMEROS" ]; then
      where $MATCH_SELECTED;"
 fi
 
-q "\set alvo '$ALVO'
+q "
   select coalesce(u.email,'(sem e-mail)') as cadastro,
          c.wa_id as contato, coalesce(c.name,'(sem nome)') as nome,
          coalesce(n.meta_display_phone_number,'(caixa antiga/sem vínculo)') as caixa,
@@ -199,7 +199,7 @@ q "\set alvo '$ALVO'
 
 titulo "4) Últimos registros (sem mostrar conteúdo)"
 if [ -n "$NUMEROS" ]; then
-  q "\set ids '$SELECTED_IDS'
+  q "
     select m.direction, m.message_type, m.status,
            case when m.media_url is not null then 'SIM' else 'NAO' end as tem_midia,
            case when m.error_code is not null or m.error_message is not null
@@ -211,7 +211,7 @@ if [ -n "$NUMEROS" ]; then
      where $MATCH_SELECTED
      order by m.created_at desc limit 20;"
 else
-  q "\set alvo '$ALVO'
+  q "
     select m.direction, m.message_type, m.status,
            case when m.media_url is not null then 'SIM' else 'NAO' end as tem_midia,
            case when m.error_code is not null or m.error_message is not null

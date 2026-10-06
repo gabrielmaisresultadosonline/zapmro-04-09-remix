@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { getActiveWhatsAppNumberId, activeNumberPatch } from "@/lib/activeNumberContext";
+import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings } from "@/lib/numberSettings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -495,10 +496,17 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   };
 
   const fetchCountdownSettings = async () => {
-    const { data: settings } = await supabase
+    const { data: baseSettings } = await supabase
       .from('crm_settings')
       .select('*')
       .maybeSingle();
+
+    // A Automação de Janela (24h) é de cada número: a configuração do número
+    // aberto sobrepõe a do cadastro e nunca vaza para os outros números.
+    const numberId = getActiveWhatsAppNumberId();
+    const settings: any = numberId
+      ? overlayNumberSettings((baseSettings || {}) as Record<string, unknown>, await fetchNumberSettings(numberId))
+      : baseSettings;
 
     if (settings) {
       setCountdownEnabled(settings.countdown_trigger_enabled || false);
@@ -507,8 +515,8 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
       setCountdownContent(settings.countdown_trigger_content || '');
       setCountdownTemplate(settings.countdown_trigger_template_id || '');
       setCountdownFlow(settings.countdown_trigger_flow_id || '');
-      setCountdownStatusFilter(Array.isArray((settings as any).countdown_trigger_status_filter) ? (settings as any).countdown_trigger_status_filter : []);
-      setCountdownScope(((settings as any).countdown_trigger_scope === 'once' ? 'once' : 'always'));
+      setCountdownStatusFilter(Array.isArray(settings.countdown_trigger_status_filter) ? settings.countdown_trigger_status_filter : []);
+      setCountdownScope(settings.countdown_trigger_scope === 'once' ? 'once' : 'always');
     }
   };
 
@@ -573,19 +581,28 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   const handleSaveCountdown = async () => {
     setSavingCountdown(true);
     try {
-      const { error } = await supabase
-        .from('crm_settings')
-        .update({
-          countdown_trigger_enabled: countdownEnabled,
-          countdown_trigger_threshold_minutes: countdownThreshold,
-          countdown_trigger_message_type: countdownType,
-          countdown_trigger_content: countdownContent,
-          countdown_trigger_template_id: countdownTemplate,
-          countdown_trigger_flow_id: countdownFlow || null,
-          countdown_trigger_status_filter: countdownStatusFilter,
-          countdown_trigger_scope: countdownScope,
-        } as any)
-        .eq('user_id', (await supabase.auth.getUser()).data.user?.id);
+      const patch = {
+        countdown_trigger_enabled: countdownEnabled,
+        countdown_trigger_threshold_minutes: countdownThreshold,
+        countdown_trigger_message_type: countdownType,
+        countdown_trigger_content: countdownContent,
+        countdown_trigger_template_id: countdownTemplate || null,
+        countdown_trigger_flow_id: countdownFlow || null,
+        countdown_trigger_status_filter: countdownStatusFilter,
+        countdown_trigger_scope: countdownScope,
+      };
+      const numberId = getActiveWhatsAppNumberId();
+      let error: { message: string } | null = null;
+      if (numberId) {
+        // Salva só no número aberto; os outros números do cadastro não mudam.
+        await saveNumberSettings(numberId, patch);
+      } else {
+        const result = await supabase
+          .from('crm_settings')
+          .update(patch as any)
+          .eq('user_id', (await supabase.auth.getUser()).data.user?.id);
+        error = result.error;
+      }
 
       if (error) throw error;
       toast({ title: "Configuração de 24h salva!" });

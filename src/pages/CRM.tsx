@@ -5792,6 +5792,7 @@ const CRM = () => {
     if (!currentUserId) return;
     persistActiveNumberId(currentUserId, null);
     activeNumberIdRef.current = null;
+    setReadOnlyNumber(false);
     numberScopeVersionRef.current += 1;
     setRealtimeStatus('connecting');
     setActiveWhatsAppNumberId(null);
@@ -5817,7 +5818,7 @@ const CRM = () => {
     !loading &&
     multiNumberEnabled &&
     currentUserId &&
-    (forceNumberSelector || !activeNumberId || (!isWhatsAppConnected && hasSavedNumbers))
+    (forceNumberSelector || !activeNumberId || (!isWhatsAppConnected && hasSavedNumbers && !readOnlyNumber))
   ) {
     return (
       <WhatsAppNumberSelector
@@ -5856,7 +5857,7 @@ const CRM = () => {
       />
     );
   }
-  if (!loading && !isWhatsAppConnected) {
+  if (!loading && !isWhatsAppConnected && !readOnlyNumber) {
     return (
       <div className="min-h-screen w-full flex flex-col lg:flex-row items-center justify-center gap-6 bg-gradient-to-br from-[#0c1317] via-[#111b21] to-[#0c1317] p-6">
         <div className="max-w-xl w-full bg-[#202c33] rounded-2xl shadow-2xl border border-white/5 p-8 text-center order-2 lg:order-1">

@@ -643,6 +643,8 @@ const CRM = () => {
     vps_status: 'unknown' as 'unknown' | 'online' | 'offline'
   });
   const [whatsAppConnectionConfirmed, setWhatsAppConnectionConfirmed] = useState(false);
+  // Número desconectado aberto só para consulta: vê as conversas, sem enviar nada.
+  const [readOnlyNumber, setReadOnlyNumber] = useState(false);
 
   // ---- Flow shortcut bar preferences (persisted in localStorage per profile) ----
   const FLOW_BAR_PREFS_KEY = 'crm_flow_bar_prefs_v1';
@@ -3638,6 +3640,7 @@ const CRM = () => {
   };
 
   const handleSendMessage = async () => {
+    if (readOnlyNumber) return;
     if (!newMessage.trim() || !selectedContact) return;
 
     const isColdList = isConversationExpired(selectedContact);
@@ -5789,6 +5792,7 @@ const CRM = () => {
     if (!currentUserId) return;
     persistActiveNumberId(currentUserId, null);
     activeNumberIdRef.current = null;
+    setReadOnlyNumber(false);
     numberScopeVersionRef.current += 1;
     setRealtimeStatus('connecting');
     setActiveWhatsAppNumberId(null);
@@ -5814,7 +5818,7 @@ const CRM = () => {
     !loading &&
     multiNumberEnabled &&
     currentUserId &&
-    (forceNumberSelector || !activeNumberId || (!isWhatsAppConnected && hasSavedNumbers))
+    (forceNumberSelector || !activeNumberId || (!isWhatsAppConnected && hasSavedNumbers && !readOnlyNumber))
   ) {
     return (
       <WhatsAppNumberSelector
@@ -5822,6 +5826,8 @@ const CRM = () => {
         maxNumbers={maxWhatsAppNumbers}
         onSelected={(record: WhatsAppNumberRecord) => {
           // Fixa o escopo ANTES de qualquer consulta para não misturar caixas.
+          const recordConnected = !!(record.meta_access_token && record.meta_phone_number_id);
+          setReadOnlyNumber(!recordConnected);
           activeNumberIdRef.current = record.id;
           numberScopeVersionRef.current += 1;
           setRealtimeStatus('connecting');
@@ -5853,7 +5859,7 @@ const CRM = () => {
       />
     );
   }
-  if (!loading && !isWhatsAppConnected) {
+  if (!loading && !isWhatsAppConnected && !readOnlyNumber) {
     return (
       <div className="min-h-screen w-full flex flex-col lg:flex-row items-center justify-center gap-6 bg-gradient-to-br from-[#0c1317] via-[#111b21] to-[#0c1317] p-6">
         <div className="max-w-xl w-full bg-[#202c33] rounded-2xl shadow-2xl border border-white/5 p-8 text-center order-2 lg:order-1">
@@ -7999,7 +8005,23 @@ const CRM = () => {
                           </ScrollArea>
                           
                           <div className="p-1 sm:p-2 bg-[#f0f2f5] dark:bg-[#202c33] border-t shadow-lg z-10 space-y-1 sm:space-y-2 shrink-0 w-full min-w-0 overflow-hidden">
-                            {selectedContact ? (
+                            {selectedContact && readOnlyNumber ? (
+                              <div className="max-w-5xl mx-auto w-full px-2 pb-2">
+                                <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-center">
+                                  <p className="text-[11px] sm:text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                    Este WhatsApp está desconectado. Você está apenas vendo as conversas — não é possível enviar mensagens.
+                                  </p>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleSwitchNumber}
+                                    className="h-8 px-3 shrink-0 text-xs"
+                                  >
+                                    Trocar WhatsApp
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : selectedContact ? (
                               <>
                                   {isPreviewingAudio && recordedAudioUrl ? (
                                    <div className="flex flex-col gap-2 p-2 bg-primary/5 rounded-xl border border-primary/20 animate-in fade-in slide-in-from-bottom-2 shrink-0">

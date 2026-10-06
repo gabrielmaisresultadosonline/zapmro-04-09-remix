@@ -643,6 +643,8 @@ const CRM = () => {
     vps_status: 'unknown' as 'unknown' | 'online' | 'offline'
   });
   const [whatsAppConnectionConfirmed, setWhatsAppConnectionConfirmed] = useState(false);
+  // Número desconectado aberto só para consulta: vê as conversas, sem enviar nada.
+  const [readOnlyNumber, setReadOnlyNumber] = useState(false);
 
   // ---- Flow shortcut bar preferences (persisted in localStorage per profile) ----
   const FLOW_BAR_PREFS_KEY = 'crm_flow_bar_prefs_v1';
@@ -3638,6 +3640,7 @@ const CRM = () => {
   };
 
   const handleSendMessage = async () => {
+    if (readOnlyNumber) return;
     if (!newMessage.trim() || !selectedContact) return;
 
     const isColdList = isConversationExpired(selectedContact);

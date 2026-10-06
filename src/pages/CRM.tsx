@@ -386,7 +386,12 @@ const getMetaDeliveryErrorMessage = (message: any) => {
   if (code === '131026' || /message undeliverable/i.test(raw)) {
     return 'Mensagem não entregue (erro 131026 da Meta).';
   }
-  if (/business account locked|not been verified|business.*verification|verifica(c|ç)/i.test(raw)) {
+  // 131031 = conta/destino bloqueado pela Meta (restrição de política ou dados
+  // que não conferem). Não é necessariamente falta de verificação do negócio.
+  if (code === '131031' || /business account locked/i.test(raw)) {
+    return 'A Meta recusou este envio (erro 131031 – conta bloqueada). Isso vem da Meta, não do CRM: pode ser restrição na conta do WhatsApp ou neste contato. Veja o WhatsApp Manager e teste enviando para outro número.';
+  }
+  if (/not been verified|business.*verification/i.test(raw)) {
     return 'A Meta bloqueou o envio porque o seu Negócio (Business Manager) ainda não foi verificado. Você consegue receber mensagens, mas não enviar até concluir a verificação.';
   }
   if (/media upload error/i.test(raw)) {

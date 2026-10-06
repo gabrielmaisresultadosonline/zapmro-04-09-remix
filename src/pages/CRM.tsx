@@ -9035,7 +9035,7 @@ const CRM = () => {
             )}
 
             {activeTab === 'broadcast' && (
-              <Broadcaster 
+              <Broadcaster key={activeNumberId || "default"} 
                 templates={templates} 
                 flows={flows} 
                 contacts={contacts} 

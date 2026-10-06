@@ -3060,7 +3060,7 @@ async function processCountdownTriggers(supabase: any) {
 
       console.log(`[COUNTDOWN] Sending trigger to ${contact.wa_id}`);
 
-      const payload: any = { to: contact.wa_id };
+      const payload: any = { to: contact.wa_id, whatsapp_number_id: countdownBoxId || contact.whatsapp_number_id || undefined };
       if (settings.countdown_trigger_message_type === 'message') {
         payload.text = settings.countdown_trigger_content;
       } else if (settings.countdown_trigger_message_type === 'template') {

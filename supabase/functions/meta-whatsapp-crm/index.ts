@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { expandSettingsPerNumber, mergeNumberSettings, loadNumberSettings } from '../_shared/number-settings.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
@@ -860,18 +861,20 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   if (boxId) {
     const { data: boxRow, error: boxErr } = await supabase
       .from('crm_whatsapp_numbers')
-      .select('id, meta_phone_number_id, meta_access_token, meta_waba_id, meta_display_phone_number, is_active')
+      .select('id, meta_phone_number_id, meta_access_token, meta_waba_id, meta_display_phone_number, is_active, number_settings')
       .eq('id', boxId)
       .maybeSingle();
     if (boxErr) console.error('[AI-AGENT] Falha ao carregar credenciais da caixa', boxId, boxErr.message);
     if (boxRow?.meta_phone_number_id && boxRow?.meta_access_token) {
-      aiSettings = applyNumberToSettings(baseSettings, boxRow);
+      aiSettings = applyNumberToSettings(mergeNumberSettings(baseSettings, boxRow.number_settings), boxRow);
       aiLog('credentials_resolved', {
         source: 'crm_whatsapp_numbers',
         phone_number_id: boxRow.meta_phone_number_id,
         display: boxRow.meta_display_phone_number || null,
       });
     } else {
+      // Automações continuam sendo da caixa mesmo sem credenciais.
+      if (boxRow) aiSettings = mergeNumberSettings(baseSettings, boxRow.number_settings);
       aiLog('credentials_fallback_settings', {
         reason: boxRow ? 'box_without_credentials' : 'box_not_found',
         has_settings_credentials: Boolean(baseSettings?.meta_phone_number_id && baseSettings?.meta_access_token),
@@ -2301,7 +2304,8 @@ else if (message.type === "unsupported") {
     if (loadedSettingsError) {
       console.error('[WEBHOOK] Failed to load crm_settings for AI check', loadedSettingsError.message);
     }
-    webhookSettings = loadedSettings || null;
+    // Automações são por número: a caixa do contato decide se a I.A. está ligada.
+    webhookSettings = await loadNumberSettings(supabase, loadedSettings || null, contact?.whatsapp_number_id || null);
   } catch (settingsErr) {
     console.error('[WEBHOOK] Unexpected error loading crm_settings', settingsErr);
   }
@@ -2964,8 +2968,7 @@ async function processCountdownTriggers(supabase: any) {
 
   const { data: activeSettings, error: settingsError } = await supabase
     .from('crm_settings')
-    .select('*')
-    .eq('countdown_trigger_enabled', true);
+    .select('*');
 
   if (settingsError) {
     console.error('[COUNTDOWN] Failed to load active settings:', settingsError.message);
@@ -2977,9 +2980,12 @@ async function processCountdownTriggers(supabase: any) {
     return summary;
   }
 
-  summary.activeSettings = activeSettings.length;
+  // Uma unidade por número conectado; cada caixa liga/desliga o seu gatilho.
+  const countdownUnits = (await expandSettingsPerNumber(supabase, activeSettings))
+    .filter((u) => u.settings.countdown_trigger_enabled === true);
+  summary.activeSettings = countdownUnits.length;
 
-  for (const settings of activeSettings) {
+  for (const { settings, boxId: countdownBoxId } of countdownUnits) {
     const thresholdMinutes = Number(settings.countdown_trigger_threshold_minutes) || 60;
     const now = new Date();
     const windowLimitDate = new Date(now.getTime() - (24 * 60 * 60 * 1000));
@@ -2992,6 +2998,7 @@ async function processCountdownTriggers(supabase: any) {
       .gt('last_message_received_at', windowLimitDate.toISOString())
       .lt('last_message_received_at', triggerThresholdDate.toISOString())
       .is('countdown_trigger_sent_at', null);
+    if (countdownBoxId) contactsQuery = contactsQuery.eq('whatsapp_number_id', countdownBoxId);
 
     const statusFilter: string[] = Array.isArray(settings.countdown_trigger_status_filter)
       ? settings.countdown_trigger_status_filter
@@ -3053,7 +3060,7 @@ async function processCountdownTriggers(supabase: any) {
 
       console.log(`[COUNTDOWN] Sending trigger to ${contact.wa_id}`);
 
-      const payload: any = { to: contact.wa_id };
+      const payload: any = { to: contact.wa_id, whatsapp_number_id: countdownBoxId || contact.whatsapp_number_id || undefined };
       if (settings.countdown_trigger_message_type === 'message') {
         payload.text = settings.countdown_trigger_content;
       } else if (settings.countdown_trigger_message_type === 'template') {
@@ -3154,9 +3161,7 @@ async function processAiRecoveryForAllUsers(supabase: any, onlyUserId?: string |
 
   let settingsQuery = supabase
     .from('crm_settings')
-    .select('user_id, openai_api_key, meta_phone_number_id, meta_access_token, vps_transcoder_url, ai_agent_enabled, ai_recovery_enabled, ai_recovery_delay_minutes, ai_recovery_max_attempts, ai_recovery_finalized_status, ai_recovery_scope, business_description, ai_system_prompt')
-    .eq('ai_agent_enabled', true)
-    .eq('ai_recovery_enabled', true);
+    .select('user_id, openai_api_key, meta_phone_number_id, meta_access_token, vps_transcoder_url, ai_agent_enabled, ai_recovery_enabled, ai_recovery_delay_minutes, ai_recovery_max_attempts, ai_recovery_finalized_status, ai_recovery_scope, business_description, ai_system_prompt');
 
   if (onlyUserId) settingsQuery = settingsQuery.eq('user_id', onlyUserId);
 
@@ -3167,7 +3172,12 @@ async function processAiRecoveryForAllUsers(supabase: any, onlyUserId?: string |
     return summary;
   }
 
-  for (const settings of settingsRows || []) {
+  // Cada número tem seu próprio Recuperador: só roda na caixa em que foi ligado,
+  // envia pelo próprio número e só avalia contatos daquela caixa.
+  const recoveryUnits = (await expandSettingsPerNumber(supabase, settingsRows || []))
+    .filter((u) => u.settings.ai_agent_enabled === true && u.settings.ai_recovery_enabled === true);
+
+  for (const { settings, boxId: recoveryBoxId } of recoveryUnits) {
     const apiKey = settings.openai_api_key || Deno.env.get('OPENAI_API_KEY');
     if (!apiKey || !settings.meta_phone_number_id || !settings.meta_access_token) continue;
 
@@ -3187,7 +3197,7 @@ async function processAiRecoveryForAllUsers(supabase: any, onlyUserId?: string |
     // Janela de atendimento do WhatsApp (24h desde a ultima mensagem recebida).
     const windowStartIso = new Date(now - 23.5 * 60 * 60 * 1000).toISOString();
 
-    const { data: contacts } = await supabase
+    let recoveryContactsQuery = supabase
       .from('crm_contacts')
       .select('*')
       .eq('user_id', settings.user_id)
@@ -3195,6 +3205,8 @@ async function processAiRecoveryForAllUsers(supabase: any, onlyUserId?: string |
       .lt('last_message_received_at', cutoffIso)
       .gt('last_message_received_at', windowStartIso)
       .limit(40);
+    if (recoveryBoxId) recoveryContactsQuery = recoveryContactsQuery.eq('whatsapp_number_id', recoveryBoxId);
+    const { data: contacts } = await recoveryContactsQuery;
 
     for (const contact of contacts || []) {
       try {
@@ -3309,7 +3321,7 @@ ${conversation}`;
           supabase,
           settings.meta_phone_number_id,
           settings.meta_access_token,
-          { to: contact.wa_id, text: recoveryText, metadata: { ai_recovery: true } },
+          { to: contact.wa_id, text: recoveryText, whatsapp_number_id: recoveryBoxId, metadata: { ai_recovery: true } },
           contact,
           settings.vps_transcoder_url,
           settings.user_id,

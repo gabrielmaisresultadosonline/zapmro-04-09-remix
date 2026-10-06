@@ -1,4 +1,5 @@
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
+import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
@@ -2679,6 +2680,11 @@ const CRM = () => {
          console.info('[CRM] Configurações recebidas são anteriores ao último salvamento; ignoradas para não sobrescrever o que foi salvo.');
        }
        if (settingsData && !settingsStale) {
+         // Automações (I.A., Recuperador, gatilhos) são do número aberto.
+         const openNumberId = getActiveWhatsAppNumberId();
+         if (openNumberId) {
+           settingsData = overlayNumberSettings(settingsData, await fetchNumberSettings(openNumberId));
+         }
          const loadedKey = String(settingsData.openai_api_key || '').trim();
          const draftKey = openAiKeyDraftRef.current;
          // Se o usuário está editando a chave, o rascunho vence o valor do banco.
@@ -2943,7 +2949,16 @@ const CRM = () => {
          settingsToSave.webhook_identifier = Math.random().toString(36).substring(2, 15);
        }
 
-       const { error } = await supabase.from('crm_settings').upsert(settingsToSave, { onConflict: 'user_id' });
+       // Cadastro com números: automações vão para o número aberto e não
+       // alteram os outros números do mesmo cadastro.
+       const openNumberId = getActiveWhatsAppNumberId();
+       let cadastroPayload: Record<string, any> = settingsToSave;
+       if (openNumberId) {
+         const { perNumber, shared } = splitNumberSettings(settingsToSave);
+         await saveNumberSettings(openNumberId, perNumber);
+         cadastroPayload = shared;
+       }
+       const { error } = await supabase.from('crm_settings').upsert(cadastroPayload as any, { onConflict: 'user_id' });
        
        if (error) throw error;
 

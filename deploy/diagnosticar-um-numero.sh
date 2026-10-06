@@ -62,9 +62,10 @@ if [ "$(q1 'select 1')" != "1" ]; then
   exit 2
 fi
 
-# O argumento contém apenas dígitos; ainda assim usamos uma variável do psql
-# para evitar interpolar entrada livre nas consultas.
-MATCH_NUMBER="regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g') = :'alvo' OR regexp_replace(coalesce(n.meta_phone_number_id,''), '[^0-9]', '', 'g') = :'alvo' OR n.id::text = :'alvo_uuid'"
+# ALVO só tem dígitos e ALVO_UUID só hex/hífen (filtrados acima), então podem
+# entrar direto no SQL. Variáveis do psql (:'x') NÃO funcionam com -c, e era
+# por isso que nenhuma caixa era encontrada.
+MATCH_NUMBER="regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g') = '$ALVO' OR regexp_replace(coalesce(n.meta_phone_number_id,''), '[^0-9]', '', 'g') = '$ALVO' OR n.id::text = '$ALVO_UUID'"
 MATCH_SOURCE="exata"
 
 titulo "1) Serviços necessários"
@@ -77,7 +78,7 @@ for servico in "$DB_CONTAINER" "$FN_CONTAINER" zapmro-rest zapmro-realtime; do
 done
 
 titulo "2) Cadastro da caixa WhatsApp"
-NUMEROS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -v alvo="$ALVO" -v alvo_uuid="$ALVO_UUID" -c "
+NUMEROS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -c "
   select n.id, n.user_id, coalesce(n.label,''), coalesce(n.meta_display_phone_number,''),
          coalesce(n.meta_phone_number_id,''), coalesce(n.meta_waba_id,''),
          case when coalesce(n.meta_access_token,'') <> '' then 'sim' else 'nao' end,
@@ -89,7 +90,7 @@ NUMEROS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_
 if [ -z "$NUMEROS" ]; then
   warn "Nenhuma correspondência exata. Conferindo DDI, DDD e variação do nono dígito..."
 
-  PROVAVEIS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -v alvo="$ALVO" -c "
+  PROVAVEIS="$(docker exec -e PGPASSWORD="$PGPASS" "$DB_CONTAINER" psql -U "$PGUSER_" -d "$PGDB" -X -tA -F'|' -c "
     with base as (
       select n.*,
              regexp_replace(coalesce(n.meta_display_phone_number,''), '[^0-9]', '', 'g') as telefone_limpo
@@ -102,9 +103,9 @@ if [ -z "$NUMEROS" ]; then
       from base n
      where length(n.telefone_limpo) >= 8
        and (
-         right(n.telefone_limpo, 8) = right(:'alvo', 8)
+         right(n.telefone_limpo, 8) = right('$ALVO', 8)
          or regexp_replace(n.telefone_limpo, '^(55[0-9]{2})9([0-9]{8})$', '\1\2')
-              = regexp_replace(:'alvo', '^(55[0-9]{2})9([0-9]{8})$', '\1\2')
+              = regexp_replace('$ALVO', '^(55[0-9]{2})9([0-9]{8})$', '\1\2')
        )
      order by n.is_active desc, n.is_primary desc;" 2>/dev/null)"
 
@@ -144,8 +145,8 @@ if [ -z "$NUMEROS" ]; then
        from public.crm_whatsapp_numbers n
       order by n.is_active desc, n.is_primary desc, n.created_at;"
 else
-  q "\set alvo '$ALVO'
-    \set alvo_uuid '$ALVO_UUID'
+  q "
+    
     select coalesce(u.email,'(sem e-mail)') as cadastro,
            coalesce(n.label,'(sem nome)') as caixa,
            coalesce(n.meta_display_phone_number,'-') as telefone,
@@ -159,11 +160,11 @@ else
 fi
 
 SELECTED_IDS="$(printf '%s\n' "$NUMEROS" | awk -F'|' 'NF {print $1}' | paste -sd',' -)"
-MATCH_SELECTED="n.id::text = any(string_to_array(:'ids', ','))"
+MATCH_SELECTED="n.id::text = any(string_to_array('$SELECTED_IDS', ','))"
 
 titulo "3) Agente, fluxos e recebimento"
 if [ -n "$NUMEROS" ]; then
-  q "\set ids '$SELECTED_IDS'
+  q "
     select coalesce(u.email,'(sem e-mail)') as cadastro,
            s.ai_agent_enabled as agente_geral,
            s.ai_agent_trigger as gatilho_agente,
@@ -182,7 +183,7 @@ if [ -n "$NUMEROS" ]; then
      where $MATCH_SELECTED;"
 fi
 
-q "\set alvo '$ALVO'
+q "
   select coalesce(u.email,'(sem e-mail)') as cadastro,
          c.wa_id as contato, coalesce(c.name,'(sem nome)') as nome,
          coalesce(n.meta_display_phone_number,'(caixa antiga/sem vínculo)') as caixa,
@@ -192,13 +193,13 @@ q "\set alvo '$ALVO'
     from public.crm_contacts c
     left join public.crm_whatsapp_numbers n on n.id=c.whatsapp_number_id
     left join auth.users u on u.id=c.user_id
-   where regexp_replace(coalesce(c.wa_id,''), '[^0-9]', '', 'g') = :'alvo'
+   where regexp_replace(coalesce(c.wa_id,''), '[^0-9]', '', 'g') = '$ALVO'
    order by c.last_message_received_at desc nulls last
    limit 20;"
 
 titulo "4) Últimos registros (sem mostrar conteúdo)"
 if [ -n "$NUMEROS" ]; then
-  q "\set ids '$SELECTED_IDS'
+  q "
     select m.direction, m.message_type, m.status,
            case when m.media_url is not null then 'SIM' else 'NAO' end as tem_midia,
            case when m.error_code is not null or m.error_message is not null
@@ -210,7 +211,7 @@ if [ -n "$NUMEROS" ]; then
      where $MATCH_SELECTED
      order by m.created_at desc limit 20;"
 else
-  q "\set alvo '$ALVO'
+  q "
     select m.direction, m.message_type, m.status,
            case when m.media_url is not null then 'SIM' else 'NAO' end as tem_midia,
            case when m.error_code is not null or m.error_message is not null
@@ -218,7 +219,7 @@ else
            m.created_at
       from public.crm_messages m
       join public.crm_contacts c on c.id=m.contact_id
-     where regexp_replace(coalesce(c.wa_id,''), '[^0-9]', '', 'g') = :'alvo'
+     where regexp_replace(coalesce(c.wa_id,''), '[^0-9]', '', 'g') = '$ALVO'
      order by m.created_at desc limit 20;"
 fi
 

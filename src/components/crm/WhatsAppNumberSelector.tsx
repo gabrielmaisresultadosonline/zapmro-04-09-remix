@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Loader2, Lock, MessageSquare, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Copy, Eye, Loader2, Lock, MessageSquare, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -204,15 +204,28 @@ export function WhatsAppNumberSelector({
                       Abrir
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      title="Excluir definitivamente"
-                      aria-label={`Excluir definitivamente ${describeNumber(record)}`}
-                      onClick={() => setDeleteTarget(record)}
-                      className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        title="Abrir para ver as conversas (somente leitura)"
+                        aria-label={`Abrir ${describeNumber(record)} em modo leitura`}
+                        onClick={() => handleOpen(record)}
+                        disabled={busyId === record.id}
+                        className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/15 text-white text-sm font-semibold flex items-center gap-2 transition disabled:opacity-60"
+                      >
+                        {busyId === record.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+                        Ver
+                      </button>
+                      <button
+                        type="button"
+                        title="Excluir definitivamente"
+                        aria-label={`Excluir definitivamente ${describeNumber(record)}`}
+                        onClick={() => setDeleteTarget(record)}
+                        className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>

@@ -4177,10 +4177,10 @@ const CRM = () => {
         const recorder: any = new Recorder({
           encoderPath: '/opus/encoderWorker.min.js',
           encoderApplication: 2048,
-          encoderSampleRate: 16000,
+          encoderSampleRate: 48000,
           numberOfChannels: 1,
           streamPages: false,
-          encoderBitRate: 24000,
+          encoderBitRate: 32000,
           sourceNode,
         });
 

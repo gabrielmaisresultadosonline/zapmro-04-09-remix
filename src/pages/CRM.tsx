@@ -4434,9 +4434,9 @@ const CRM = () => {
       const isAudio = type === 'audio';
       setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 10 }));
 
-      // Áudio enviado de arquivo (mp3, m4a, wav, ogg vorbis...): converte na hora
-      // para OGG + Opus + 48 kHz + Mono, o único formato de voz que a Meta aceita.
-      if (isAudio && file instanceof File) {
+      // Todo áudio (arquivo OU gravado no microfone, que sai em 16 kHz ou webm)
+      // é convertido para OGG + Opus + 48 kHz + Mono, o formato que a Meta aceita.
+      if (isAudio) {
         toast({ title: 'Convertendo áudio…', description: 'Ajustando para o formato aceito pelo WhatsApp (OGG Opus, 48 kHz, mono).' });
         file = await convertToWhatsAppVoice(file, (pct) => setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 10 + Math.round(pct * 0.1) })));
         setMediaUploadProgress(prev => ({ ...prev, [targetContactId]: 20 }));

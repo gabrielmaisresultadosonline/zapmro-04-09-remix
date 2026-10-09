@@ -65,6 +65,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import MetaPricingCalculator from "@/components/whatsapp/MetaPricingCalculator";
 import BroadcastFailureLogs from "@/components/crm/BroadcastFailureLogs";
+import { SavedContactsReviewDialog, type SavedContact } from "@/components/crm/SavedContactsReviewDialog";
 import TemplateVariablesDialog, { loadDefaultTemplatePreset } from "@/components/whatsapp/TemplateVariablesDialog";
 import {
   TemplateSendConfig,
@@ -242,7 +243,8 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   const [delayMax, setDelayMax] = useState(60);
   const [applyTag, setApplyTag] = useState<string>('');
   const [replyFlowId, setReplyFlowId] = useState<string>('');
-  const [skipSavedContacts, setSkipSavedContacts] = useState(false);
+  const [savedReview, setSavedReview] = useState<{ total: number; saved: SavedContact[] } | null>(null);
+  const savedReviewResolver = useRef<((removed: string[] | null) => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsingType, setParsingType] = useState<'vcard' | 'csv' | null>(null);
 
@@ -640,22 +642,33 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
     if (!userId) throw new Error('Sua sessão expirou. Entre novamente para iniciar o disparo.');
     const activeNumberId = getActiveWhatsAppNumberId();
 
-    // Opcional: não enviar para quem já é contato salvo (com nome) neste WhatsApp.
+    // Antes de disparar: avisa quais números da lista já são contatos salvos (com nome).
     let numbers = inputNumbers;
-    if (skipSavedContacts && inputNumbers.length > 0) {
-      const saved = new Set<string>();
+    if (inputNumbers.length > 0) {
+      const saved = new Map<string, string>();
       for (let i = 0; i < inputNumbers.length; i += 300) {
         const { data: rows } = await scopeNumber(
           supabase.from('crm_contacts').select('wa_id, name')
         ).in('wa_id', inputNumbers.slice(i, i + 300));
         (rows || []).forEach((r: any) => {
           const n = String(r.name || '').trim();
-          if (n && n.replace(/\D/g, '') !== String(r.wa_id || '').replace(/\D/g, '')) saved.add(String(r.wa_id));
+          if (n && n.replace(/\D/g, '') !== String(r.wa_id || '').replace(/\D/g, '')) saved.set(String(r.wa_id), n);
         });
       }
-      numbers = inputNumbers.filter((n) => !saved.has(n));
-      if (saved.size > 0) toast({ title: `${saved.size} contato(s) salvo(s) removido(s) do disparo` });
-      if (numbers.length === 0) throw new Error('Todos os números da lista já são contatos salvos. Nada para enviar.');
+      if (saved.size > 0) {
+        const removed = await new Promise<string[] | null>((resolve) => {
+          savedReviewResolver.current = resolve;
+          setSavedReview({
+            total: inputNumbers.length,
+            saved: Array.from(saved, ([wa_id, name]) => ({ wa_id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+          });
+        });
+        if (removed === null) throw new Error('Disparo cancelado.');
+        const drop = new Set(removed);
+        numbers = inputNumbers.filter((n) => !drop.has(n));
+        if (drop.size > 0) toast({ title: `${drop.size} contato(s) salvo(s) removido(s) do disparo` });
+        if (numbers.length === 0) throw new Error('Nenhum número restou na lista. Nada para enviar.');
+      }
     }
 
     const { data, error } = await (supabase as any)
@@ -1983,18 +1996,12 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                 </div>
               )}
 
-              <label className="flex items-start gap-3 pt-4 border-t border-white/5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={skipSavedContacts}
-                  onChange={(e) => setSkipSavedContacts(e.target.checked)}
-                  className="mt-1 h-4 w-4 accent-[#00a884]"
-                />
-                <span>
-                  <span className="block text-xs md:text-sm font-bold uppercase tracking-wider text-[#e9edef]">Não enviar para contatos salvos</span>
-                  <span className="block text-[10px] md:text-xs text-[#8696a0] italic">Quem já está salvo com nome neste WhatsApp é tirado do disparo automaticamente.</span>
-                </span>
-              </label>
+              <SavedContactsReviewDialog
+                open={!!savedReview}
+                total={savedReview?.total || 0}
+                saved={savedReview?.saved || []}
+                onResolve={(removed) => { const r = savedReviewResolver.current; savedReviewResolver.current = null; setSavedReview(null); r?.(removed); }}
+              />
 
               <Button 
                 onClick={handleStartBroadcast} 

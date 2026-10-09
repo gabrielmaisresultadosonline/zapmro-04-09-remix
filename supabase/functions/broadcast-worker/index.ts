@@ -29,7 +29,7 @@ const randomDelaySeconds = (minimum: unknown, maximum: unknown): number => {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-Deno.serve(async (req: Request) => {
+async function processOne(req: Request, workerId: string): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ success: false, error: 'Method not allowed' }, 405)
 
@@ -54,7 +54,6 @@ Deno.serve(async (req: Request) => {
   if (!parsedBody.success) return json({ success: false, error: parsedBody.error.flatten().fieldErrors }, 400)
   const requestedBroadcastId = parsedBody.data.broadcast_id || null
 
-  const workerId = crypto.randomUUID()
   let claimedItem: Record<string, unknown> | null = null
   try {
     const { data: claimedRows, error: claimError } = await admin.rpc('crm_claim_broadcast_item', {
@@ -211,4 +210,50 @@ Deno.serve(async (req: Request) => {
     }
     return json({ success: false, error: errorMessage(error) }, 500)
   }
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/** Tempo máximo que uma chamada fica "segurando" a campanha para respeitar o intervalo exato. */
+const LOOP_BUDGET_MS = 50_000
+
+/**
+ * Processa vários destinatários na mesma chamada, esperando exatamente o
+ * intervalo sorteado (next_run_at) entre um envio e outro. Um "lease" no banco
+ * impede que o cron rode a mesma campanha ao mesmo tempo.
+ */
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS' || req.method !== 'POST') return processOne(req, crypto.randomUUID())
+  const workerId = crypto.randomUUID()
+  const started = Date.now()
+  const bodyText = await req.text()
+  let body: JsonRecord = {}
+  try { body = bodyText ? JSON.parse(bodyText) : {} } catch { /* processOne valida */ }
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const admin = supabaseUrl && serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } }) : null
+
+  let last: Response | null = null
+  let lockedBroadcast: string | null = null
+  try {
+    for (let i = 0; i < 500; i++) {
+      const res = await processOne(new Request(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(body) }), workerId)
+      const data = await res.clone().json().catch(() => ({})) as JsonRecord
+      last = res
+      const bid = typeof data.broadcast_id === 'string' ? data.broadcast_id : null
+      if (!admin || data.processed !== 1 || !bid) break
+      lockedBroadcast = bid
+      body = { ...body, broadcast_id: bid }
+      const { data: c } = await admin.from('crm_broadcasts').select('status, next_run_at').eq('id', bid).single()
+      if (!c || !['pending', 'running'].includes(String(c.status))) break
+      const wait = Math.max(0, Date.parse(String(c.next_run_at || '')) - Date.now() || 0)
+      if (Date.now() - started + wait > LOOP_BUDGET_MS) break
+      await sleep(wait)
+    }
+  } finally {
+    if (admin && lockedBroadcast) {
+      await admin.from('crm_broadcasts').update({ worker_lease_owner: null, worker_lease_until: null })
+        .eq('id', lockedBroadcast).eq('worker_lease_owner', workerId)
+    }
+  }
+  return last || json({ success: true, processed: 0 })
 })

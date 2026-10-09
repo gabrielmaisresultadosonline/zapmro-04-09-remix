@@ -6192,6 +6192,25 @@ const CRM = () => {
           </DialogContent>
         </Dialog>
 
+        <Dialog open={ghostOpen} onOpenChange={setGhostOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Números que não existem nas conversas</DialogTitle>
+              <DialogDescription>
+                Vimos {ghostCount} número(s) nas conversas que não existem no WhatsApp (a Meta recusou a entrega). Eles nunca responderam nada. Podemos apagar essas conversas?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setGhostOpen(false)} disabled={ghostPurging}>
+                Agora não
+              </Button>
+              <Button variant="destructive" onClick={purgeGhostContacts} disabled={ghostPurging}>
+                {ghostPurging ? 'Apagando…' : 'Sim, apagar'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <SidebarInset className="flex flex-col flex-1 h-full overflow-hidden bg-[#f0f2f5] dark:bg-[#0c1317]">
           <header className="min-h-[64px] h-auto md:h-16 border-b border-border/50 flex flex-wrap items-center px-4 md:px-6 bg-[#f0f2f5] dark:bg-[#202c33] z-10 shrink-0 justify-between gap-2 py-2 shadow-sm">
             <div className="flex items-center gap-2 md:gap-4 overflow-hidden">

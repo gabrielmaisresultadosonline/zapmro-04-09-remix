@@ -1383,16 +1383,23 @@ const CRM = () => {
       let paidWeek = 0;
       let repliesCount = 0;
       
+      // Franquia de respostas grátis zerada para todos em 09/10/2026 (00:00 São Paulo).
+      const FREE_REPLIES_RESET_AT = Date.parse('2026-10-09T03:00:00Z');
+
       Object.values(byContact).forEach((msgs) => {
         let lastInbound = -Infinity;
         let lastPaidStart = -Infinity;
         const weekTime = new Date(startOfWeek).getTime();
         
         const ctwaAt = msgs[0]?.contact_id ? ctwaByContact[msgs[0].contact_id] : undefined;
+        // Toda entrada por anúncio (não só a mais recente) abre 72h sem consumo.
+        let lastAdAt = -Infinity;
         for (const m of msgs) {
           const t = new Date(m.created_at).getTime();
           if (m.direction === 'inbound') {
             lastInbound = t;
+            const md = (m as any)?.metadata || {};
+            if (md.ad_referral || md.referral || md.ctwa_clid) lastAdAt = t;
           } else if (m.direction === 'outbound') {
             // Mensagens enviadas pelo app do celular (echoes) NÃO são cobradas
             // pela Meta — não contam como conversa paga.
@@ -1404,9 +1411,10 @@ const CRM = () => {
             if (isEcho || isFailed) continue;
             // Janela de anúncio (72h): sem cobrança e não consome as 1.000 respostas.
             if (ctwaAt !== undefined && t >= ctwaAt && t - ctwaAt < CTWA_FREE_MS) continue;
+            if (t >= lastAdAt && t - lastAdAt < CTWA_FREE_MS) continue;
             // Resposta pela API oficial dentro da janela de 24h consome 1 da franquia mensal.
             const isTemplate = m.message_type === 'template' || m.message_type === 'carousel';
-            if (!isTemplate && t - lastInbound < DAY) repliesCount++;
+            if (!isTemplate && t - lastInbound < DAY && t >= FREE_REPLIES_RESET_AT) repliesCount++;
             const isManual = src === 'manual_send';
             const isAutomation = src === 'api_automation' || isTemplate;
             if (isManual || !isAutomation) continue;

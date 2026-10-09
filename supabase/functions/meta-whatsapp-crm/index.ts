@@ -8561,6 +8561,47 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
       return jsonResponse({ success: true, media_url: storedUrl });
     }
 
+    if (action === 'ghostContacts') {
+      // Varre disparos antigos que falharam com 131026 (número sem WhatsApp) e
+      // lista/remove as conversas desses contatos — apenas quando o contato
+      // nunca respondeu e nenhum envio a ele foi entregue. mode: scan | purge.
+      if (!userId) return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
+      const mode = params?.mode === 'purge' ? 'purge' : 'scan';
+      const numberId = params?.whatsappNumberId ? String(params.whatsappNumberId) : null;
+      let failedQuery = supabase.from('crm_messages')
+        .select('contact_id')
+        .eq('user_id', userId)
+        .eq('direction', 'outbound')
+        .eq('status', 'failed')
+        .eq('error_code', '131026');
+      if (numberId) failedQuery = failedQuery.eq('whatsapp_number_id', numberId);
+      const { data: failedMsgs, error: failedError } = await failedQuery.limit(5000);
+      if (failedError) return jsonResponse({ success: false, error: failedError.message }, 500);
+      const contactIds = [...new Set((failedMsgs || []).map((m: any) => m.contact_id).filter(Boolean))];
+      const ghosts: string[] = [];
+      for (const cid of contactIds) {
+        const { count: inbound } = await supabase.from('crm_messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('contact_id', cid).eq('direction', 'inbound');
+        const { count: okOutbound } = await supabase.from('crm_messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('contact_id', cid).eq('direction', 'outbound')
+          .in('status', ['delivered', 'read']);
+        if ((inbound || 0) === 0 && (okOutbound || 0) === 0) ghosts.push(cid as string);
+      }
+      if (mode === 'scan') {
+        return jsonResponse({ success: true, count: ghosts.length });
+      }
+      let removed = 0;
+      for (const cid of ghosts) {
+        await supabase.from('crm_messages').delete().eq('contact_id', cid).eq('user_id', userId);
+        const { error: delError } = await supabase.from('crm_contacts').delete().eq('id', cid).eq('user_id', userId);
+        if (!delError) removed += 1;
+      }
+      console.log('[GHOST-CONTACTS] Limpeza concluída', { userId, numberId, removed, scanned: contactIds.length });
+      return jsonResponse({ success: true, removed });
+    }
+
     if (action === 'clearHistory') {
       const { contactId } = params;
       if (!contactId) throw new Error('contactId is required');

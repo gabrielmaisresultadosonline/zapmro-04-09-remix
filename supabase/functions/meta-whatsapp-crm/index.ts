@@ -4461,6 +4461,42 @@ async function syncOutboundStatusFromMeta(supabase: any, userId: string, statusE
   }
 
   const broadcastId = existing.metadata?.broadcast_id;
+
+  // Disparo em massa com 131026: o número não recebe WhatsApp. Remove a conversa
+  // (mensagens + contato) quando o contato nunca respondeu e nenhum envio a ele
+  // deu certo — assim a lista de conversas não fica poluída. O item do disparo
+  // continua no histórico da campanha como falha.
+  const failedCode = String(firstError?.code || firstError?.error_code || '');
+  const isBroadcastMessage = Boolean(broadcastId) || handledByBroadcastQueue;
+  if (nextStatus === 'failed' && failedCode === '131026' && isBroadcastMessage) {
+    try {
+      const { data: msgRow } = await supabase
+        .from('crm_messages').select('contact_id').eq('id', existing.id).maybeSingle();
+      const contactId = msgRow?.contact_id;
+      if (contactId) {
+        const { count: inboundCount } = await supabase
+          .from('crm_messages').select('id', { count: 'exact', head: true })
+          .eq('contact_id', contactId).eq('direction', 'inbound');
+        const { count: okOutbound } = await supabase
+          .from('crm_messages').select('id', { count: 'exact', head: true })
+          .eq('contact_id', contactId).eq('direction', 'outbound')
+          .in('status', ['delivered', 'read']);
+        if ((inboundCount || 0) === 0 && (okOutbound || 0) === 0) {
+          await supabase.from('crm_messages').delete().eq('contact_id', contactId);
+          const { error: delContactError } = await supabase
+            .from('crm_contacts').delete().eq('id', contactId).eq('user_id', userId);
+          if (delContactError) {
+            console.warn('[META-STATUS] Conversa limpa, contato mantido', { contactId, error: delContactError.message });
+          } else {
+            console.log('[META-STATUS] Número inexistente (131026) removido das conversas', { contactId });
+          }
+          return { updated: true, removed_contact: contactId };
+        }
+      }
+    } catch (cleanupError) {
+      console.error('[META-STATUS] Falha ao remover número inexistente', (cleanupError as any)?.message);
+    }
+  }
   if (broadcastId && nextStatus === 'failed' && existing.status !== 'failed' && !handledByBroadcastQueue) {
     const { error: broadcastError } = await supabase.rpc('increment_broadcast_failed', { b_id: broadcastId });
     if (broadcastError) {

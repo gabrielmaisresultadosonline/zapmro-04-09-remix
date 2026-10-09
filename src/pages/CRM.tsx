@@ -646,6 +646,47 @@ const CRM = () => {
   // Número desconectado aberto só para consulta: vê as conversas, sem enviar nada.
   const [readOnlyNumber, setReadOnlyNumber] = useState(false);
 
+  // Números inexistentes (erro 131026 da Meta) que ficaram de disparos antigos:
+  // ao abrir um WhatsApp, conta quantos são e oferece apagar as conversas deles.
+  const [ghostCount, setGhostCount] = useState(0);
+  const [ghostOpen, setGhostOpen] = useState(false);
+  const [ghostPurging, setGhostPurging] = useState(false);
+  useEffect(() => {
+    if (!activeNumberId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.functions.invoke('meta-whatsapp-crm', {
+          body: { action: 'ghostContacts', mode: 'scan', whatsappNumberId: activeNumberId },
+        });
+        if (!cancelled && data?.success && Number(data.count) > 0) {
+          setGhostCount(Number(data.count));
+          setGhostOpen(true);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [activeNumberId]);
+  const purgeGhostContacts = async () => {
+    if (!activeNumberId) return;
+    setGhostPurging(true);
+    try {
+      const { data } = await supabase.functions.invoke('meta-whatsapp-crm', {
+        body: { action: 'ghostContacts', mode: 'purge', whatsappNumberId: activeNumberId },
+      });
+      if (data?.success) {
+        toast({ title: 'Conversas apagadas', description: `${data.removed || 0} número(s) que não existem foram removidos das conversas.` });
+        setGhostOpen(false);
+        setGhostCount(0);
+        fetchContacts();
+      } else {
+        toast({ title: 'Não foi possível apagar', description: data?.error || 'Tente novamente.', variant: 'destructive' });
+      }
+    } finally {
+      setGhostPurging(false);
+    }
+  };
+
   // ---- Flow shortcut bar preferences (persisted in localStorage per profile) ----
   const FLOW_BAR_PREFS_KEY = 'crm_flow_bar_prefs_v1';
   const FLOW_BAR_COLORS: Record<string, { border: string; bg: string; text: string; hover: string }> = {
@@ -6146,6 +6187,25 @@ const CRM = () => {
                 }}
               >
                 {myDataSaving ? 'Salvando...' : 'Salvar alterações'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={ghostOpen} onOpenChange={setGhostOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Números que não existem nas conversas</DialogTitle>
+              <DialogDescription>
+                Vimos {ghostCount} número(s) nas conversas que não existem no WhatsApp (a Meta recusou a entrega). Eles nunca responderam nada. Podemos apagar essas conversas?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setGhostOpen(false)} disabled={ghostPurging}>
+                Agora não
+              </Button>
+              <Button variant="destructive" onClick={purgeGhostContacts} disabled={ghostPurging}>
+                {ghostPurging ? 'Apagando…' : 'Sim, apagar'}
               </Button>
             </DialogFooter>
           </DialogContent>

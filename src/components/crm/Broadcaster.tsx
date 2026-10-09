@@ -646,13 +646,27 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
     let numbers = inputNumbers;
     if (inputNumbers.length > 0) {
       const saved = new Map<string, string>();
-      for (let i = 0; i < inputNumbers.length; i += 300) {
+      // Aceita o número com/sem 55 e com/sem o 9 extra, como foi salvo no CRM.
+      const variantsOf = (raw: string): string[] => {
+        const d = String(raw).replace(/\D/g, '');
+        const base = d.length <= 11 ? '55' + d : d;
+        const out = new Set([d, base]);
+        if (base.startsWith('55') && base.length === 13) out.add(base.slice(0, 4) + base.slice(5));
+        if (base.startsWith('55') && base.length === 12) out.add(base.slice(0, 4) + '9' + base.slice(4));
+        return Array.from(out);
+      };
+      const owner = new Map<string, string>();
+      inputNumbers.forEach((n) => variantsOf(n).forEach((v) => { if (!owner.has(v)) owner.set(v, n); }));
+      const allVariants = Array.from(owner.keys());
+      for (let i = 0; i < allVariants.length; i += 300) {
         const { data: rows } = await scopeNumber(
           supabase.from('crm_contacts').select('wa_id, name')
-        ).in('wa_id', inputNumbers.slice(i, i + 300));
+        ).in('wa_id', allVariants.slice(i, i + 300));
         (rows || []).forEach((r: any) => {
           const n = String(r.name || '').trim();
-          if (n && n.replace(/\D/g, '') !== String(r.wa_id || '').replace(/\D/g, '')) saved.set(String(r.wa_id), n);
+          const wa = String(r.wa_id || '');
+          const original = owner.get(wa);
+          if (original && n && n.replace(/\D/g, '') !== wa.replace(/\D/g, '')) saved.set(original, n);
         });
       }
       if (saved.size > 0) {

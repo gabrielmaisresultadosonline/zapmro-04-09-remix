@@ -1983,6 +1983,19 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                 </div>
               )}
 
+              <label className="flex items-start gap-3 pt-4 border-t border-white/5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={skipSavedContacts}
+                  onChange={(e) => setSkipSavedContacts(e.target.checked)}
+                  className="mt-1 h-4 w-4 accent-[#00a884]"
+                />
+                <span>
+                  <span className="block text-xs md:text-sm font-bold uppercase tracking-wider text-[#e9edef]">Não enviar para contatos salvos</span>
+                  <span className="block text-[10px] md:text-xs text-[#8696a0] italic">Quem já está salvo com nome neste WhatsApp é tirado do disparo automaticamente.</span>
+                </span>
+              </label>
+
               <Button 
                 onClick={handleStartBroadcast} 
                 disabled={loading}

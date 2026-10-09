@@ -241,6 +241,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   const [delayMin, setDelayMin] = useState(10);
   const [delayMax, setDelayMax] = useState(60);
   const [applyTag, setApplyTag] = useState<string>('');
+  const [replyFlowId, setReplyFlowId] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsingType, setParsingType] = useState<'vcard' | 'csv' | null>(null);
 
@@ -656,6 +657,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         whatsapp_number_id: activeNumberId,
         template_config: type === 'template' ? templateConfig : null,
         apply_tag: applyTag || null,
+        ...(type !== 'flow' && replyFlowId ? { reply_flow_id: replyFlowId } : {}),
         next_run_at: new Date().toISOString(),
       }])
       .select()
@@ -1939,6 +1941,28 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                   </Select>
                 </div>
               </div>
+
+              {type !== 'flow' && (
+                <div className="space-y-3 pt-4 border-t border-white/5">
+                  <Label className="text-xs md:text-sm font-bold uppercase tracking-wider text-[#8696a0] flex items-center gap-2">
+                    <Zap className="w-4 h-4" /> Ativar fluxo quando responder (Opcional)
+                  </Label>
+                  <p className="text-[10px] md:text-xs text-[#8696a0] italic">
+                    Quem receber este disparo e responder qualquer coisa (até 7 dias depois) entra automaticamente no fluxo escolhido. Vale uma vez por contato.
+                  </p>
+                  <Select value={replyFlowId || 'none'} onValueChange={(v) => setReplyFlowId(v === 'none' ? '' : v)}>
+                    <SelectTrigger className="h-10 md:h-11 rounded-xl bg-[#202c33] border-none text-[#e9edef] text-xs md:text-sm">
+                      <SelectValue placeholder="Nenhum fluxo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhum fluxo</SelectItem>
+                      {flows.map(f => (
+                        <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <Button 
                 onClick={handleStartBroadcast} 

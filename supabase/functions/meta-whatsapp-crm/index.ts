@@ -2416,6 +2416,61 @@ else if (message.type === "unsupported") {
   }
 
 
+  // Resposta a um disparo com "fluxo ao responder": qualquer mensagem do contato
+  // que recebeu a campanha (até 7 dias) inicia o fluxo escolhido, uma vez só.
+  if (contact && !hasActiveFlow && !isAiHandlingFlow) {
+    try {
+      const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const ids = Array.from(new Set([waId, contact.wa_id].filter(Boolean).map((v: any) => String(v))));
+      let itemsQuery = supabase.from('crm_broadcast_items')
+        .select('id, broadcast_id, whatsapp_number_id, processed_at')
+        .eq('user_id', userId).eq('status', 'sent').is('reply_flow_started_at', null)
+        .in('wa_id', ids).gte('processed_at', sinceIso)
+        .order('processed_at', { ascending: false }).limit(10);
+      if (contact.whatsapp_number_id) itemsQuery = itemsQuery.eq('whatsapp_number_id', contact.whatsapp_number_id);
+      const { data: replyItems, error: replyItemsError } = await itemsQuery;
+      if (replyItemsError) throw replyItemsError;
+      if (replyItems && replyItems.length > 0) {
+        const { data: replyCampaigns } = await supabase.from('crm_broadcasts')
+          .select('id, reply_flow_id').in('id', replyItems.map((i: any) => i.broadcast_id)).not('reply_flow_id', 'is', null);
+        const flowByCampaign = new Map((replyCampaigns || []).map((b: any) => [b.id, b.reply_flow_id]));
+        const replyItem = replyItems.find((i: any) => flowByCampaign.has(i.broadcast_id));
+        if (replyItem) {
+          // Marca atomicamente: duas mensagens simultâneas não iniciam duas vezes.
+          const { data: marked } = await supabase.from('crm_broadcast_items')
+            .update({ reply_flow_started_at: new Date().toISOString() })
+            .eq('id', replyItem.id).is('reply_flow_started_at', null).select('id').maybeSingle();
+          const replyFlowId = flowByCampaign.get(replyItem.broadcast_id);
+          const { data: replyFlow } = marked
+            ? await supabase.from('crm_flows').select('id, name, trigger_type, nodes, edges, user_id, whatsapp_number_id').eq('id', replyFlowId).eq('user_id', userId).maybeSingle()
+            : { data: null };
+          if (replyFlow) {
+            let startNode = replyFlow.nodes?.find((n: any) => n.type === 'start' || n.data?.isStartNode);
+            if (!startNode && replyFlow.nodes?.length > 0) {
+              const targets = new Set((replyFlow.edges || []).map((e: any) => e.target));
+              startNode = replyFlow.nodes.find((n: any) => !targets.has(n.id)) || replyFlow.nodes[0];
+            }
+            if (startNode && await claimAutomaticFlow(supabase, contact, replyFlow, startNode.id)) {
+              console.log(`[TRIGGER-BROADCAST-REPLY] Starting flow ${replyFlow.id} for ${waId} (campaign ${replyItem.broadcast_id})`);
+              await supabase.from('crm_scheduled_messages').delete().eq('contact_id', contact.id);
+              let currentRes: any = await executeVisualNode(supabase, replyFlow, startNode, contact.id, waId);
+              let iterations = 0;
+              while (currentRes?.nextNodeId && iterations < 10) {
+                iterations++;
+                const nextNode = replyFlow.nodes.find((n: any) => n.id === currentRes.nextNodeId);
+                if (!nextNode) break;
+                currentRes = await executeVisualNode(supabase, replyFlow, nextNode, contact.id, waId);
+              }
+              return jsonResponse({ success: true, triggered_flow: replyFlow.id, source: 'broadcast_reply' });
+            }
+          }
+        }
+      }
+    } catch (replyErr) {
+      console.error('[TRIGGER-BROADCAST-REPLY] Error:', replyErr);
+    }
+  }
+
   // Gatilhos exact_phrase/keyword devem ter prioridade sobre IA ativa (ai_active=true),
   // mesmo sem referral. Mensagens de anúncio (CTWA) podem chegar como "unsupported" (code 131060)
   // SEM referral — antes, o bloco só rodava com referral e a IA interceptava a mensagem,

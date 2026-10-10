@@ -612,6 +612,7 @@ function cleanAiControlTags(reply: string): string {
     .replace(/\[\[KANBAN:(?:frio|quente|cliente|humano)\]\]/gi, '')
     .replace(/\[\[ETIQUETA:[^\]]*\]\]/gi, '')
     .replace(/\[\[TRANSFER_TO_HUMAN\]\]/gi, '')
+    .replace(/\[\[ENVIAR:[^\]]*\]\]/gi, '')
     .trim();
 }
 
@@ -1074,6 +1075,26 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     ? '\n15. FORMATO DE ENVIO: responda em um único bloco coeso sempre que possível.'
     : '';
 
+  // Biblioteca de documentos do Agente (por WhatsApp; itens sem número valem para o cadastro).
+  let aiDocuments: Array<{ code: string; title: string; description: string | null; media_type: string; media_url: string; file_name: string | null; mime_type: string | null }> = [];
+  try {
+    const ownerId = userId || contact?.user_id;
+    if (ownerId) {
+      let docsQuery = supabase.from('crm_ai_documents')
+        .select('code, title, description, media_type, media_url, file_name, mime_type, whatsapp_number_id')
+        .eq('user_id', ownerId).eq('is_active', true);
+      docsQuery = boxId ? docsQuery.or(`whatsapp_number_id.eq.${boxId},whatsapp_number_id.is.null`) : docsQuery.is('whatsapp_number_id', null);
+      const { data: docsRows, error: docsErr } = await docsQuery.limit(100);
+      if (docsErr) aiLog('documents_load_failed', { error: docsErr.message });
+      aiDocuments = (docsRows || []) as any[];
+    }
+  } catch (docsLoadErr: any) {
+    aiLog('documents_load_failed', { error: docsLoadErr?.message || String(docsLoadErr) });
+  }
+  const documentsInstruction = aiDocuments.length > 0
+    ? `\n16. ARQUIVOS DISPONÍVEIS PARA ENVIO: você pode enviar os arquivos abaixo ao cliente. Quando o cliente pedir um deles, ou quando o prompt mandar enviar, ou quando fizer sentido no atendimento, inclua a etiqueta interna [[ENVIAR:CODIGO]] (uma por arquivo) junto da sua resposta. O sistema envia o arquivo automaticamente logo após o texto. Nunca escreva o link do arquivo, nunca diga que não consegue enviar arquivos e não envie o mesmo arquivo de novo se ele já aparece enviado no histórico, a menos que o cliente peça.\n${aiDocuments.map((d) => `- ${d.code} (${d.media_type === 'document' ? 'documento/PDF' : d.media_type === 'image' ? 'imagem' : d.media_type === 'audio' ? 'áudio' : 'vídeo'}): ${d.title}${d.description ? ` — ${d.description}` : ''}`).join('\n')}`
+    : '';
+
   const systemPrompt = `${aiPrompt}
   
   REGRAS INTERNAS E OBRIGATÓRIAS:
@@ -1091,7 +1112,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     10. LINKS: Ao enviar um link, envie apenas a URL pura (ex: https://site.com). Nunca use markdown para links como [texto](url) e nunca repita o link. Digite o link uma única vez.
     11. SAUDAÇÕES: Não envie saudações (como "Oi!", "Olá!", "Bom dia") se você já estiver conversando com o cliente no histórico recente. Se o histórico já contém interações, pule a saudação inicial e vá direto para a resposta ou pergunta.
     12. Nunca saia do personagem.
-    13. MEMÓRIA DA CONVERSA: Sempre retome TODO o contexto já conversado no histórico (dados, nomes, valores, combinados, dúvidas pendentes). Nunca repita perguntas cujas respostas já estão no histórico e nunca recomece o atendimento do zero.${kanbanInstruction}${sendingInstruction}`;
+    13. MEMÓRIA DA CONVERSA: Sempre retome TODO o contexto já conversado no histórico (dados, nomes, valores, combinados, dúvidas pendentes). Nunca repita perguntas cujas respostas já estão no histórico e nunca recomece o atendimento do zero.${kanbanInstruction}${sendingInstruction}${documentsInstruction}`;
   
   try {
     const visualAttachments = (recentMessages || [])
@@ -1155,6 +1176,35 @@ ${aiPrompt}
     const customLabel = organizerEnabled ? extractAiCustomLabel(rawReply) : null;
     const wantsHumanTransfer = rawReply.includes('[[TRANSFER_TO_HUMAN]]');
     const reply = cleanAiControlTags(rawReply);
+    // Arquivos pedidos pela IA ([[ENVIAR:CODIGO]]) ou citados pelo código na mensagem do cliente.
+    const documentsToSend: typeof aiDocuments = [];
+    if (aiDocuments.length > 0) {
+      const wanted = new Set<string>();
+      for (const m of rawReply.matchAll(/\[\[ENVIAR:([^\]]+)\]\]/gi)) wanted.add(m[1].trim().toLowerCase());
+      const clientText = String(messageText || '');
+      for (const d of aiDocuments) {
+        const escaped = d.code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, 'i').test(clientText)) wanted.add(d.code.toLowerCase());
+      }
+      for (const d of aiDocuments) if (wanted.has(d.code.toLowerCase())) documentsToSend.push(d);
+      if (documentsToSend.length > 0) aiLog('documents_requested', { codes: documentsToSend.map((d) => d.code) });
+    }
+    const sendAiDocuments = async () => {
+      for (const d of documentsToSend.slice(0, 5)) {
+        const mediaParams: any = { to: waId, whatsapp_number_id: boxId, metadata: { source_message_id: sourceMessageId, ai_run_id: aiRunId, ai_document_code: d.code } };
+        if (d.media_type === 'image') mediaParams.imageUrl = d.media_url;
+        else if (d.media_type === 'video') mediaParams.videoUrl = d.media_url;
+        else if (d.media_type === 'audio') mediaParams.audioUrl = d.media_url;
+        else { mediaParams.documentUrl = d.media_url; mediaParams.fileName = d.file_name || `${d.title}.pdf`; mediaParams.mimeType = d.mime_type || undefined; }
+        try {
+          await handleInternalSendMessage(supabase, aiSettings.meta_phone_number_id, aiSettings.meta_access_token, mediaParams, contact, aiSettings.vps_transcoder_url, userId || contact.user_id);
+          aiLog('document_sent', { code: d.code, media_type: d.media_type });
+        } catch (docErr: any) {
+          aiLog('document_send_failed', { code: d.code, error: docErr?.message || String(docErr) });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    };
     aiLog('model_reply_received', { reply_length: reply.length });
     console.log(`[AI-AGENT] OpenAI reply for ${waId}: ${reply.slice(0, 100)}...`);
 
@@ -1252,7 +1302,7 @@ ${aiPrompt}
         next_execution_time: null
       }).eq('id', contact.id);
       
-    } else if (reply) {
+    } else if (reply || documentsToSend.length > 0) {
       // Credenciais já resolvidas no início (caixa correta + fallback validado).
       const settings = aiSettings;
 
@@ -1266,7 +1316,9 @@ ${aiPrompt}
         .limit(1)
         .maybeSingle();
 
-      if (lastOutbound?.content === reply) {
+      if (!reply) {
+        // Só arquivo, sem texto.
+      } else if (lastOutbound?.content === reply) {
         aiLog('skipped_duplicate_reply');
         console.log(`[AI-AGENT] Duplicated response detected for contact ${waId}. Skipping send.`);
       } else {
@@ -1312,6 +1364,7 @@ ${aiPrompt}
         }
         aiLog('reply_sent', { parts: sentParts, phone_number_id: settings.meta_phone_number_id });
       }
+      await sendAiDocuments();
       
       
       console.log(`[AI-AGENT] Updating contact ${waId} to ensure continued AI interaction.`);

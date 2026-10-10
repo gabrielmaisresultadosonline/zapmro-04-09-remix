@@ -1,6 +1,7 @@
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
+import { AiDocumentsLibrary } from '@/components/crm/AiDocumentsLibrary';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
 import AdReferralCard, { type AdReferralData } from '@/components/crm/AdReferralCard';
@@ -9155,6 +9156,8 @@ const CRM = () => {
                                 onChange={(e) => setMetaSettings({...metaSettings, ai_system_prompt: e.target.value})}
                               />
                             </div>
+
+                            <AiDocumentsLibrary />
 
                             <div className="flex justify-end pt-4 border-t">
                               <Button onClick={() => handleSaveSettings()} disabled={saving} size="sm" className="bg-[#00875A] hover:bg-[#00875A]/90">

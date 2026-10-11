@@ -878,6 +878,21 @@ const appDashboardImg = "https://images.unsplash.com/photo-1675271591211-126ad94
            </div>
          </div>
        </footer>
+        {/* Botão flutuante de WhatsApp — mensagem pré-preenchida */}
+        <a
+          href={`https://wa.me/${SALES_WHATSAPP_NUMBER}?text=${encodeURIComponent(SALES_WHATSAPP_MESSAGE)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Falar no WhatsApp: ${SALES_WHATSAPP_MESSAGE}`}
+          className="group fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-full bg-green-500 px-5 py-3 text-white shadow-xl shadow-green-500/30 ring-1 ring-green-600/40 transition-all hover:scale-105 hover:bg-green-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2"
+        >
+          <span className="pointer-events-none absolute inset-0 -z-10 animate-ping rounded-full bg-green-500/40 [animation-duration:2.5s]" />
+          <svg viewBox="0 0 32 32" aria-hidden="true" className="h-6 w-6 fill-current">
+            <path d="M16.003 3C9.383 3 4 8.383 4 15.003c0 2.648.873 5.097 2.35 7.078L4 29l7.12-2.29a11.94 11.94 0 0 0 4.883 1.04h.004C22.627 27.75 28 22.367 28 15.747 28 9.127 22.62 3 16.003 3Zm0 21.9a9.86 9.86 0 0 1-5.02-1.374l-.36-.213-4.22 1.356 1.37-4.103-.235-.377a9.84 9.84 0 0 1-1.51-5.25c0-5.456 4.44-9.895 9.9-9.895 2.64 0 5.12 1.03 6.99 2.9a9.83 9.83 0 0 1 2.9 6.99c0 5.46-4.44 9.9-9.815 9.961Zm5.43-7.41c-.297-.15-1.757-.868-2.03-.967-.273-.1-.471-.149-.67.15-.198.298-.768.967-.942 1.166-.173.199-.347.224-.645.075-.297-.15-1.257-.463-2.393-1.477-.884-.789-1.48-1.764-1.654-2.062-.173-.298-.018-.459.13-.608.134-.133.298-.347.447-.521.15-.174.199-.298.298-.497.1-.199.05-.373-.025-.522-.075-.149-.67-1.614-.918-2.21-.242-.58-.487-.501-.67-.51l-.572-.01a1.1 1.1 0 0 0-.793.372c-.273.298-1.04 1.017-1.04 2.48 0 1.462 1.065 2.875 1.213 3.074.15.199 2.096 3.2 5.077 4.487.71.307 1.264.49 1.696.628.713.227 1.363.195 1.876.118.572-.085 1.757-.718 2.005-1.412.248-.694.248-1.29.174-1.413-.074-.124-.272-.199-.57-.348Z" />
+          </svg>
+          <span className="text-sm font-bold leading-tight">Falar no WhatsApp</span>
+        </a>
+
         <PurchaseDialog open={buyOpen} onOpenChange={setBuyOpen} plan={buyPlan} />
 
      </div>

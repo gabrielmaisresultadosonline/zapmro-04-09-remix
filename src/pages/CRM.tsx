@@ -1,3 +1,4 @@
+import { UnsupportedMessageDiagnostic } from "@/components/crm/UnsupportedMessageDiagnostic";
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';

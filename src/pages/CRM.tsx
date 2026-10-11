@@ -1,3 +1,4 @@
+import { UnsupportedMessageDiagnostic } from "@/components/crm/UnsupportedMessageDiagnostic";
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
@@ -7955,6 +7956,7 @@ const CRM = () => {
                                                   {getUnsupportedMetaDetails(m) && (
                                                     <p className="mt-1 text-[10px] opacity-80">Detalhe informado: {getUnsupportedMetaDetails(m)}</p>
                                                   )}
+                                                  <UnsupportedMessageDiagnostic message={m} />
                                                 </div>
                                               </div>
                                             </div>

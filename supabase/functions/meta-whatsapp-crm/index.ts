@@ -6353,11 +6353,67 @@ async function fetchAndStoreIncomingMedia(
       if (waitingRes.error) throw waitingRes.error;
       if (delayRes.error) throw delayRes.error;
 
-      const contactsToProcess = [...(waitingRes.data || []), ...(delayRes.data || [])];
       const results: any[] = [];
       const flowCache = new Map<string, any>();
+      const runReadyDelay = async (contact: any) => {
+          if (contact.next_execution_time && new Date(contact.next_execution_time) <= new Date()) {
+            console.log(`[DELAY-READY] Contato ${contact.wa_id} pronto para execução.`);
+            
+            // Tenta atualizar de forma atômica para garantir que APENAS UM processo execute este nó
+            const { data: updated, error: updateError } = await supabase.from('crm_contacts').update({ 
+              next_execution_time: null,
+              flow_state: 'running'
+            })
+            .eq('id', contact.id)
+            .eq('next_execution_time', contact.next_execution_time) // Garante atomicidade baseada no timestamp exato
+            .select();
+
+            if (updateError || !updated || updated.length === 0) {
+               console.log(`[DUPLICATION-PREVENTED] Contact ${contact.wa_id} already being processed.`);
+               continue;
+            }
+
+            const { data: flow } = await supabase.from('crm_flows').select('*').eq('id', contact.current_flow_id).single();
+            const currentNode = flow?.nodes?.find((n: any) => n.id === contact.current_node_id);
+            
+            if (flow && currentNode) {
+              const res: any = await executeVisualNode(supabase, flow, currentNode, contact.id, contact.wa_id);
+              results.push({ contactId: contact.id, result: res });
+
+              // Se o nó executado foi um Agente IA, processamos a resposta imediatamente
+                if (res?.message?.includes('AI handling state') && res?.aiResponseStarted !== true) {
+                console.log(`[SCHEDULED] Node resulted in AI handling state. Triggering AI response for ${contact.wa_id}`);
+                // Re-fetch contact to get updated flow_state and metadata from executeVisualNode
+                const { data: updatedContact } = await supabase.from('crm_contacts').select('*').eq('id', contact.id).single();
+                 if (updatedContact) {
+                     // Adicionamos um pequeno delay para garantir que a mensagem de abertura foi entregue antes da IA responder
+                     await new Promise(r => setTimeout(r, 2000));
+                     await processAiAgentResponse(supabase, updatedContact, contact.wa_id, undefined, undefined, contact.user_id, (contact as any).whatsapp_number_id || null);
+                 }
+              }
+            } else {
+              await supabase.from('crm_contacts').update({ flow_state: 'idle' }).eq('id', contact.id);
+            }
+          }
+      };
+
+      // Delays prontos primeiro, em paralelo e isolados: um contato com erro
+      // ou lento nunca segura a espera dos outros.
+      const DELAY_PARALLEL = 10;
+      const runDelayBatch = async (rows: any[]) => {
+        for (let i = 0; i < rows.length; i += DELAY_PARALLEL) {
+          await Promise.all(rows.slice(i, i + DELAY_PARALLEL).map(async (row) => {
+            try { await runReadyDelay(row); }
+            catch (delayErr: any) { console.error(`[DELAY-ERROR] Contato ${row?.wa_id}:`, delayErr?.message || delayErr); }
+          }));
+        }
+      };
+      await runDelayBatch(delayRes.data || []);
+
+      const contactsToProcess = [...(waitingRes.data || [])];
       if (contactsToProcess.length > 0) {
         for (const contact of contactsToProcess) {
+         try {
           // 1. Process Timeout (se aplicável)
           if (contact.flow_state === 'waiting_response') {
             let effectiveTimeoutNodeId = contact.flow_timeout_node_id;
@@ -6465,48 +6521,27 @@ async function fetchAndStoreIncomingMedia(
             }
             continue; // Importante: se era waiting_response, já processamos (ou ignoramos se ainda estiver esperando)
           }
+         } catch (contactErr: any) {
+           console.error(`[TIMEOUT-ERROR] Contato ${contact?.wa_id}:`, contactErr?.message || contactErr);
+         }
 
-          // 2. Process Scheduled Delays
-          if (contact.next_execution_time && new Date(contact.next_execution_time) <= new Date()) {
-            console.log(`[DELAY-READY] Contato ${contact.wa_id} pronto para execução.`);
-            
-            // Tenta atualizar de forma atômica para garantir que APENAS UM processo execute este nó
-            const { data: updated, error: updateError } = await supabase.from('crm_contacts').update({ 
-              next_execution_time: null,
-              flow_state: 'running'
-            })
-            .eq('id', contact.id)
-            .eq('next_execution_time', contact.next_execution_time) // Garante atomicidade baseada no timestamp exato
-            .select();
-
-            if (updateError || !updated || updated.length === 0) {
-               console.log(`[DUPLICATION-PREVENTED] Contact ${contact.wa_id} already being processed.`);
-               continue;
-            }
-
-            const { data: flow } = await supabase.from('crm_flows').select('*').eq('id', contact.current_flow_id).single();
-            const currentNode = flow?.nodes?.find((n: any) => n.id === contact.current_node_id);
-            
-            if (flow && currentNode) {
-              const res: any = await executeVisualNode(supabase, flow, currentNode, contact.id, contact.wa_id);
-              results.push({ contactId: contact.id, result: res });
-
-              // Se o nó executado foi um Agente IA, processamos a resposta imediatamente
-                if (res?.message?.includes('AI handling state') && res?.aiResponseStarted !== true) {
-                console.log(`[SCHEDULED] Node resulted in AI handling state. Triggering AI response for ${contact.wa_id}`);
-                // Re-fetch contact to get updated flow_state and metadata from executeVisualNode
-                const { data: updatedContact } = await supabase.from('crm_contacts').select('*').eq('id', contact.id).single();
-                 if (updatedContact) {
-                     // Adicionamos um pequeno delay para garantir que a mensagem de abertura foi entregue antes da IA responder
-                     await new Promise(r => setTimeout(r, 2000));
-                     await processAiAgentResponse(supabase, updatedContact, contact.wa_id, undefined, undefined, contact.user_id, (contact as any).whatsapp_number_id || null);
-                 }
-              }
-            } else {
-              await supabase.from('crm_contacts').update({ flow_state: 'idle' }).eq('id', contact.id);
-            }
-          }
         }
+      }
+
+      // Pontualidade: o cron chama a cada 15s; nesse intervalo continuamos
+      // olhando a cada 1s para que esperas de segundos saiam no tempo certo.
+      const pollUntil = Date.now() + 13_000;
+      while (Date.now() < pollUntil) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const { data: readyNow } = await supabase
+          .from('crm_contacts')
+          .select('id, wa_id, user_id, current_flow_id, current_node_id, flow_timeout_minutes, flow_timeout_node_id, last_flow_interaction, flow_state, next_execution_time, last_message_received_at')
+          .neq('flow_state', 'idle')
+          .neq('flow_state', 'waiting_response')
+          .not('next_execution_time', 'is', null)
+          .lte('next_execution_time', new Date().toISOString())
+          .limit(200);
+        if (readyNow && readyNow.length > 0) await runDelayBatch(readyNow);
       }
 
       // Auto-push named CRM contacts to Google for every user with a connected account.

@@ -7955,6 +7955,7 @@ const CRM = () => {
                                                   {getUnsupportedMetaDetails(m) && (
                                                     <p className="mt-1 text-[10px] opacity-80">Detalhe informado: {getUnsupportedMetaDetails(m)}</p>
                                                   )}
+                                                  <UnsupportedMessageDiagnostic message={m} />
                                                 </div>
                                               </div>
                                             </div>

@@ -6370,7 +6370,7 @@ async function fetchAndStoreIncomingMedia(
 
             if (updateError || !updated || updated.length === 0) {
                console.log(`[DUPLICATION-PREVENTED] Contact ${contact.wa_id} already being processed.`);
-               continue;
+               return;
             }
 
             const { data: flow } = await supabase.from('crm_flows').select('*').eq('id', contact.current_flow_id).single();

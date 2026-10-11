@@ -473,6 +473,38 @@ SQLCRON
 sobrou_supabase="$(psql "$DB" -tAc "select count(*) from cron.job where command ilike '%supabase.co%'" 2>/dev/null || echo '?')"
 ok "cron apontando para ${CRON_URL} (jobs com Supabase restantes: ${sobrou_supabase})"
 
+# 5.2 — Serviço contínuo no host para fluxos/esperas/gatilhos com o CRM fechado.
+# Independe do pg_cron/pg_net e da URL pública: chama o gateway local 127.0.0.1.
+# O pg_cron acima continua ativo; a reserva atômica impede envio duplicado.
+if command -v systemctl >/dev/null 2>&1; then
+  chmod +x "$ROOT/deploy/zapmro-flow-ticker.sh" 2>/dev/null || true
+  sudo_ tee /etc/systemd/system/zapmro-flow-ticker.service >/dev/null <<EOF
+[Unit]
+Description=ZapMRO - fluxos e esperas rodando sem navegador
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env bash $ROOT/deploy/zapmro-flow-ticker.sh
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo_ systemctl daemon-reload
+  sudo_ systemctl enable zapmro-flow-ticker >/dev/null 2>&1 || true
+  if sudo_ systemctl restart zapmro-flow-ticker; then
+    ok "fluxos e esperas rodando continuamente na VPS (serviço zapmro-flow-ticker)"
+  else
+    warn "não foi possível iniciar zapmro-flow-ticker — veja: journalctl -u zapmro-flow-ticker"
+  fi
+else
+  warn "systemd indisponível; fluxos dependem apenas do pg_cron"
+fi
+
 # depois de garantir roles/senhas, os serviços que conectam no banco precisam
 # reconectar (PostgREST fica em Restarting se subiu antes das roles existirem)
 info "reiniciando serviços que dependem do banco e recarregando o gateway…"

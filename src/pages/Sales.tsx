@@ -15,6 +15,10 @@ const professionalButtonsImg = "https://images.unsplash.com/photo-1516321497487-
 const interactiveChatImg = "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&q=80&w=800";
 const productCarouselImg = "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=800";
 const appDashboardImg = "https://images.unsplash.com/photo-1675271591211-126ad94e495d?auto=format&fit=crop&q=80&w=800";
+
+// Contato comercial exibido no botão flutuante de WhatsApp da página de vendas.
+const SALES_WHATSAPP_NUMBER = "555192835863"; // 51 9283-5863
+const SALES_WHATSAPP_MESSAGE = "Vim pelo site do zapmro !";
  
   const Sales = () => {
      const [buyOpen, setBuyOpen] = useState(false);

@@ -1945,14 +1945,32 @@ async function handleProcessWebhook(supabase: any, entry: any, skipSave = false,
   if (!skipSave && message.id) {
      const { data: existingInbound } = await supabase
        .from('crm_messages')
-       .select('id')
+       .select('id, message_type, metadata')
        .eq('meta_message_id', message.id)
        .eq('user_id', userId)
        .maybeSingle();
 
     if (existingInbound) {
-      console.log(`[FLOW-LOG] Duplicate inbound message ${message.id} ignored for ${waId}`);
-      return jsonResponse({ success: true, message: 'Duplicate inbound ignored' });
+      // A Meta pode entregar primeiro um aviso "unsupported/131060 — currently unavailable"
+      // e, depois, reenviar a MESMA mensagem (mesmo wamid) com o conteúdo real.
+      // Antes, esse reenvio era descartado como duplicado e a conversa ficava
+      // para sempre com "Conteúdo não disponível". Agora o aviso é substituído
+      // pela mensagem real e o processamento (gatilhos/IA) segue normalmente.
+      const wasUnavailable = existingInbound.message_type === 'unsupported';
+      const nowReadable = message.type && message.type !== 'unsupported';
+      if (wasUnavailable && nowReadable) {
+        console.log(`[UNAVAILABLE-UPGRADE] Meta reenviou ${message.id} com conteúdo real (${message.type}); substituindo o aviso.`);
+        const previousRaw = (existingInbound.metadata as any)?.raw || null;
+        message.__unavailable_upgraded_from = previousRaw;
+        const { error: delErr } = await supabase.from('crm_messages').delete().eq('id', existingInbound.id);
+        if (delErr) {
+          console.error('[UNAVAILABLE-UPGRADE] Falha ao substituir aviso', delErr.message);
+          return jsonResponse({ success: true, message: 'Duplicate inbound ignored' });
+        }
+      } else {
+        console.log(`[FLOW-LOG] Duplicate inbound message ${message.id} ignored for ${waId}`);
+        return jsonResponse({ success: true, message: 'Duplicate inbound ignored' });
+      }
     }
   }
 

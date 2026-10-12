@@ -408,6 +408,9 @@ const getMetaDeliveryErrorExplanation = (message: any) => {
   if (code === '131026' || /message undeliverable/i.test(raw)) {
     return 'A Meta aceitou o envio, mas o WhatsApp não conseguiu entregar no aparelho do destinatário naquele momento (celular sem conexão, app desatualizado ou conta temporariamente indisponível). A Meta NÃO reenvia sozinha essas mensagens — elas são descartadas. Clique em "Reenviar" para tentar de novo.';
   }
+  if (code === '130497' || /restricted from messaging users in this country/i.test(raw)) {
+    return 'Restrição aplicada pela Meta na conta deste WhatsApp (código 130497): ela está impedida de enviar para clientes deste país. Não é falha do CRM nem mistura entre números. Verifique no WhatsApp Manager (Qualidade da conta / Business Support Home) o motivo — comum: nome de exibição fora das regras (ex.: todo em MAIÚSCULAS), verificação da empresa pendente ou violação de política. Reenviar não resolve até a Meta liberar.';
+  }
   if (/business account locked|not been verified|business.*verification|verifica(c|ç)/i.test(raw)) {
     return 'O Business Manager precisa concluir a verificação para liberar envios. Até lá você só recebe mensagens.';
   }

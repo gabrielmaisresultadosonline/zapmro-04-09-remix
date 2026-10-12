@@ -443,9 +443,13 @@ const getUnsupportedMetaMessage = (message: unknown) => {
   const raw = getUnsupportedMetaRaw(message);
   const error = Array.isArray(raw.errors) ? raw.errors[0] : null;
   const details = String(error?.error_data?.details || error?.message || '').trim();
+  const rawRecord = raw as Record<string, unknown>;
+  const hasAd = Boolean(rawRecord.referral || getAdReferral(message));
 
   if (Number(error?.code) === 131060 || /unavailable/i.test(details)) {
-    return 'Mensagem de anúncio (Click-to-WhatsApp) recebida. Em modo coexistência (QR Code), a Meta não libera o conteúdo, imagem nem link do anúncio para o CRM — apenas o app do WhatsApp mostra. Para receber tudo aqui, migre o número 100% para a Cloud API.';
+    return hasAd
+      ? 'Mensagem de anúncio (Click-to-WhatsApp) recebida, mas a Meta reteve o conteúdo (comum em número usado no celular e no CRM ao mesmo tempo). Se a Meta reenviar o conteúdo, ele substitui este aviso automaticamente.'
+      : 'A Meta avisou que recebeu uma mensagem, mas reteve o conteúdo e não informou anúncio. Se a Meta reenviar o conteúdo, ele substitui este aviso automaticamente. Veja o texto no celular do WhatsApp.';
   }
 
   return 'Mensagem recebida em um formato que o WhatsApp ainda não disponibilizou para leitura no CRM.';

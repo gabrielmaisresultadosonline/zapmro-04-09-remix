@@ -4709,6 +4709,22 @@ async function uploadMediaToMeta(accessToken: string, phoneNumberId: string, med
     if (arrayBuffer.byteLength > 100_000_000) {
       throw new Error('Documento acima do limite de 100MB da Meta.');
     }
+    // A Meta só aceita uma lista fechada de tipos de documento. Arquivos fora dela
+    // (.zip, .rar, .7z, .crx, .apk, etc.) são enviados como "documento genérico"
+    // (text/plain) mantendo o NOME e a EXTENSÃO originais — o WhatsApp do cliente
+    // entrega o arquivo intacto (ex.: extensao.zip) e ele abre normalmente.
+    const META_DOC_TYPES = new Set([
+      'application/pdf', 'text/plain', 'application/msword', 'application/vnd.ms-excel',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]);
+    const baseType = String(contentType || '').split(';')[0].trim().toLowerCase();
+    if (!META_DOC_TYPES.has(baseType)) {
+      console.log(`[UPLOAD-DOC] Tipo "${baseType}" não aceito pela Meta; enviando como documento genérico mantendo o nome "${fileName}".`);
+      contentType = 'text/plain';
+    }
   }
   // Imagem: a Meta aceita apenas image/jpeg e image/png
   if (media.type === 'image') {

@@ -5849,36 +5849,57 @@ const CRM = () => {
    * "Não tens acesso à conta comercial ..." (erro 404 business_access).
    * Sem ID próprio abrimos a página geral, que resolve pela conta logada.
    */
+  /**
+   * IDs da Meta do WhatsApp ABERTO. Em cadastros com vários números, o
+   * crm_settings pode guardar as credenciais do último número conectado;
+   * por isso lemos direto a caixa aberta em crm_whatsapp_numbers.
+   */
+  const resolveOpenNumberMetaIds = async (): Promise<{ businessId: string; wabaId: string }> => {
+    const fallback = {
+      businessId: String(metaSettings.meta_business_id || '').trim(),
+      wabaId: String(metaSettings.meta_waba_id || '').trim(),
+    };
+    const boxId = activeNumberIdRef.current;
+    if (!boxId) return fallback;
+    const { data } = await (supabase as any)
+      .from('crm_whatsapp_numbers')
+      .select('meta_business_id, meta_waba_id')
+      .eq('id', boxId)
+      .maybeSingle();
+    if (!data) return fallback;
+    return {
+      businessId: String(data.meta_business_id || '').trim(),
+      wabaId: String(data.meta_waba_id || '').trim(),
+    };
+  };
+
+  /** Abre a aba já (evita bloqueio de pop-up) e define o endereço após ler os IDs. */
+  const openMetaPage = async (build: (ids: { businessId: string; wabaId: string }) => string) => {
+    const tab = window.open('about:blank', '_blank');
+    const url = build(await resolveOpenNumberMetaIds());
+    if (tab) { tab.opener = null; tab.location.href = url; }
+    else window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const openMetaTemplatesManager = () => {
-    const businessId = String(metaSettings.meta_business_id || '').trim();
-    const wabaId = String(metaSettings.meta_waba_id || '').trim();
-    const params = new URLSearchParams();
-    if (businessId) params.set('business_id', businessId);
-    if (wabaId) params.set('asset_id', wabaId);
-    const qs = params.toString();
-    window.open(
-      `https://business.facebook.com/latest/whatsapp_manager/message_templates${qs ? `?${qs}` : ''}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
+    void openMetaPage(({ businessId, wabaId }) => {
+      const params = new URLSearchParams();
+      if (businessId) params.set('business_id', businessId);
+      if (wabaId) params.set('asset_id', wabaId);
+      const qs = params.toString();
+      return `https://business.facebook.com/latest/whatsapp_manager/message_templates${qs ? `?${qs}` : ''}`;
+    });
   };
 
   const openMetaBillingHub = () => {
-    const businessId = String(metaSettings.meta_business_id || '').trim();
-    const wabaId = String(metaSettings.meta_waba_id || '').trim();
-    if (!businessId && !wabaId) {
-      window.open('https://business.facebook.com/billing_hub/accounts', '_blank', 'noopener,noreferrer');
-      return;
-    }
-    const params = new URLSearchParams();
-    if (wabaId) params.set('asset_id', wabaId);
-    if (businessId) params.set('business_id', businessId);
-    params.set('placement', 'whatsapp_ads');
-    window.open(
-      `https://business.facebook.com/latest/billing_hub/accounts?${params.toString()}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
+    void openMetaPage(({ businessId, wabaId }) => {
+      if (!businessId && !wabaId) return 'https://business.facebook.com/billing_hub/accounts';
+      const params = new URLSearchParams();
+      if (wabaId) params.set('asset_id', wabaId);
+      if (businessId) params.set('business_id', businessId);
+      params.set('placement', 'whatsapp_ads');
+      return `https://business.facebook.com/latest/billing_hub/accounts?${params.toString()}`;
+    });
   };
 
   // Multi-WhatsApp habilitado: escolhe qual número abrir antes das conversas.

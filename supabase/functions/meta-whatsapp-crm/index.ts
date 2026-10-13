@@ -3796,6 +3796,15 @@ function getGoogleOAuthCredentials(settings?: any) {
   };
 }
 
+/**
+ * WhatsApp ao qual a conta Google pertence. null = compartilhada entre todos
+ * os WhatsApps do cadastro (contas antigas ou "compartilhar" ligado).
+ */
+function googleAccountBox(account: any): string | null {
+  if (!account || account.share_all_numbers === true) return null;
+  return account.whatsapp_number_id || null;
+}
+
 async function pushPendingContactsToGoogle(supabase: any, userId: string, settings: any, accounts: any[], limit = 500) {
   if (!userId || userId === 'null') {
     throw new Error('Exportação Google recusada: usuário não identificado.');
@@ -3911,14 +3920,13 @@ async function pushPendingContactsToGoogle(supabase: any, userId: string, settin
     // - dirty contacts already on THIS account (re-upload)
     // Contacts linked to a different Google account stay with that account;
     // they are never migrated to the current account by Auto Sync.
+    // Contas ligadas a um WhatsApp só recebem contatos daquele WhatsApp.
+    const accountBox = googleAccountBox(account);
+    const inScope = (c: any) => !accountBox || c.whatsapp_number_id === accountBox;
     const forThisAccount = remaining.filter((c: any) =>
-      !c.google_sync_account_id
-        || c.google_sync_account_id === account.id
+      inScope(c) && (!c.google_sync_account_id || c.google_sync_account_id === account.id)
     );
-    const skippedForOtherAccounts = remaining.filter((c: any) =>
-      c.google_sync_account_id
-        && c.google_sync_account_id !== account.id
-    );
+    const skippedForOtherAccounts = remaining.filter((c: any) => !forThisAccount.includes(c));
     if (forThisAccount.length === 0) {
       remaining = skippedForOtherAccounts;
       continue;

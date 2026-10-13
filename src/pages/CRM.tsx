@@ -1018,7 +1018,18 @@ const CRM = () => {
   const [webhooks, setWebhooks] = useState<any[]>([]);
   const [isNewWebhookDialogOpen, setIsNewWebhookDialogOpen] = useState(false);
   const [newWebhook, setNewWebhook] = useState({ name: '', response_type: 'text' as 'text' | 'template', template_id: '', secret_token: '', is_active: true, default_status: 'new' });
-  const [googleAccounts, setGoogleAccounts] = useState<Array<{ id: string; email: string; auto_sync: boolean; connection_status?: string | null; last_sync_error?: string | null }>>([]);
+  const [googleAccounts, setGoogleAccounts] = useState<Array<{ id: string; email: string; auto_sync: boolean; connection_status?: string | null; last_sync_error?: string | null; whatsapp_number_id?: string | null; share_all_numbers?: boolean }>>([]);
+  /** Liga/desliga o compartilhamento dos contatos de uma conta Google com todos os WhatsApps. */
+  const handleToggleGoogleShare = async (accountId: string, share: boolean) => {
+    const boxId = activeNumberIdRef.current;
+    const patch: Record<string, unknown> = { share_all_numbers: share, updated_at: new Date().toISOString() };
+    // Ao deixar de compartilhar, a conta passa a ser só do WhatsApp aberto.
+    if (!share && boxId) patch.whatsapp_number_id = boxId;
+    const { error } = await (supabase as any).from('crm_google_accounts').update(patch).eq('id', accountId);
+    if (error) { toast({ title: 'Não foi possível alterar', description: error.message, variant: 'destructive' }); return; }
+    setGoogleAccounts(prev => prev.map(a => a.id === accountId ? { ...a, share_all_numbers: share, whatsapp_number_id: (patch.whatsapp_number_id as string) ?? a.whatsapp_number_id } : a));
+    toast({ title: share ? 'Contatos compartilhados com todos os WhatsApps' : 'Contatos só deste WhatsApp' });
+  };
   const googleContactsEnabled = googleAccounts.length > 0;
   const anyAutoSync = googleAccounts.some(a => a.auto_sync);
   const MAX_GOOGLE_ACCOUNTS = 3;
@@ -2865,12 +2876,24 @@ const CRM = () => {
       await fetchAllScheduledMessages();
 
       // Busca todas as contas Google conectadas (até 3)
-      const { data: googleAccs } = await supabase
+      let { data: googleAccsRaw, error: googleAccsError } = await (supabase as any)
         .from('crm_google_accounts')
-        .select('id, email, auto_sync, connection_status, last_sync_error')
+        .select('id, email, auto_sync, connection_status, last_sync_error, whatsapp_number_id, share_all_numbers')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true });
-      if (googleAccs) {
+      if (googleAccsError) {
+        // Servidor ainda sem a migração 125: mantém o comportamento anterior.
+        ({ data: googleAccsRaw } = await supabase
+          .from('crm_google_accounts')
+          .select('id, email, auto_sync, connection_status, last_sync_error')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true }));
+      }
+      // Cada WhatsApp vê só as próprias contas Google + as compartilhadas.
+      const openBox = activeNumberIdRef.current;
+      const googleAccs = (googleAccsRaw || []).filter((a: any) =>
+        !a.whatsapp_number_id || a.share_all_numbers || !openBox || a.whatsapp_number_id === openBox);
+      if (googleAccsRaw) {
         setGoogleAccounts(googleAccs as any);
         if (googleAccs.length > 0) {
           localStorage.setItem('google_contacts_connected', 'true');

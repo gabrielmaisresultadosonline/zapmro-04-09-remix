@@ -1308,6 +1308,21 @@ const CRM = () => {
           }
         }
         addConnectionLog('success', 'Conexão salva no CRM com sucesso', data);
+        // Grava na lista de WhatsApps já agora — inclusive "Reconectar", que
+        // reaproveita a caixa desconectada escolhida (conversas e fluxos ficam).
+        if (user) {
+          try {
+            const { data: freshSettings } = await supabase.from('crm_settings').select('*').eq('user_id', user.id).maybeSingle();
+            if (freshSettings) {
+              const list = await syncSettingsIntoNumbers(user.id, freshSettings);
+              const saved = list.find((n) => n.meta_phone_number_id === (freshSettings as any).meta_phone_number_id);
+              if (saved) setActiveNumberId(saved.id);
+              setUserNumbersCount(list.length);
+            }
+          } catch (syncErr) {
+            console.warn('[CRM] falha ao registrar a conexão na lista de WhatsApps', syncErr);
+          }
+        }
         setWhatsAppConnectionConfirmed(true);
         setMetaSettings(prev => ({
           ...prev,

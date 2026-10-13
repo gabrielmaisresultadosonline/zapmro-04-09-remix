@@ -218,6 +218,16 @@ export function WhatsAppNumberSelector({
                       </button>
                       <button
                         type="button"
+                        title="Reconectar mantendo conversas, contatos e fluxos"
+                        aria-label={`Reconectar ${describeNumber(record)}`}
+                        onClick={() => setReconnectConfirm(record)}
+                        className="h-9 px-3 rounded-lg bg-[#1877F2] hover:bg-[#1465c8] text-white text-sm font-semibold flex items-center gap-2 transition"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Reconectar
+                      </button>
+                      <button
+                        type="button"
                         title="Excluir definitivamente"
                         aria-label={`Excluir definitivamente ${describeNumber(record)}`}
                         onClick={() => setDeleteTarget(record)}

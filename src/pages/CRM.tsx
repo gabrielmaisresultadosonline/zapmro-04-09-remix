@@ -1316,7 +1316,7 @@ const CRM = () => {
             if (freshSettings) {
               const list = await syncSettingsIntoNumbers(user.id, freshSettings);
               const saved = list.find((n) => n.meta_phone_number_id === (freshSettings as any).meta_phone_number_id);
-              if (saved) setActiveNumberId(saved.id);
+              if (saved) persistActiveNumberId(user.id, saved.id);
               setUserNumbersCount(list.length);
             }
           } catch (syncErr) {

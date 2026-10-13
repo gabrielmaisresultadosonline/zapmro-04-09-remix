@@ -9559,6 +9559,16 @@ const CRM = () => {
                                       ⚠ Reconexão necessária
                                     </span>
                                   )}
+                                  {userNumbersCount > 1 && (
+                                    <label className="mt-1 flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
+                                      <Switch
+                                        className="scale-75 origin-left"
+                                        checked={!acc.whatsapp_number_id || !!acc.share_all_numbers}
+                                        onCheckedChange={(checked) => void handleToggleGoogleShare(acc.id, checked)}
+                                      />
+                                      {!acc.whatsapp_number_id || acc.share_all_numbers ? 'Compartilhada com todos os WhatsApps' : 'Só contatos deste WhatsApp'}
+                                    </label>
+                                  )}
                                 </div>
                               </div>
 

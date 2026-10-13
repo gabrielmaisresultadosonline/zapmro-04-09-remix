@@ -3796,6 +3796,15 @@ function getGoogleOAuthCredentials(settings?: any) {
   };
 }
 
+/**
+ * WhatsApp ao qual a conta Google pertence. null = compartilhada entre todos
+ * os WhatsApps do cadastro (contas antigas ou "compartilhar" ligado).
+ */
+function googleAccountBox(account: any): string | null {
+  if (!account || account.share_all_numbers === true) return null;
+  return account.whatsapp_number_id || null;
+}
+
 async function pushPendingContactsToGoogle(supabase: any, userId: string, settings: any, accounts: any[], limit = 500) {
   if (!userId || userId === 'null') {
     throw new Error('Exportação Google recusada: usuário não identificado.');
@@ -3911,14 +3920,13 @@ async function pushPendingContactsToGoogle(supabase: any, userId: string, settin
     // - dirty contacts already on THIS account (re-upload)
     // Contacts linked to a different Google account stay with that account;
     // they are never migrated to the current account by Auto Sync.
+    // Contas ligadas a um WhatsApp só recebem contatos daquele WhatsApp.
+    const accountBox = googleAccountBox(account);
+    const inScope = (c: any) => !accountBox || c.whatsapp_number_id === accountBox;
     const forThisAccount = remaining.filter((c: any) =>
-      !c.google_sync_account_id
-        || c.google_sync_account_id === account.id
+      inScope(c) && (!c.google_sync_account_id || c.google_sync_account_id === account.id)
     );
-    const skippedForOtherAccounts = remaining.filter((c: any) =>
-      c.google_sync_account_id
-        && c.google_sync_account_id !== account.id
-    );
+    const skippedForOtherAccounts = remaining.filter((c: any) => !forThisAccount.includes(c));
     if (forThisAccount.length === 0) {
       remaining = skippedForOtherAccounts;
       continue;
@@ -7898,6 +7906,8 @@ async function fetchAndStoreIncomingMedia(
            updated_at: new Date().toISOString(),
            user_id: userId,
            auto_sync: scopeOk ? (existingAccount?.auto_sync ?? true) : false,
+           // Conta nova fica ligada ao WhatsApp aberto; conta existente mantém o seu.
+           ...(!existingAccount?.id && params?.whatsapp_number_id ? { whatsapp_number_id: params.whatsapp_number_id } : {}),
            connection_status: scopeOk ? 'active' : 'reconnect_required',
            granted_scopes: grantedScopes ? grantedScopes.join(' ') : null,
            last_sync_error_code: scopeOk ? null : 'INSUFFICIENT_SCOPE',
@@ -8027,10 +8037,14 @@ async function fetchAndStoreIncomingMedia(
         let from = 0;
         const pageSize = 1000;
         while (true) {
-          const { data: existingRows, error: existingErr } = await supabase
+          // Conta ligada a um WhatsApp: só cruza com contatos daquele WhatsApp.
+          let existingQuery = supabase
             .from('crm_contacts')
             .select('id, wa_id, name, source_type')
-            .eq('user_id', userId)
+            .eq('user_id', userId);
+          const importBox = googleAccountBox(account);
+          if (importBox) existingQuery = existingQuery.eq('whatsapp_number_id', importBox);
+          const { data: existingRows, error: existingErr } = await existingQuery
             .range(from, from + pageSize - 1);
           if (existingErr) {
             console.error('[SYNC] Falha ao carregar contatos existentes:', existingErr.message);
@@ -8135,6 +8149,7 @@ async function fetchAndStoreIncomingMedia(
                 google_sync_account_id: account.id,
                 user_id: userId,
                 source_type: 'google',
+                ...(googleAccountBox(account) ? { whatsapp_number_id: googleAccountBox(account) } : {}),
                 updated_at: new Date().toISOString()
               });
             }

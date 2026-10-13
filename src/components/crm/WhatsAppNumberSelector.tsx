@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Eye, Loader2, Lock, MessageSquare, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Copy, Eye, Loader2, Lock, MessageSquare, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -10,6 +10,7 @@ import {
   isNumberUnlocked,
   isNumberConnected,
   setNumberPin,
+  setReconnectTarget,
   type WhatsAppNumberRecord,
 } from "@/lib/whatsappNumbers";
 import { DisconnectedNumbersHistory } from "@/components/crm/DisconnectedNumbersHistory";
@@ -52,6 +53,15 @@ export function WhatsAppNumberSelector({
   const [showLimit, setShowLimit] = useState(false);
   const [copySource, setCopySource] = useState<WhatsAppNumberRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WhatsAppNumberRecord | null>(null);
+  const [reconnectConfirm, setReconnectConfirm] = useState<WhatsAppNumberRecord | null>(null);
+
+  const startReconnect = () => {
+    if (!reconnectConfirm) return;
+    setReconnectTarget(userId, reconnectConfirm.id);
+    setReconnectConfirm(null);
+    // Reconectar não conta como número novo: a caixa já existe no cadastro.
+    onConnectNew();
+  };
 
   const load = async () => {
     setLoading(true);
@@ -218,6 +228,16 @@ export function WhatsAppNumberSelector({
                       </button>
                       <button
                         type="button"
+                        title="Reconectar mantendo conversas, contatos e fluxos"
+                        aria-label={`Reconectar ${describeNumber(record)}`}
+                        onClick={() => setReconnectConfirm(record)}
+                        className="h-9 px-3 rounded-lg bg-[#1877F2] hover:bg-[#1465c8] text-white text-sm font-semibold flex items-center gap-2 transition"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Reconectar
+                      </button>
+                      <button
+                        type="button"
                         title="Excluir definitivamente"
                         aria-label={`Excluir definitivamente ${describeNumber(record)}`}
                         onClick={() => setDeleteTarget(record)}
@@ -291,6 +311,25 @@ export function WhatsAppNumberSelector({
 
       {copySource && (
         <NumberContentCopyDialog userId={userId} source={copySource} numbers={numbers} onClose={() => setCopySource(null)} />
+      )}
+
+      {reconnectConfirm && (
+        <div className="fixed inset-0 z-[220] bg-black/70 flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#202c33] rounded-2xl border border-white/10 p-6">
+            <div className="w-12 h-12 rounded-lg bg-[#1877F2]/15 text-[#1877F2] flex items-center justify-center mb-4"><RefreshCw className="w-6 h-6" /></div>
+            <h2 className="text-white font-bold text-lg">Reconectar este WhatsApp?</h2>
+            <p className="text-white/60 text-sm mt-2 leading-relaxed">
+              A nova conexão da Meta entra no lugar de {describeNumber(reconnectConfirm)}. Conversas, contatos, fluxos e configurações continuam aqui, mesmo se você conectar outro número.
+            </p>
+            <p className="text-amber-400/90 text-xs mt-2 leading-relaxed">
+              Templates ficam salvos, mas se a conta da Meta for outra eles precisam ser enviados de novo para aprovação.
+            </p>
+            <div className="flex gap-2 mt-5">
+              <button type="button" onClick={() => setReconnectConfirm(null)} className="flex-1 h-10 rounded-lg bg-white/10 hover:bg-white/15 text-white text-sm font-semibold">Cancelar</button>
+              <button type="button" onClick={startReconnect} className="flex-1 h-10 rounded-lg bg-[#1877F2] hover:bg-[#1465c8] text-white text-sm font-semibold">Reconectar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {deleteTarget && (

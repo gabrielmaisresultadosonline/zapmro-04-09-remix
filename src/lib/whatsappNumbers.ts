@@ -27,6 +27,18 @@ export interface WhatsAppNumberRecord {
 }
 
 const activeKey = (userId: string) => `crm_active_number_${userId}`;
+const reconnectKey = (userId: string) => `crm_reconnect_number_${userId}`;
+
+/** Marca qual caixa desconectada deve receber a próxima conexão da Meta. */
+export function setReconnectTarget(userId: string, numberId: string) {
+  try { localStorage.setItem(reconnectKey(userId), numberId); } catch { /* noop */ }
+}
+export function getReconnectTarget(userId: string): string | null {
+  try { return localStorage.getItem(reconnectKey(userId)); } catch { return null; }
+}
+export function clearReconnectTarget(userId: string) {
+  try { localStorage.removeItem(reconnectKey(userId)); } catch { /* noop */ }
+}
 const unlockedKey = (userId: string, numberId: string) =>
   `crm_number_unlocked_${userId}_${numberId}`;
 
@@ -112,9 +124,17 @@ export async function syncSettingsIntoNumbers(
   }
 
   const existing = await fetchUserNumbers(userId);
-  const match = existing.find(
+  let match = existing.find(
     (n) => n.meta_phone_number_id === settings.meta_phone_number_id
   );
+  // "Reconectar": a nova conexão entra na MESMA caixa desconectada, mantendo
+  // conversas, contatos e fluxos (todos ligados ao id da caixa).
+  const reconnectId = getReconnectTarget(userId);
+  if (reconnectId) {
+    const target = existing.find((n) => n.id === reconnectId && !isNumberConnected(n));
+    if (!match && target) match = target;
+    clearReconnectTarget(userId);
+  }
 
   const payload = {
     user_id: userId,

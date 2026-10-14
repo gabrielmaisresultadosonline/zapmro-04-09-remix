@@ -1253,6 +1253,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     10. LINKS: Ao enviar um link, envie apenas a URL pura (ex: https://site.com). Nunca use markdown para links como [texto](url) e nunca repita o link. Digite o link uma única vez.
     11. SAUDAÇÕES: Não envie saudações (como "Oi!", "Olá!", "Bom dia") se você já estiver conversando com o cliente no histórico recente. Se o histórico já contém interações, pule a saudação inicial e vá direto para a resposta ou pergunta.
     12. Nunca saia do personagem.
+    12.1. NEGRITO (FORMATO WHATSAPP): para destacar palavras em negrito, envolva-as com UM asterisco de cada lado, assim: *palavra*. NUNCA use dois asteriscos (**palavra**) — o WhatsApp não entende markdown e o cliente veria os asteriscos soltos no texto.
     13. MEMÓRIA DA CONVERSA: Sempre retome TODO o contexto já conversado no histórico (dados, nomes, valores, combinados, dúvidas pendentes). Nunca repita perguntas cujas respostas já estão no histórico e nunca recomece o atendimento do zero.${kanbanInstruction}${sendingInstruction}${documentsInstruction}`;
   
   try {

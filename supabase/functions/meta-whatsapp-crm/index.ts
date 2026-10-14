@@ -4,6 +4,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
 import {
+  buildHumanAlertText, HUMAN_ALERT_DEDUPE_MS, HUMAN_ALERT_RENEW_BEFORE_MS, HUMAN_ALERT_RENEW_BUTTON_ID,
+  HUMAN_ALERT_RENEW_TEXT, isSamePhone, phoneVariants,
+} from "../_shared/human-alert.ts"
+import {
   buildServerTemplateComponents,
   parseServerTemplateSchema,
   renderSentTemplateContent,
@@ -1381,6 +1385,17 @@ ${aiPrompt}
       }
     }
     
+    if (wantsHumanTransfer || kanbanCategory === 'humano') {
+      try {
+        const alert = await notifyHumanAttendant(supabase, {
+          settings: aiSettings, boxId, contact, waId, history, openaiKey: OPENAI_API_KEY, userId: userId || contact?.user_id,
+        });
+        aiLog('human_alert', alert);
+      } catch (alertErr: any) {
+        aiLog('human_alert_failed', { error: alertErr?.message || String(alertErr) });
+      }
+    }
+
     if (wantsHumanTransfer) {
       console.log(`[AI-AGENT] AI decided to transfer contact ${waId} to human.`);
       
@@ -2528,6 +2543,16 @@ else if (message.type === "unsupported") {
     webhookSettings = await loadNumberSettings(supabase, loadedSettings || null, contact?.whatsapp_number_id || null);
   } catch (settingsErr) {
     console.error('[WEBHOOK] Unexpected error loading crm_settings', settingsErr);
+  }
+  // O atendente humano cadastrado no Agente I.A. só conversa para manter a
+  // janela de 24h aberta: a mensagem fica salva, mas fluxos e I.A. não respondem.
+  if (
+    webhookSettings?.ai_human_alert_enabled === true &&
+    webhookSettings?.ai_human_alert_phone &&
+    isSamePhone(waId, webhookSettings.ai_human_alert_phone)
+  ) {
+    console.log(`[HUMAN-ALERT] Mensagem do atendente ${waId} recebida (botão: ${buttonId || '-'}); janela de 24h renovada, automações ignoradas.`);
+    return jsonResponse({ success: true, message: 'Human attendant message stored' });
   }
   const isGlobalAiEnabled = webhookSettings?.ai_agent_enabled === true;
   webhookAiLog('eligibility_resolved', {
@@ -6517,6 +6542,9 @@ async function fetchAndStoreIncomingMedia(
         return await handleProcessWebhook(supabase, body.entry, false, userId || undefined);
       }
     if (action === 'processScheduled') {
+      // Renovação da janela do atendente humano (auxiliar, nunca bloqueia fluxos).
+      processHumanAlertRenewals(supabase).catch((err: any) =>
+        console.error('[HUMAN-ALERT] Renovação falhou:', err?.message || String(err)));
       console.log(`[BACKGROUND-LOG] Background processing for action: ${action}`);
       const now = new Date().toISOString();
       

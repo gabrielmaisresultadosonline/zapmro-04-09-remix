@@ -1092,7 +1092,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     aiLog('documents_load_failed', { error: docsLoadErr?.message || String(docsLoadErr) });
   }
   const documentsInstruction = aiDocuments.length > 0
-    ? `\n16. ARQUIVOS DISPONÍVEIS PARA ENVIO: você pode enviar os arquivos abaixo ao cliente. Quando o cliente pedir um deles, ou quando o prompt mandar enviar, ou quando fizer sentido no atendimento, inclua a etiqueta interna [[ENVIAR:CODIGO]] (uma por arquivo) junto da sua resposta. O sistema envia o arquivo automaticamente logo após o texto. Nunca escreva o link do arquivo, nunca diga que não consegue enviar arquivos e não envie o mesmo arquivo de novo se ele já aparece enviado no histórico, a menos que o cliente peça.\n${aiDocuments.map((d) => `- ${d.code} (${d.media_type === 'document' ? 'documento/PDF' : d.media_type === 'image' ? 'imagem' : d.media_type === 'audio' ? 'áudio' : 'vídeo'}): ${d.title}${d.description ? ` — ${d.description}` : ''}`).join('\n')}`
+    ? `\n16. ARQUIVOS DISPONÍVEIS PARA ENVIO: você pode enviar os arquivos abaixo ao cliente. Quando o cliente pedir um deles, ou quando o prompt mandar enviar (mesmo que o prompt escreva o código entre parênteses, como (CODIGO)), ou quando fizer sentido no atendimento, inclua EXATAMENTE a etiqueta interna [[ENVIAR:CODIGO]] (uma por arquivo) no final da sua resposta. Nunca escreva o código solto, entre parênteses ou como "ação operacional" para o cliente; use somente a etiqueta. O sistema envia o arquivo automaticamente, separado, logo após o texto. Nunca escreva o link do arquivo, nunca diga que não consegue enviar arquivos e não envie o mesmo arquivo de novo se ele já aparece enviado no histórico, a menos que o cliente peça.\n${aiDocuments.map((d) => `- ${d.code} (${d.media_type === 'document' ? 'documento/PDF' : d.media_type === 'image' ? 'imagem' : d.media_type === 'audio' ? 'áudio' : 'vídeo'}): ${d.title}${d.description ? ` — ${d.description}` : ''}`).join('\n')}`
     : '';
 
   const systemPrompt = `${aiPrompt}
@@ -1175,7 +1175,7 @@ ${aiPrompt}
     let kanbanCategory = organizerEnabled ? extractAiKanbanCategory(rawReply) : null;
     const customLabel = organizerEnabled ? extractAiCustomLabel(rawReply) : null;
     const wantsHumanTransfer = rawReply.includes('[[TRANSFER_TO_HUMAN]]');
-    const reply = cleanAiControlTags(rawReply);
+    let reply = cleanAiControlTags(rawReply);
     // Arquivos pedidos pela IA ([[ENVIAR:CODIGO]]) ou citados pelo código na mensagem do cliente.
     const documentsToSend: typeof aiDocuments = [];
     if (aiDocuments.length > 0) {
@@ -1185,8 +1185,20 @@ ${aiPrompt}
       for (const d of aiDocuments) {
         const escaped = d.code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         if (new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, 'i').test(clientText)) wanted.add(d.code.toLowerCase());
+        // A IA às vezes escreve o código no texto em vez da etiqueta: (docsaopaulo), `docsaopaulo`,
+        // [docsaopaulo], ENVIAR:docsaopaulo. Nesses casos o arquivo é enviado e o código some do texto.
+        const wrapped = new RegExp(`[\\(\\[\`"'{]+\\s*(?:ENVIAR\\s*:\\s*)?${escaped}\\s*[\\)\\]\`"'}]+|ENVIAR\\s*:\\s*${escaped}(?![A-Za-z0-9_])`, 'gi');
+        if (wrapped.test(reply)) {
+          wanted.add(d.code.toLowerCase());
+          reply = reply.replace(wrapped, '');
+        }
       }
+      // Remove linhas que sobraram vazias ou só com rótulos internos (ex.: "Ação operacional:").
+      reply = reply.split('\n')
+        .filter((line) => !/^\s*[`*_\-•]*\s*(a[çc][aã]o operacional|a[çc][aã]o interna|enviar arquivo|arquivo)\s*:?\s*[`*_.\s]*$/i.test(line))
+        .join('\n').replace(/\n{3,}/g, '\n\n').trim();
       for (const d of aiDocuments) if (wanted.has(d.code.toLowerCase())) documentsToSend.push(d);
+
       if (documentsToSend.length > 0) aiLog('documents_requested', { codes: documentsToSend.map((d) => d.code) });
     }
     const sendAiDocuments = async () => {

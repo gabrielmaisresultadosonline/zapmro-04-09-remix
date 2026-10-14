@@ -747,6 +747,143 @@ async function classifyConversationForKanban(
   }
 }
 
+// ============= AVISO DE ATENDIMENTO HUMANO (Agente I.A.) =============
+
+/** Contato do atendente dentro da mesma caixa (janela 24h vem dele). */
+async function findHumanAttendantContact(supabase: any, boxId: string | null, phone: unknown) {
+  const variants = phoneVariants(phone);
+  if (!boxId || variants.length === 0) return null;
+  const { data, error } = await supabase
+    .from('crm_contacts')
+    .select('*')
+    .eq('whatsapp_number_id', boxId)
+    .in('wa_id', variants)
+    .order('last_message_received_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) console.error('[HUMAN-ALERT] Falha ao localizar atendente:', error.message);
+  return data || null;
+}
+
+async function summarizeForHumanAlert(openaiKey: string | null | undefined, history: string): Promise<string> {
+  const fallback = 'Cliente pediu atendimento humano.';
+  if (!openaiKey || !history) return fallback;
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${String(openaiKey).trim()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        max_tokens: 220,
+        messages: [
+          { role: 'system', content: 'Você resume conversas de vendas para um atendente humano assumir. Responda em português, em no máximo 4 frases curtas, em um único parágrafo, sem markdown. Diga: o que o cliente quer, se já está qualificado (sim/não e por quê) e se está fechando a compra (sim/não). Não invente dados.' },
+          { role: 'user', content: history.slice(-12000) },
+        ],
+      }),
+    });
+    if (!res.ok) return fallback;
+    const json = await res.json();
+    const text = String(json?.choices?.[0]?.message?.content || '').replace(/\s*\n+\s*/g, ' ').trim();
+    return text || fallback;
+  } catch (err: any) {
+    console.error('[HUMAN-ALERT] Falha no resumo:', err?.message || String(err));
+    return fallback;
+  }
+}
+
+/** Envia UMA mensagem de aviso ao atendente, se a janela 24h dele estiver aberta. */
+async function notifyHumanAttendant(supabase: any, p: {
+  settings: any; boxId: string | null; contact: any; waId: string; history: string; openaiKey?: string | null; userId?: string | null;
+}) {
+  const s = p.settings || {};
+  if (s.ai_human_alert_enabled !== true || !s.ai_human_alert_phone) return { sent: false, reason: 'disabled' };
+  if (isSamePhone(p.waId, s.ai_human_alert_phone)) return { sent: false, reason: 'is_attendant' };
+  const lastAlert = Date.parse(String(p.contact?.metadata?.human_alert_sent_at || ''));
+  if (Number.isFinite(lastAlert) && Date.now() - lastAlert < HUMAN_ALERT_DEDUPE_MS) return { sent: false, reason: 'recently_alerted' };
+
+  const attendant = await findHumanAttendantContact(supabase, p.boxId, s.ai_human_alert_phone);
+  if (!attendant) {
+    console.warn(`[HUMAN-ALERT] Atendente ainda não mandou mensagem para esta caixa (${p.boxId}).`);
+    return { sent: false, reason: 'attendant_never_wrote' };
+  }
+  if (!getConversationWindow(attendant).is_open) {
+    console.warn(`[HUMAN-ALERT] Janela de 24h do atendente ${attendant.wa_id} fechada; aviso não enviado.`);
+    return { sent: false, reason: 'attendant_window_closed' };
+  }
+
+  const summary = await summarizeForHumanAlert(p.openaiKey, p.history);
+  const text = buildHumanAlertText({ waId: p.waId, name: p.contact?.name, summary });
+  await handleInternalSendMessage(supabase, s.meta_phone_number_id, s.meta_access_token, {
+    to: attendant.wa_id,
+    text,
+    whatsapp_number_id: p.boxId,
+    metadata: { source: 'human_alert', alert_for_contact_id: p.contact?.id || null },
+  }, attendant, s.vps_transcoder_url, p.userId || attendant.user_id);
+
+  if (p.contact?.id) {
+    await supabase.from('crm_contacts').update({
+      metadata: { ...(p.contact.metadata || {}), human_alert_sent_at: new Date().toISOString() },
+    }).eq('id', p.contact.id);
+  }
+  console.log(`[HUMAN-ALERT] Aviso enviado ao atendente ${attendant.wa_id} sobre ${p.waId}.`);
+  return { sent: true };
+}
+
+let lastHumanAlertRenewalRun = 0;
+
+/**
+ * 6h antes de a janela do atendente fechar, manda UMA mensagem com o botão
+ * ACEITAR. O clique é uma mensagem recebida e reabre as 24h sozinho.
+ */
+async function processHumanAlertRenewals(supabase: any) {
+  if (Date.now() - lastHumanAlertRenewalRun < 60_000) return;
+  lastHumanAlertRenewalRun = Date.now();
+  const { data: numbers, error } = await supabase
+    .from('crm_whatsapp_numbers')
+    .select('id, user_id, meta_phone_number_id, meta_access_token, number_settings')
+    .not('meta_phone_number_id', 'is', null)
+    .not('meta_access_token', 'is', null)
+    .filter('number_settings->>ai_human_alert_enabled', 'eq', 'true');
+  if (error) { console.error('[HUMAN-ALERT] Falha ao listar números:', error.message); return; }
+
+  for (const n of numbers || []) {
+    try {
+      const phone = n.number_settings?.ai_human_alert_phone;
+      const attendant = await findHumanAttendantContact(supabase, n.id, phone);
+      if (!attendant) continue;
+      const win = getConversationWindow(attendant);
+      if (!win.is_open || !win.expires_at) continue;
+      const remaining = Date.parse(win.expires_at) - Date.now();
+      if (remaining > HUMAN_ALERT_RENEW_BEFORE_MS) continue;
+      // Uma única mensagem por janela: marca pela abertura atual.
+      if (attendant.metadata?.human_alert_renew_for === win.opened_at) continue;
+
+      const { data: claimed } = await supabase.from('crm_contacts')
+        .update({ metadata: { ...(attendant.metadata || {}), human_alert_renew_for: win.opened_at } })
+        .eq('id', attendant.id)
+        .eq('last_message_received_at', attendant.last_message_received_at)
+        .select('id').maybeSingle();
+      if (!claimed) continue;
+
+      await handleInternalSendMessage(supabase, n.meta_phone_number_id, n.meta_access_token, {
+        to: attendant.wa_id,
+        text: HUMAN_ALERT_RENEW_TEXT,
+        whatsapp_number_id: n.id,
+        interactive: {
+          type: 'button',
+          body: { text: HUMAN_ALERT_RENEW_TEXT },
+          action: { buttons: [{ type: 'reply', reply: { id: HUMAN_ALERT_RENEW_BUTTON_ID, title: 'ACEITAR' } }] },
+        },
+        metadata: { source: 'human_alert_renew' },
+      }, attendant, undefined, n.user_id);
+      console.log(`[HUMAN-ALERT] Pedido de renovação enviado ao atendente ${attendant.wa_id}.`);
+    } catch (err: any) {
+      console.error('[HUMAN-ALERT] Falha na renovação:', err?.message || String(err));
+    }
+  }
+}
+
 /**
  * Resolve o texto real de uma mensagem recebida. Se for áudio, transcreve
  * internamente (Whisper) e persiste, para a I.A responder direto ao conteúdo

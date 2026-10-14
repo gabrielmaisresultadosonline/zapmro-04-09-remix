@@ -16,6 +16,7 @@ export const PER_NUMBER_SETTING_KEYS = [
   "countdown_trigger_enabled", "countdown_trigger_flow_id", "countdown_trigger_template_id",
   "countdown_trigger_message_type", "countdown_trigger_content", "countdown_trigger_threshold_minutes",
   "countdown_trigger_status_filter", "countdown_trigger_scope",
+  "ai_human_alert_enabled", "ai_human_alert_phone",
 ] as const;
 
 type SettingsMap = Record<string, unknown>;

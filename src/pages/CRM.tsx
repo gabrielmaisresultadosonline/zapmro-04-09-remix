@@ -3,6 +3,7 @@ import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { AiDocumentsLibrary } from '@/components/crm/AiDocumentsLibrary';
+import { HumanAlertSettings } from '@/components/crm/HumanAlertSettings';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
 import AdReferralCard, { type AdReferralData } from '@/components/crm/AdReferralCard';
@@ -624,6 +625,8 @@ const CRM = () => {
     ai_agent_enabled: false,
      ai_kanban_auto_organizer: false,
      ai_send_bundled: false,
+     ai_human_alert_enabled: false,
+     ai_human_alert_phone: '',
     ai_operation_mode: 'chat',
     ai_recovery_enabled: false,
     ai_recovery_delay_minutes: 60,
@@ -3029,6 +3032,7 @@ const CRM = () => {
             'openai_api_key','ai_agent_enabled','ai_kanban_auto_organizer','ai_send_bundled','ai_operation_mode','ai_system_prompt',
             'ai_recovery_enabled','ai_recovery_delay_minutes','ai_recovery_max_attempts','ai_recovery_finalized_status','ai_recovery_scope',
            'ai_agent_trigger','ai_agent_trigger_keyword','ai_agent_prompt','ai_agent_label_on_transfer',
+           'ai_human_alert_enabled','ai_human_alert_phone',
            'auto_generate_strategy','strategy_generation_prompt',
            'initial_auto_response_enabled','initial_response_text','initial_response_buttons','initial_flow_id',
             'shortcut_size','tag_size','save_deleted_messages',
@@ -8802,6 +8806,15 @@ const CRM = () => {
                       </CardContent>
                     </Card>
                   </div>
+
+                  <HumanAlertSettings
+                    enabled={!!metaSettings.ai_human_alert_enabled}
+                    phone={String(metaSettings.ai_human_alert_phone || '')}
+                    onSave={async (patch) => {
+                      setMetaSettings((previous: typeof metaSettings) => ({ ...previous, ...patch }));
+                      await handleSaveSettings({ ...metaSettings, ...patch });
+                    }}
+                  />
 
                   {/* RECUPERADOR IA — reengaja conversas paradas usando o mesmo cérebro do agente */}
                   <Card className="rounded-2xl shadow-sm border overflow-hidden">

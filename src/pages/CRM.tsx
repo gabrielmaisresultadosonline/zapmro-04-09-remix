@@ -3,6 +3,7 @@ import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { AiDocumentsLibrary } from '@/components/crm/AiDocumentsLibrary';
+import { HumanAlertSettings } from '@/components/crm/HumanAlertSettings';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
 import AdReferralCard, { type AdReferralData } from '@/components/crm/AdReferralCard';
@@ -8805,6 +8806,15 @@ const CRM = () => {
                       </CardContent>
                     </Card>
                   </div>
+
+                  <HumanAlertSettings
+                    enabled={!!metaSettings.ai_human_alert_enabled}
+                    phone={String(metaSettings.ai_human_alert_phone || '')}
+                    onSave={async (patch) => {
+                      setMetaSettings((previous: typeof metaSettings) => ({ ...previous, ...patch }));
+                      await handleSaveSettings({ ...metaSettings, ...patch });
+                    }}
+                  />
 
                   {/* RECUPERADOR IA — reengaja conversas paradas usando o mesmo cérebro do agente */}
                   <Card className="rounded-2xl shadow-sm border overflow-hidden">

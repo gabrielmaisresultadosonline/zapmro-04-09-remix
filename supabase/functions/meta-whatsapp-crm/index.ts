@@ -903,7 +903,7 @@ async function resolveInboundMessageText(
   if (!msg) return '';
   if (!isPlaceholderContent(msg.content)) return String(msg.content).trim();
   if (msg.message_type === 'audio' && msg.media_url) {
-    const transcription = await _transcribeAudioForAi(apiKey, msg.media_url);
+    const transcription = (await transcribeOnce(supabase, msg.media_url, (u) => _transcribeAudioForAi(apiKey, u))).text;
     if (transcription) {
       if (msg.id) {
         await supabase.from('crm_messages').update({ content: transcription }).eq('id', msg.id);
@@ -1175,7 +1175,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   for (const msg of recentMessages || []) {
     if (msg.direction === 'inbound' && msg.message_type === 'audio' && msg.media_url && isPlaceholderContent(msg.content)) {
       console.log(`[AI-AGENT-DEBUG] Transcribing history audio for ${waId}. Current content: "${msg.content}"`);
-      const transcription = await _transcribeAudioForAi(OPENAI_API_KEY, msg.media_url);
+      const transcription = (await transcribeOnce(supabase, msg.media_url, (u) => _transcribeAudioForAi(OPENAI_API_KEY, u))).text;
       if (transcription) {
         msg.content = transcription;
         // Persistir no banco para não repetir

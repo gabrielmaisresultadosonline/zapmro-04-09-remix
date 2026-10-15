@@ -5229,7 +5229,7 @@ const CRM = () => {
     }
   };
 
-  const handleSaveTemplate = async (template: any) => {
+  const handleSaveTemplate = async (template: any, opts?: { silent?: boolean }): Promise<{ success: boolean; id?: string; error?: string }> => {
     setSaving(true);
     try {
       const { data, error } = await supabase.functions.invoke('meta-whatsapp-crm', {
@@ -5237,11 +5237,12 @@ const CRM = () => {
       });
       if (error) throw error;
       if (!data.success) throw new Error(data.error || "Erro ao criar template na Meta");
-      toast({ title: "Template enviado para aprovação!" });
+      if (!opts?.silent) toast({ title: "Template enviado para aprovação!" });
       fetchData(false);
-
+      return { success: true, id: data?.result?.id };
     } catch (err: any) {
-      toast({ title: "Erro ao criar template", description: err.message, variant: "destructive" });
+      if (!opts?.silent) toast({ title: "Erro ao criar template", description: err.message, variant: "destructive" });
+      return { success: false, error: err?.message || 'Erro ao criar template' };
     } finally {
       setSaving(false);
     }

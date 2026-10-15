@@ -8862,6 +8862,96 @@ async function fetchAndStoreIncomingMedia(
       return jsonResponse({ success: true, improvedPrompt: aiData.choices?.[0]?.message?.content });
     }
 
+    /**
+     * Gera N variações Utility da mensagem completa, escondendo o conteúdo
+     * comercial dentro de variáveis {{n}}. Retorna o texto do template e os
+     * valores reais de cada variável (salvos só no nosso sistema).
+     * Regras da Meta garantidas aqui: variáveis sequenciais, nunca no início
+     * nem no fim do corpo, nunca duas variáveis coladas.
+     */
+    if (action === 'utilityVariations') {
+      const message = String(params?.message || '').trim();
+      const count = Math.min(Math.max(Number(params?.count) || 5, 1), 5);
+      if (!message) throw new Error('Escreva a mensagem completa primeiro.');
+      if (message.length > 4000) throw new Error('Mensagem muito longa (máx. 4000 caracteres).');
+
+      const { data: settings } = await supabase.from('crm_settings').select('openai_api_key').eq('user_id', userId).maybeSingle();
+      const apiKey = settings?.openai_api_key || Deno.env.get('OPENAI_API_KEY');
+      if (!apiKey) throw new Error('Nenhum token vinculado ao Agente I.A. Salve seu token no Agente I.A para usar o gerador.');
+
+      const systemPrompt = `Você é especialista em aprovação de templates do WhatsApp Business (Meta) na categoria UTILITY.
+O usuário envia a MENSAGEM COMPLETA que ele quer que o cliente receba (pode ser comercial).
+Crie ${count} variações DIFERENTES de template, cada uma um template único, em que o TEXTO FIXO pareça atendimento/acompanhamento/atualização (Utility) e TODO trecho que pareça marketing (preços, ofertas, benefícios, chamadas de compra, urgência, nomes de produtos, links, descontos) fique ESCONDIDO dentro de variáveis {{1}}, {{2}}, {{3}}...
+Quando a mensagem for enviada, as variáveis serão preenchidas com os trechos originais, então o cliente lê a mensagem completa e coerente.
+
+REGRAS OBRIGATÓRIAS:
+- Variáveis numeradas em sequência começando em {{1}}, sem pular números, cada número usado uma vez.
+- O corpo NUNCA começa com uma variável e NUNCA termina com uma variável. Sempre há texto fixo antes da primeira e uma frase fixa curta depois da última (ex.: "Seguimos à disposição.").
+- Nunca coloque duas variáveis coladas ({{1}} {{2}}); sempre tenha palavras fixas entre elas.
+- Uma linha nunca pode conter só uma variável; nunca termine uma linha com variável.
+- Use entre 2 e 6 variáveis por variação.
+- Texto fixo sem palavras promocionais (promoção, oferta, desconto, compre, garanta, aproveite, imperdível, exclusivo, últimas vagas, grátis, venda).
+- Cada variação com estrutura e frases fixas diferentes das outras.
+- Os valores das variáveis contêm os trechos reais da mensagem original, sem quebras de linha.
+- Juntando texto fixo + valores, o conteúdo final deve transmitir tudo da mensagem original.
+- Máximo 900 caracteres no texto fixo. Sem markdown com dois asteriscos.
+
+Responda SOMENTE JSON: {"variations":[{"title":"título curto descrevendo o estilo","body":"texto com {{1}}...","values":{"1":"trecho real","2":"..."}}]}`;
+
+      const callModel = async (model: string) => {
+        const r = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            temperature: 0.8,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: `MENSAGEM COMPLETA:\n\n${message}` },
+            ],
+          }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j?.error?.message || `OpenAI ${r.status}`);
+        return String(j?.choices?.[0]?.message?.content || '');
+      };
+
+      let raw = '';
+      try { raw = await callModel('gpt-4o'); }
+      catch (_e) { raw = await callModel('gpt-4o-mini'); }
+
+      let parsed: any = {};
+      try { parsed = JSON.parse(raw); } catch { throw new Error('A I.A. devolveu um formato inválido. Tente de novo.'); }
+      const list: any[] = Array.isArray(parsed?.variations) ? parsed.variations : [];
+
+      // Normaliza cada variação para as regras da Meta.
+      const normalize = (v: any, i: number) => {
+        let body = String(v?.body || '').replace(/\*\*/g, '*').trim();
+        const values: Record<string, string> = (v?.values && typeof v.values === 'object') ? v.values : {};
+        // Renumera variáveis em ordem de aparição.
+        const order: string[] = [];
+        body = body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n: string) => {
+          if (!order.includes(n)) order.push(n);
+          return `{{${order.indexOf(n) + 1}}}`;
+        });
+        const newValues: Record<string, string> = {};
+        order.forEach((old, idx) => {
+          newValues[String(idx + 1)] = String(values[old] ?? '').replace(/[\r\n\t]+/g, ' ').trim() || 'informação';
+        });
+        if (/^\{\{\d+\}\}/.test(body)) body = `Olá, ${body}`;
+        if (/\{\{\d+\}\}[\s.!?,:;]*$/.test(body)) body = `${body.replace(/[\s]+$/, '')}\n\nSeguimos à disposição.`;
+        // Linha terminando em variável: adiciona pontuação + texto curto.
+        body = body.split('\n').map(line => /\{\{\d+\}\}\s*$/.test(line) ? `${line.trimEnd()} conforme combinado.` : line).join('\n');
+        body = body.replace(/(\{\{\d+\}\})\s*(\{\{\d+\}\})/g, '$1 e $2');
+        return { title: String(v?.title || `Variação ${i + 1}`).slice(0, 60), body, values: newValues };
+      };
+
+      const variations = list.slice(0, count).map(normalize).filter(v => v.body);
+      if (variations.length === 0) throw new Error('A I.A. não gerou variações. Tente de novo.');
+      return jsonResponse({ success: true, variations });
+    }
+
     if (action === 'convertToUtility') {
       const { message } = params;
       if (!message || !String(message).trim()) throw new Error('Mensagem é obrigatória');

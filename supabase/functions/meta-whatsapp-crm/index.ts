@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { isTrialOnlyUser } from '../_shared/plan-access.ts';
 import { expandSettingsPerNumber, mergeNumberSettings, loadNumberSettings } from '../_shared/number-settings.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 import { collectConversations, tickPromptJobs, LOW_VOLUME_CONVERSATIONS, LOW_VOLUME_MESSAGES, PROMPT_JOB_DAYS } from "../_shared/prompt-builder.ts"
@@ -990,6 +991,10 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
      flow_state: contact?.flow_state || null,
      has_input_text: Boolean(text),
    });
+   if (await isTrialOnlyUser(supabase, userId || contact?.user_id)) {
+     aiLog('skipped_trial_plan');
+     return;
+   }
    let messageText = text;
 
     const { data: baseSettings, error: settingsError } = await supabase.from('crm_settings').select('openai_api_key, meta_phone_number_id, meta_access_token, vps_transcoder_url, ai_agent_enabled, ai_kanban_auto_organizer, ai_send_bundled, business_description, ai_system_prompt').eq('user_id', userId).maybeSingle();
@@ -3542,6 +3547,7 @@ async function processAiRecoveryForAllUsers(supabase: any, onlyUserId?: string |
     .filter((u) => u.settings.ai_agent_enabled === true && u.settings.ai_recovery_enabled === true);
 
   for (const { settings, boxId: recoveryBoxId } of recoveryUnits) {
+    if (await isTrialOnlyUser(supabase, settings.user_id)) continue;
     const apiKey = settings.openai_api_key || Deno.env.get('OPENAI_API_KEY');
     if (!apiKey || !settings.meta_phone_number_id || !settings.meta_access_token) continue;
 

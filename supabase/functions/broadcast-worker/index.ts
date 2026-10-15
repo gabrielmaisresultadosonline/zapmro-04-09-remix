@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { isTrialOnlyUser, PAID_ONLY_MESSAGE } from '../_shared/plan-access.ts'
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 import { z } from 'npm:zod@3.25.76'
 import {
@@ -72,6 +73,15 @@ async function processOne(req: Request, workerId: string): Promise<Response> {
       .eq('id', item.claimed_broadcast_id)
       .single()
     if (broadcastError || !broadcast) throw broadcastError || new Error('Campaign not found')
+    // Teste grátis não dispara em massa: pausa a campanha e devolve o item.
+    if (await isTrialOnlyUser(admin, broadcast.user_id)) {
+      await admin.from('crm_broadcast_items').update({ status: 'pending', locked_by: null, updated_at: new Date().toISOString() })
+        .eq('id', item.item_id).eq('locked_by', workerId).then(() => null, () => null)
+      await admin.from('crm_broadcasts').update({ status: 'paused', last_error: PAID_ONLY_MESSAGE, updated_at: new Date().toISOString() })
+        .eq('id', broadcast.id).then(() => null, () => null)
+      claimedItem = null
+      return json({ success: false, error: PAID_ONLY_MESSAGE, code: 'PAID_PLAN_REQUIRED' }, 403)
+    }
 
     const { data: template } = broadcast.type === 'template' && broadcast.template_id
       ? await admin.from('crm_templates').select('name, language, components, is_carousel').eq('id', broadcast.template_id).eq('user_id', broadcast.user_id).maybeSingle()

@@ -1,3 +1,5 @@
+import { useIsTrialPlan } from "@/lib/planAccess";
+import PaidFeatureLock from "@/components/crm/PaidFeatureLock";
 import { UnsupportedMessageDiagnostic } from "@/components/crm/UnsupportedMessageDiagnostic";
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
@@ -535,6 +537,7 @@ const sanitizeConnectionDetails = (details?: unknown) => {
 };
 
 const CRM = () => {
+  const isTrialPlan = useIsTrialPlan();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);

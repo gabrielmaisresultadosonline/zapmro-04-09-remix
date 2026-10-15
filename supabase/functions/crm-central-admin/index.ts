@@ -1141,7 +1141,7 @@ serve(async (req) => {
       const { data: profiles } = await supabase
         .from("crm_profiles")
         .select("user_id, full_name, whatsapp_number, trial_ends_at, access_until, is_paid, plan, created_at")
-        .in("user_id", userIds);
+        .limit(10000);
       const pMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
       // Detectar quem já conectou o WhatsApp (via crm_settings). Se estiver conectado
       // mas ainda não tiver trial_ends_at e não for pago, faz backfill de 2 dias
@@ -1149,7 +1149,7 @@ serve(async (req) => {
       const { data: settings } = await supabase
         .from("crm_settings")
         .select("user_id, meta_phone_number_id, meta_access_token, meta_waba_id, updated_at, created_at")
-        .in("user_id", userIds);
+        .limit(10000);
       const sMap = new Map(
         (settings || []).map((s: any) => [s.user_id, s])
       );

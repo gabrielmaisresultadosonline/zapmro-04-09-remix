@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2, Lock, Sparkles, Check, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AccessLockOverlay from "@/components/crm/AccessLockOverlay";
+import { PlanModeContext } from "@/lib/planAccess";
+import OnlinePresence from "@/components/crm/OnlinePresence";
 
 
 type Status =
@@ -265,8 +267,9 @@ export default function AccessGate({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <>
+    <PlanModeContext.Provider value={status.mode}>
       <AccessLockOverlay />
+      <OnlinePresence />
       {status.mode === "trial" && (
 
         <div className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-white text-center text-sm font-semibold py-2 px-4 shadow">
@@ -289,6 +292,6 @@ export default function AccessGate({ children }: { children: React.ReactNode }) 
       >
         {children}
       </div>
-    </>
+    </PlanModeContext.Provider>
   );
 }

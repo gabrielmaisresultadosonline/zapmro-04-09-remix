@@ -12,3 +12,5 @@
 - Automações (Agente I.A., Recuperador, gatilho de 24h, prompt, fluxo inicial, horário) ficam em crm_whatsapp_numbers.number_settings e sobrepõem crm_settings (_shared/number-settings.ts ↔ src/lib/numberSettings.ts); jobs rodam uma unidade por número conectado para que números do mesmo cadastro nunca compartilhem configuração.
 - Fluxos agendados (esperas, timeouts) avançam por um serviço systemd no host (deploy/zapmro-flow-ticker.sh) que chama processScheduled pelo gateway local, além do pg_cron; o navegador nunca é necessário e a reserva atômica em crm_contacts evita duplicidade.
 - A geração de prompt pelos atendimentos roda em crm_ai_prompt_jobs (_shared/prompt-builder.ts): rodadas pequenas com trava, avançadas pelo processScheduled e pela tela; nunca processa tudo numa chamada só.
+- O teste grátis bloqueia Disparo em massa e Agente I.A. na tela (planAccess/PaidFeatureLock) e no servidor (_shared/plan-access.ts); a regra de plano deve ficar igual nos dois lados.
+- 'Reiniciar' do AdminCentral grava em crm_client_reload_signals (só service_role); cada CRM aberto anuncia presença no canal crm-online-v1 e recarrega ao receber o sinal.

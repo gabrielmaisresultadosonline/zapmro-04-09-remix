@@ -1,3 +1,5 @@
+import { useIsTrialPlan } from "@/lib/planAccess";
+import PaidFeatureLock from "@/components/crm/PaidFeatureLock";
 import { UnsupportedMessageDiagnostic } from "@/components/crm/UnsupportedMessageDiagnostic";
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
@@ -535,6 +537,7 @@ const sanitizeConnectionDetails = (details?: unknown) => {
 };
 
 const CRM = () => {
+  const isTrialPlan = useIsTrialPlan();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -8710,7 +8713,8 @@ const CRM = () => {
             )}
             </div>
 
-            {activeTab === 'ai-agent' && (
+            {activeTab === 'ai-agent' && isTrialPlan && <PaidFeatureLock feature="ai" />}
+            {activeTab === 'ai-agent' && !isTrialPlan && (
               <ScrollArea className="flex-1 p-3 sm:p-4 md:p-8 bg-muted/5">
                 <div className="max-w-4xl mx-auto space-y-4 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 bg-card p-4 md:p-6 rounded-2xl border shadow-sm">
@@ -9271,7 +9275,8 @@ const CRM = () => {
               </ScrollArea>
             )}
 
-            {activeTab === 'broadcast' && (
+            {activeTab === 'broadcast' && isTrialPlan && <PaidFeatureLock feature="broadcast" />}
+            {activeTab === 'broadcast' && !isTrialPlan && (
               <Broadcaster key={activeNumberId || "default"} 
                 templates={templates} 
                 flows={flows} 

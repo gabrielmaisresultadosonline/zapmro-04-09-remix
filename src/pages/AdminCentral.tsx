@@ -1119,7 +1119,7 @@ export default function AdminCentral() {
   // ============ LOGIN ============
   if (!creds) {
     return (
-      <div className="min-h-screen bg-[#F0FDF4] text-[#075E54] flex items-center justify-center p-4">
+      <div className="admin-light min-h-screen bg-[#F0FDF4] text-[#075E54] flex items-center justify-center p-4">
         <Card className="w-full max-w-md p-6 space-y-4 bg-white border-[#E8F5F1] text-[#075E54] shadow-lg shadow-green-900/5">
           <div>
             <h1 className="text-2xl font-bold text-[#075E54]">Admin Central</h1>
@@ -1177,7 +1177,7 @@ export default function AdminCentral() {
   const newThisWeek = users.filter((u) => new Date(u.created_at) >= last7).length;
 
   return (
-    <div className="min-h-screen bg-[#F0FDF4] text-[#075E54] p-4 md:p-6">
+    <div className="admin-light min-h-screen bg-[#F0FDF4] text-[#075E54] p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>

@@ -532,3 +532,42 @@
 .flow-bar-scroll::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--primary));
 }
+
+/* Admin Central é sempre claro: evita botões brancos com texto branco quando o tema escuro ficou ativo. */
+.admin-light {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 164 100% 26%; /* WhatsApp Business Green #075E54 */
+    --primary-foreground: 210 40% 98%;
+    --secondary: 164 25% 95%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 142 76% 36%; /* WhatsApp Bright Green #25D366 */
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 164 100% 26%;
+    --radius: 0.75rem;
+    --mro-green: 164 100% 26%;
+    --mro-green-light: 142 76% 36%;
+    --mro-green-dark: 164 100% 20%;
+    --whatsapp-chat-bg: 37 32% 92%; /* #E5DDD5 */
+    --whatsapp-bubble-out: 142 45% 85%; /* #DCF8C6 */
+    --whatsapp-bubble-in: 0 0% 100%; /* #FFFFFF */
+    --sidebar-background: 164 100% 15%; /* Dark WhatsApp Green */
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 142 76% 36%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 164 100% 20%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 164 100% 25%;
+    --sidebar-ring: 142 76% 36%;
+  color-scheme: light;
+}

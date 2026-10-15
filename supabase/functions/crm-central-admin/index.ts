@@ -516,6 +516,18 @@ serve(async (req) => {
         const s: any = settingsMap.get(u.id) || {};
         const p: any = profileMap.get(u.id) || {};
         const connected = !!(s.meta_access_token && s.meta_phone_number_id);
+        // Cadastro antigo sem linha em crm_whatsapp_numbers: mostra a conexão
+        // que existe em crm_settings como se fosse o 1º número, para o painel
+        // nunca ficar sem os números conectados.
+        let numbers = numbersMap.get(u.id) || [];
+        if (numbers.length === 0 && (s.meta_phone_number_id || s.meta_display_phone_number)) {
+          numbers = [{
+            label: s.meta_verified_name || s.meta_display_phone_number || "WhatsApp principal",
+            phone: s.meta_display_phone_number || null,
+            name: s.meta_verified_name || null,
+            connected,
+          }];
+        }
         return {
           id: u.id,
           email: u.email,

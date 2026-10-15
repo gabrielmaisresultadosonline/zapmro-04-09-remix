@@ -24,6 +24,7 @@ import TutorialsAdminPanel from "@/components/admin/TutorialsAdminPanel";
 import TrialsPanel from "@/components/admin/TrialsPanel";
 import MigrationExtras from "@/components/admin/MigrationExtras";
 import StorageAdminPanel from "@/components/admin/StorageAdminPanel";
+import OnlineNowPanel from "@/components/admin/OnlineNowPanel";
 import { toast } from "sonner";
 import {
   Loader2,
@@ -1199,6 +1200,7 @@ export default function AdminCentral() {
         <Tabs defaultValue="users" className="w-full">
           <TabsList className="bg-white border border-[#E8F5F1] shadow-sm flex flex-wrap h-auto gap-1">
             <TabsTrigger value="users" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Cadastros & Números</TabsTrigger>
+            <TabsTrigger value="online" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Conectados agora</TabsTrigger>
             <TabsTrigger value="trials" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Testes & Acessos</TabsTrigger>
             <TabsTrigger value="sales" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Vendas</TabsTrigger>
             <TabsTrigger value="announcements" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Avisos (Popup)</TabsTrigger>
@@ -1422,6 +1424,10 @@ export default function AdminCentral() {
 
           <TabsContent value="tutorials" className="mt-4">
             <TutorialsAdminPanel />
+          </TabsContent>
+
+          <TabsContent value="online" className="mt-4">
+            <OnlineNowPanel creds={creds} />
           </TabsContent>
 
           <TabsContent value="storage" className="mt-4">

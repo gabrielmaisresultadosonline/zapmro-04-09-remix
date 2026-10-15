@@ -1072,6 +1072,15 @@ serve(async (req) => {
       return json({ success: true });
     }
 
+    if (action === "reload_clients") {
+      const target = typeof (body as any).userId === "string" && (body as any).userId ? (body as any).userId : null;
+      const { error } = await supabase
+        .from("crm_client_reload_signals")
+        .insert({ target_user_id: target, reason: target ? "admin_reload_user" : "admin_reload_all" });
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true });
+    }
+
     if (action === "list_trials") {
       // Fetch all auth users (paginated)
       const allUsers: any[] = [];

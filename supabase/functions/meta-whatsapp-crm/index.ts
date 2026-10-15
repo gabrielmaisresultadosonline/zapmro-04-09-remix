@@ -1208,11 +1208,31 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     const aiNode = flowConfig?.nodes?.find((n: any) => n.id === nodeId && n.type === 'aiAgent');
     if (aiNode?.data) {
       resolvedFromFlow = true;
-      const source = aiNode.data.promptSource === 'global' ? 'global' : 'node';
+      const rawSource = String(aiNode.data.promptSource || 'node');
+      const source = rawSource === 'global' || rawSource === 'both' ? rawSource : 'node';
       const nodePrompt = String(aiNode.data.prompt || "").trim();
-      aiPrompt = source === 'global' ? (globalPrompt || nodePrompt) : (nodePrompt || globalPrompt);
+      if (source === 'both' && globalPrompt && nodePrompt) {
+        aiPrompt = `${globalPrompt}\n\n--- INSTRUÇÕES DESTE BLOCO DO FLUXO (têm prioridade se houver conflito) ---\n${nodePrompt}`;
+      } else if (source === 'global') {
+        aiPrompt = globalPrompt || nodePrompt;
+      } else {
+        aiPrompt = nodePrompt || globalPrompt;
+      }
       labelOnTransfer = aiNode.data.labelOnHumanTransfer || labelOnTransfer;
-      console.log(`[AI-AGENT] Flow node ${nodeId} prompt source=${source} length=${aiPrompt.length}`);
+      // Opções do bloco: herdar do Agente geral (padrão) ou sobrepor só neste bloco.
+      const kanbanMode = String(aiNode.data.kanbanMode || 'global');
+      const alertMode = String(aiNode.data.humanAlertMode || 'global');
+      const nodeOverrides: Record<string, unknown> = {};
+      if (kanbanMode === 'on') nodeOverrides.ai_kanban_auto_organizer = true;
+      if (kanbanMode === 'off') nodeOverrides.ai_kanban_auto_organizer = false;
+      if (alertMode === 'off') nodeOverrides.ai_human_alert_enabled = false;
+      if (alertMode === 'custom') {
+        const customPhone = String(aiNode.data.humanAlertPhone || '').replace(/\D/g, '');
+        nodeOverrides.ai_human_alert_enabled = customPhone.length >= 10;
+        nodeOverrides.ai_human_alert_phone = customPhone;
+      }
+      if (Object.keys(nodeOverrides).length) aiSettings = { ...(aiSettings || {}), ...nodeOverrides };
+      console.log(`[AI-AGENT] Flow node ${nodeId} prompt source=${source} kanban=${kanbanMode} alert=${alertMode} length=${aiPrompt.length}`);
       if (aiPrompt && aiPrompt !== contact.ai_agent_prompt) {
         await supabase.from('crm_contacts').update({ ai_agent_prompt: aiPrompt }).eq('id', contact.id);
       }

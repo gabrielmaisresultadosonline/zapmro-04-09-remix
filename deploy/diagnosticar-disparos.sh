@@ -100,7 +100,7 @@ SELECT u.email, count(n.id) AS numeros_na_lista,
        count(n.id) FILTER (WHERE n.meta_access_token IS NOT NULL AND n.meta_phone_number_id IS NOT NULL) AS conectados
 FROM auth.users u
 LEFT JOIN public.crm_whatsapp_numbers n ON n.user_id = u.id
-GROUP BY u.email
+GROUP BY u.email, u.created_at
 ORDER BY u.created_at DESC
 LIMIT 15;"
 run_sql "

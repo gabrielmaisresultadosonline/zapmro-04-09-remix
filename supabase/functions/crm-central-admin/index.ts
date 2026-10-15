@@ -483,6 +483,26 @@ serve(async (req) => {
         )
         .in("user_id", userIds);
 
+      // Números WhatsApp por cadastro (sem expor tokens ao navegador).
+      const numbersMap = new Map<string, any[]>();
+      for (let i = 0; i < userIds.length; i += 500) {
+        const { data: nums } = await supabase
+          .from("crm_whatsapp_numbers")
+          .select("user_id, label, meta_display_phone_number, meta_verified_name, meta_phone_number_id, meta_access_token, created_at")
+          .in("user_id", userIds.slice(i, i + 500))
+          .order("created_at", { ascending: true });
+        for (const n of nums || []) {
+          const list = numbersMap.get((n as any).user_id) || [];
+          list.push({
+            label: (n as any).label || null,
+            phone: (n as any).meta_display_phone_number || null,
+            name: (n as any).meta_verified_name || null,
+            connected: !!((n as any).meta_access_token && (n as any).meta_phone_number_id),
+          });
+          numbersMap.set((n as any).user_id, list);
+        }
+      }
+
       const profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
       const settingsMap = new Map((settings || []).map((s: any) => [s.user_id, s]));
 
@@ -504,7 +524,8 @@ serve(async (req) => {
           meta_display_phone_number: s.meta_display_phone_number || null,
           meta_verified_name: s.meta_verified_name || null,
           meta_phone_number_id: s.meta_phone_number_id || null,
-          connected,
+          connected: connected || (numbersMap.get(u.id) || []).some((n) => n.connected),
+          numbers: numbersMap.get(u.id) || [],
         };
 
       });

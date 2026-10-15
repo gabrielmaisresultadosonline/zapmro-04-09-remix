@@ -73,7 +73,7 @@ type AdminUser = {
   meta_verified_name: string | null;
   meta_phone_number_id: string | null;
   connected: boolean;
-
+  numbers?: { label: string | null; phone: string | null; name: string | null; connected: boolean }[];
 };
 
 type Insights = {
@@ -1119,7 +1119,7 @@ export default function AdminCentral() {
   // ============ LOGIN ============
   if (!creds) {
     return (
-      <div className="min-h-screen bg-[#F0FDF4] text-[#075E54] flex items-center justify-center p-4">
+      <div className="admin-light min-h-screen bg-[#F0FDF4] text-[#075E54] flex items-center justify-center p-4">
         <Card className="w-full max-w-md p-6 space-y-4 bg-white border-[#E8F5F1] text-[#075E54] shadow-lg shadow-green-900/5">
           <div>
             <h1 className="text-2xl font-bold text-[#075E54]">Admin Central</h1>
@@ -1177,7 +1177,7 @@ export default function AdminCentral() {
   const newThisWeek = users.filter((u) => new Date(u.created_at) >= last7).length;
 
   return (
-    <div className="min-h-screen bg-[#F0FDF4] text-[#075E54] p-4 md:p-6">
+    <div className="admin-light min-h-screen bg-[#F0FDF4] text-[#075E54] p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
@@ -1307,7 +1307,7 @@ export default function AdminCentral() {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                   <div className="space-y-1 min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold truncate">{u.full_name || u.email}</span>
+                      <span className="font-semibold break-all">{u.full_name || u.email}</span>
                       {u.connected ? (
                         <Badge className="bg-[#25D366]/15 text-[#128C7E] hover:bg-[#25D366]/15 border border-[#25D366]/30 gap-1">
                           <CheckCircle2 className="h-3 w-3" />
@@ -1330,9 +1330,25 @@ export default function AdminCentral() {
                     </div>
                     <div className="text-sm text-[#128C7E]/80 flex items-center gap-1">
                       <Mail className="h-3.5 w-3.5" />
-                      <span className="select-all">{u.email}</span>
+                      <span className="select-all break-all">{u.email}</span>
                     </div>
-                    <div className="text-xs text-slate-500 space-x-3">
+                    {(u.numbers?.length ?? 0) > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-xs font-semibold text-[#075E54]">
+                          {u.numbers!.filter((n) => n.connected).length} de {u.numbers!.length} número{u.numbers!.length === 1 ? "" : "s"} conectado{u.numbers!.filter((n) => n.connected).length === 1 ? "" : "s"}:
+                        </span>
+                        {u.numbers!.map((n, i) => (
+                          <span
+                            key={`${u.id}-${n.phone || i}`}
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${n.connected ? "border-[#25D366]/40 bg-[#25D366]/10 text-[#075E54]" : "border-slate-200 bg-slate-50 text-slate-500"}`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${n.connected ? "bg-[#25D366]" : "bg-slate-400"}`} />
+                            {i + 1}º · {n.phone || "sem número"}{n.name ? ` · ${n.name}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
                       {u.meta_display_phone_number && (
                         <span>📱 WA: {u.meta_display_phone_number}</span>
                       )}
@@ -1345,7 +1361,7 @@ export default function AdminCentral() {
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 md:max-w-[50%] md:justify-end [&>button]:w-full sm:[&>button]:w-auto">
                     <Button size="sm" variant="outline" onClick={() => openInsights(u)} className="bg-white border-[#E8F5F1] text-[#075E54] hover:bg-[#F0FDF4]">
                       <BarChart3 className="h-4 w-4 mr-1" /> Insights
                     </Button>

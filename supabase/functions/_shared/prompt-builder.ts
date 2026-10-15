@@ -9,6 +9,8 @@
  *  2. writing: junta todos os resumos e escreve o prompt final completo.
  */
 
+import { transcribeOnce } from './audio-transcript-cache.ts'
+
 export const PROMPT_JOB_DAYS = 5
 export const PROMPT_JOB_MAX_CONTACTS = 120
 const CONTACTS_PER_STEP = 2
@@ -123,25 +125,36 @@ async function buildTranscript(supabase: any, apiKey: string, contactId: string,
     .limit(400)
   const rows: any[] = data || []
   // Prioriza os áudios do atendente (é onde está a explicação da venda).
-  const audios = rows
+  const pending = rows
     .filter((m) => m.message_type === 'audio' && m.media_url && !m.metadata?.ai_transcript && isPlaceholder(String(m.content || '')))
     .sort((a, b) => (a.direction === 'outbound' ? -1 : 1) - (b.direction === 'outbound' ? -1 : 1))
-    .slice(0, MAX_AUDIOS_PER_CONTACT)
+  // Mesmo arquivo (ex.: áudio de fluxo repetido) é transcrito uma única vez.
+  const byUrl = new Map<string, any[]>()
+  for (const m of pending) byUrl.set(m.media_url, [...(byUrl.get(m.media_url) || []), m])
   let transcribed = 0
-  for (const m of audios) {
-    const text = await transcribe(apiKey, m.media_url)
+  let paid = 0
+  for (const [url, group] of byUrl) {
+    if (paid >= MAX_AUDIOS_PER_CONTACT) break
+    const { text, cached } = await transcribeOnce(supabase, url, (u) => transcribe(apiKey, u))
+    if (!cached) paid++
     if (!text) continue
     transcribed++
-    m.metadata = { ...(m.metadata || {}), ai_transcript: text }
-    // Guardado em metadata: a mensagem original não muda na conversa.
-    await supabase.from('crm_messages').update({ metadata: m.metadata }).eq('id', m.id)
+    for (const m of group) m.metadata = { ...(m.metadata || {}), ai_transcript: text }
   }
   const lines: string[] = []
+  const seenAudio = new Set<string>()
   for (const m of rows) {
     const who = m.direction === 'inbound' ? 'CLIENTE' : 'ATENDENTE'
     const transcript = m.metadata?.ai_transcript
     let text = String(m.content || '').trim()
-    if (m.message_type === 'audio') text = transcript ? `(áudio) ${transcript}` : (isPlaceholder(text) ? '(áudio sem transcrição)' : `(áudio) ${text}`)
+    if (m.message_type === 'audio') {
+      const key = String(m.media_url || transcript || '')
+      if (key && seenAudio.has(key)) text = '(áudio repetido, mesmo de antes)'
+      else {
+        if (key) seenAudio.add(key)
+        text = transcript ? `(áudio) ${transcript}` : (isPlaceholder(text) ? '(áudio sem transcrição)' : `(áudio) ${text}`)
+      }
+    }
     else if (m.message_type === 'image') text = `(imagem)${text ? ' ' + text : ''}`
     else if (m.message_type === 'video') text = `(vídeo)${text ? ' ' + text : ''}`
     else if (m.message_type === 'document') text = `(documento)${text ? ' ' + text : ''}`

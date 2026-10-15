@@ -78,6 +78,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { compressVideoForWhatsApp, WHATSAPP_VIDEO_MAX_BYTES } from "@/lib/videoCompress";
 import { VideoCompressDialog } from "./VideoCompressDialog";
 import WhatsAppFlowPreview from "./WhatsAppFlowPreview";
+import { AiAgentNodeSettingsDialog, type AiAgentNodeSettings } from "./AiAgentNodeSettingsDialog";
 import { Smartphone } from "lucide-react";
 
 /**
@@ -537,6 +538,7 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose, onN
   const [expandedTextValue, setExpandedTextValue] = useState('');
   const [carouselDialogOpen, setCarouselDialogOpen] = useState(false);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [aiNodeDialogOpen, setAiNodeDialogOpen] = useState(false);
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
   const [flowName, setFlowName] = useState(flow?.name || 'Novo Fluxo');
   const [triggerType, setTriggerType] = useState(flow?.trigger_type || 'manual');
@@ -1591,31 +1593,25 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose, onN
                       </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold">Qual prompt a I.A deve usar?</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {([
-                          { value: 'node', title: 'Prompt deste bloco', desc: 'Usa as instruções escritas abaixo' },
-                          { value: 'global', title: 'Prompt geral', desc: 'Usa o prompt do Agente I.A do CRM' },
-                        ] as const).map((opt) => {
-                          const current = selectedNode.data.promptSource === 'global' ? 'global' : 'node';
-                          const active = current === opt.value;
-                          return (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              onClick={() => updateNodeData(selectedNode.id, { promptSource: opt.value })}
-                              className={`text-left p-2 rounded-lg border transition-colors ${active ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-500' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
-                            >
-                              <span className="block text-[11px] font-bold text-slate-900">{opt.title}</span>
-                              <span className="block text-[9px] text-slate-600">{opt.desc}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                    <div className="space-y-2 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                      <Label className="text-xs font-bold text-slate-900">Configurações do Agente neste bloco</Label>
+                      <ul className="text-[10px] text-slate-700 space-y-0.5">
+                        <li>Prompt: {selectedNode.data.promptSource === 'global' ? 'original (geral)' : selectedNode.data.promptSource === 'both' ? 'geral + deste bloco' : 'deste bloco'}</li>
+                        <li>Qualificar no CRM: {selectedNode.data.kanbanMode === 'on' ? 'ligado' : selectedNode.data.kanbanMode === 'off' ? 'desligado' : 'igual ao geral'}</li>
+                        <li>Avisar atendente: {selectedNode.data.humanAlertMode === 'custom' ? `outro número (${(selectedNode.data.humanAlertPhone as string) || 'sem número'})` : selectedNode.data.humanAlertMode === 'off' ? 'não avisar' : 'igual ao geral'}</li>
+                      </ul>
+                      <Button type="button" size="sm" className="h-8 w-full text-xs gap-1" onClick={() => setAiNodeDialogOpen(true)}>
+                        <BrainCircuit className="w-3.5 h-3.5" /> Abrir configurações do Agente
+                      </Button>
                       <p className="text-[9px] text-muted-foreground italic">
-                        Em ambos os casos a I.A lê a conversa inteira para entender onde parou antes de responder.
+                        Em todos os casos a I.A lê a conversa inteira para entender onde parou antes de responder.
                       </p>
+                      <AiAgentNodeSettingsDialog
+                        open={aiNodeDialogOpen}
+                        onOpenChange={setAiNodeDialogOpen}
+                        data={selectedNode.data as AiAgentNodeSettings}
+                        onChange={(patch) => updateNodeData(selectedNode.id, patch as Record<string, unknown>)}
+                      />
                     </div>
 
                     <div className="space-y-2">

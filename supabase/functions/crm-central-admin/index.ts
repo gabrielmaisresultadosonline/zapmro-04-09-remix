@@ -542,8 +542,8 @@ serve(async (req) => {
           meta_display_phone_number: s.meta_display_phone_number || null,
           meta_verified_name: s.meta_verified_name || null,
           meta_phone_number_id: s.meta_phone_number_id || null,
-          connected: connected || (numbersMap.get(u.id) || []).some((n) => n.connected),
-          numbers: numbersMap.get(u.id) || [],
+          connected: connected || numbers.some((n) => n.connected),
+          numbers,
         };
 
       });

@@ -485,12 +485,18 @@ serve(async (req) => {
 
       // Números WhatsApp por cadastro (sem expor tokens ao navegador).
       const numbersMap = new Map<string, any[]>();
+      let numbersError: string | null = null;
       for (let i = 0; i < userIds.length; i += 500) {
-        const { data: nums } = await supabase
+        const { data: nums, error: numsError } = await supabase
           .from("crm_whatsapp_numbers")
           .select("user_id, label, meta_display_phone_number, meta_verified_name, meta_phone_number_id, meta_access_token, created_at")
           .in("user_id", userIds.slice(i, i + 500))
           .order("created_at", { ascending: true });
+        if (numsError) {
+          numbersError = numsError.message;
+          console.error("[ADMIN] list_users: falha ao ler crm_whatsapp_numbers:", numsError.message);
+          break;
+        }
         for (const n of nums || []) {
           const list = numbersMap.get((n as any).user_id) || [];
           list.push({
@@ -510,6 +516,18 @@ serve(async (req) => {
         const s: any = settingsMap.get(u.id) || {};
         const p: any = profileMap.get(u.id) || {};
         const connected = !!(s.meta_access_token && s.meta_phone_number_id);
+        // Cadastro antigo sem linha em crm_whatsapp_numbers: mostra a conexão
+        // que existe em crm_settings como se fosse o 1º número, para o painel
+        // nunca ficar sem os números conectados.
+        let numbers = numbersMap.get(u.id) || [];
+        if (numbers.length === 0 && (s.meta_phone_number_id || s.meta_display_phone_number)) {
+          numbers = [{
+            label: s.meta_verified_name || s.meta_display_phone_number || "WhatsApp principal",
+            phone: s.meta_display_phone_number || null,
+            name: s.meta_verified_name || null,
+            connected,
+          }];
+        }
         return {
           id: u.id,
           email: u.email,
@@ -524,8 +542,8 @@ serve(async (req) => {
           meta_display_phone_number: s.meta_display_phone_number || null,
           meta_verified_name: s.meta_verified_name || null,
           meta_phone_number_id: s.meta_phone_number_id || null,
-          connected: connected || (numbersMap.get(u.id) || []).some((n) => n.connected),
-          numbers: numbersMap.get(u.id) || [],
+          connected: connected || numbers.some((n) => n.connected),
+          numbers,
         };
 
       });
@@ -535,7 +553,7 @@ serve(async (req) => {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
-      return json({ success: true, users });
+      return json({ success: true, users, numbers_error: numbersError });
     }
 
     // ===== Travar / destravar o acesso de um cadastro =====

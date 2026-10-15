@@ -48,8 +48,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+import UtilityVariationsDialog, { type SaveTemplateResult } from './UtilityVariationsDialog';
+
 interface TemplateBuilderProps {
-  onSave: (template: any) => void;
+  onSave: (template: any, opts?: { silent?: boolean }) => Promise<SaveTemplateResult | void> | void;
   isSaving?: boolean;
 }
 
@@ -117,6 +119,29 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
   const [utilityOriginal, setUtilityOriginal] = useState('');
   const [utilityVersions, setUtilityVersions] = useState<string[]>([]);
   const [utilitySelected, setUtilitySelected] = useState(0);
+  const [variationsOpen, setVariationsOpen] = useState(false);
+
+  /** Componentes do template Padrão com corpo/exemplos trocados (cabeçalho, rodapé e botões mantidos). */
+  const buildStandardComponents = (body: string, examples: Record<string, string>) => {
+    const components: any[] = [];
+    if (headerType !== 'NONE') {
+      const header: any = { type: 'HEADER', format: headerType };
+      if (headerType === 'TEXT') {
+        header.text = headerText;
+        if (/\{\{\d+\}\}/.test(headerText)) header.example = { header_text: [headerExample.trim() || 'Exemplo'] };
+      } else {
+        header.example = { header_handle: [headerUrl.trim()] };
+      }
+      components.push(header);
+    }
+    const bodyComp: any = { type: 'BODY', text: body };
+    const vars = getTemplateVariableIndexes(body);
+    if (vars.length) bodyComp.example = { body_text: [vars.map(i => (examples[String(i)] || '').trim() || 'Exemplo')] };
+    components.push(bodyComp);
+    if (footerText) components.push({ type: 'FOOTER', text: footerText });
+    if (buttons.length) components.push({ type: 'BUTTONS', buttons: buttons.map(getButtonPayload) });
+    return components;
+  };
   
   // Carousel State
   const [carouselBody, setCarouselBody] = useState('');
@@ -661,6 +686,18 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
                       Converter para Utility
                     </Button>
                   </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (templateType !== 'STANDARD') { toast({ title: 'Disponível no template Padrão' }); return; }
+                      setVariationsOpen(true);
+                    }}
+                    className="w-full border-primary/40 text-primary"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" /> Criar 5 variações Utility com variáveis (I.A.)
+                  </Button>
                   {bodyVariableIndexes.length > 0 && (
                     <div className="rounded-xl border bg-muted/30 p-3 space-y-2 animate-in fade-in">
                       <p className="text-[11px] font-semibold flex items-center gap-1.5">
@@ -904,6 +941,19 @@ const TemplateBuilder: React.FC<TemplateBuilderProps> = ({ onSave, isSaving }) =
         <TemplateVariablesGuide />
       </div>
     </div>
+
+      <UtilityVariationsDialog
+        open={variationsOpen}
+        onOpenChange={setVariationsOpen}
+        initialMessage={bodyText}
+        baseName={name}
+        language={language}
+        headerMediaUrl={['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) ? headerUrl.trim() : undefined}
+        buildComponents={(body, values) => buildStandardComponents(body, values)}
+        onSaveTemplate={onSave}
+        onUseInEditor={(body, values) => { setBodyText(body); setBodyExamples(values); setCategory('UTILITY'); }}
+        extra={{ is_pix: isPix, pix_code: pixCode }}
+      />
 
       <Dialog open={utilityOpen} onOpenChange={setUtilityOpen}>
         <DialogContent className="max-w-2xl w-[95vw] p-0 gap-0">

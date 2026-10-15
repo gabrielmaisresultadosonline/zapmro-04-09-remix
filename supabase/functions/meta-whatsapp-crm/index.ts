@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { expandSettingsPerNumber, mergeNumberSettings, loadNumberSettings } from '../_shared/number-settings.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
+import { collectConversations, tickPromptJobs, LOW_VOLUME_CONVERSATIONS, LOW_VOLUME_MESSAGES, PROMPT_JOB_DAYS } from "../_shared/prompt-builder.ts"
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
 import {
@@ -6587,6 +6588,9 @@ async function fetchAndStoreIncomingMedia(
       // Renovação da janela do atendente humano (auxiliar, nunca bloqueia fluxos).
       processHumanAlertRenewals(supabase).catch((err: any) =>
         console.error('[HUMAN-ALERT] Renovação falhou:', err?.message || String(err)));
+      // Geração de prompt pelos atendimentos: uma rodada pequena por vez, com trava.
+      tickPromptJobs(supabase).catch((err: any) =>
+        console.error('[PROMPT-BUILDER] Rodada falhou:', err?.message || String(err)));
       console.log(`[BACKGROUND-LOG] Background processing for action: ${action}`);
       const now = new Date().toISOString();
       
@@ -8915,6 +8919,54 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
         metadata: { ...(msg.metadata as any || {}), media_pending: false, media_unavailable: false },
       }).eq('id', msg.id).eq('user_id', userId);
       return jsonResponse({ success: true, media_url: storedUrl });
+    }
+
+    if (action === 'promptJob') {
+      // Gera o prompt do Agente I.A. lendo os últimos atendimentos do WhatsApp aberto.
+      // mode: status | start | cancel. O processamento roda em segundo plano.
+      if (!userId) return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
+      const mode = String(params?.mode || 'status');
+      const numberId: string | null = scopedNumberId || null;
+      const latestJob = async () => {
+        let q = supabase.from('crm_ai_prompt_jobs')
+          .select('id, status, phase, cursor, total, message_count, audio_count, low_volume, result_prompt, error, created_at, updated_at')
+          .eq('user_id', userId).order('created_at', { ascending: false }).limit(1);
+        q = numberId ? q.eq('whatsapp_number_id', numberId) : q.is('whatsapp_number_id', null);
+        const { data } = await q;
+        return data?.[0] || null;
+      };
+      if (mode === 'start') {
+        const current = await latestJob();
+        if (current?.status === 'running') return jsonResponse({ success: true, job: current });
+        const found = await collectConversations(supabase, userId, numberId, PROMPT_JOB_DAYS);
+        const low = found.conversations < LOW_VOLUME_CONVERSATIONS || found.messages < LOW_VOLUME_MESSAGES;
+        if (found.contactIds.length === 0) {
+          return jsonResponse({ success: false, code: 'NO_CONVERSATIONS', conversations: 0, messages: found.messages,
+            error: 'Não há atendimentos nos últimos 5 dias neste WhatsApp. Faça mais atendimentos para o Agente aprender.' });
+        }
+        if (low && !params?.force) {
+          return jsonResponse({ success: false, code: 'LOW_VOLUME', conversations: found.conversations, messages: found.messages });
+        }
+        const { error: insErr } = await supabase.from('crm_ai_prompt_jobs').insert({
+          user_id: userId, whatsapp_number_id: numberId, days: PROMPT_JOB_DAYS,
+          contact_ids: found.contactIds, total: found.contactIds.length, low_volume: low,
+        });
+        if (insErr && !/duplicate|unique/i.test(insErr.message)) return jsonResponse({ success: false, error: insErr.message }, 500);
+        const job = await latestJob();
+        if (job?.id) tickPromptJobs(supabase, job.id).catch(() => undefined);
+        return jsonResponse({ success: true, job });
+      }
+      if (mode === 'cancel') {
+        let q = supabase.from('crm_ai_prompt_jobs').update({ status: 'cancelled', lease_until: null, updated_at: new Date().toISOString() })
+          .eq('user_id', userId).eq('status', 'running');
+        q = numberId ? q.eq('whatsapp_number_id', numberId) : q.is('whatsapp_number_id', null);
+        await q;
+        return jsonResponse({ success: true, job: await latestJob() });
+      }
+      const job = await latestJob();
+      // A tela aberta também ajuda a avançar (a trava impede rodadas em dobro).
+      if (job?.status === 'running') tickPromptJobs(supabase, job.id).catch(() => undefined);
+      return jsonResponse({ success: true, job });
     }
 
     if (action === 'ghostContacts') {

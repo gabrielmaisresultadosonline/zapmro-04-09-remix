@@ -3,6 +3,7 @@ import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { AiDocumentsLibrary } from '@/components/crm/AiDocumentsLibrary';
+import { PromptFromConversations } from '@/components/crm/PromptFromConversations';
 import { HumanAlertSettings } from '@/components/crm/HumanAlertSettings';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
@@ -9237,6 +9238,14 @@ const CRM = () => {
                                 onChange={(e) => setMetaSettings({...metaSettings, ai_system_prompt: e.target.value})}
                               />
                             </div>
+
+                            <PromptFromConversations
+                              onApply={(prompt) => {
+                                const next = { ...metaSettings, ai_system_prompt: prompt };
+                                setMetaSettings(next);
+                                void handleSaveSettings(next);
+                              }}
+                            />
 
                             <AiDocumentsLibrary />
 

@@ -89,9 +89,16 @@ async function openAiChat(apiKey: string, model: string, system: string, user: s
   return String(data?.choices?.[0]?.message?.content || '').trim()
 }
 
+/**
+ * Chaves recusadas na transcrição nesta execução. Quando a OpenAI recusa o
+ * áudio (ex.: chave sem permissão de áudio), o prompt segue só com os textos
+ * em vez de parar tudo.
+ */
+const audioRefusedKeys = new Set<string>()
+
 async function transcribe(apiKey: string, url: string): Promise<string> {
   try {
-    if (!url || !url.startsWith('http')) return ''
+    if (!url || !url.startsWith('http') || audioRefusedKeys.has(apiKey)) return ''
     const audio = await fetch(url)
     if (!audio.ok) return ''
     const blob = await audio.blob()
@@ -103,11 +110,14 @@ async function transcribe(apiKey: string, url: string): Promise<string> {
     const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
     })
-    if (res.status === 401 || res.status === 402) throw new FatalAiError('A OpenAI recusou a transcrição dos áudios (chave ou créditos).')
     const data = await res.json().catch(() => ({}))
+    if (res.status === 401 || res.status === 402 || res.status === 403) {
+      audioRefusedKeys.add(apiKey)
+      console.warn(`[PROMPT-JOB] OpenAI recusou a transcrição (${res.status}): ${data?.error?.message || ''}. Seguindo só com textos.`)
+      return ''
+    }
     return res.ok ? String(data?.text || '').trim() : ''
-  } catch (err) {
-    if (err instanceof FatalAiError) throw err
+  } catch {
     return ''
   }
 }
@@ -271,6 +281,7 @@ export async function runPromptJobStep(supabase: any, job: any): Promise<void> {
 
 /** Reserva e executa uma rodada do próximo trabalho pendente (se houver). */
 export async function tickPromptJobs(supabase: any, jobId?: string | null): Promise<void> {
+  audioRefusedKeys.clear()
   const { data, error } = await supabase.rpc('crm_claim_ai_prompt_job', { p_job_id: jobId || null })
   if (error) {
     if (!/does not exist|schema cache/i.test(error.message || '')) console.error('[PROMPT-BUILDER] claim falhou:', error.message)

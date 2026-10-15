@@ -1750,13 +1750,18 @@ const CRM = () => {
 
       const contactIds = Array.from(new Set(rows.map((row: any) => row.contact_id).filter(Boolean)));
       if (contactIds.length > 0) {
-        const { data: changedContacts } = await scopeToNumber(
-          supabase
-            .from('crm_contacts')
-            .select('*')
-            .eq('user_id', currentUserIdRef.current ?? '')
-            .in('id', contactIds)
-        );
+        // Lotes de 40: endereços longos demais são recusados pelo servidor (aparece como erro de CORS).
+        const changedContacts: any[] = [];
+        for (let i = 0; i < contactIds.length; i += 40) {
+          const { data: part } = await scopeToNumber(
+            supabase
+              .from('crm_contacts')
+              .select('*')
+              .eq('user_id', currentUserIdRef.current ?? '')
+              .in('id', contactIds.slice(i, i + 40))
+          );
+          if (part?.length) changedContacts.push(...part);
+        }
 
         if (changedContacts?.length) {
           setContacts(prev => {

@@ -248,6 +248,30 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
       const outgoingEdges = (flow.edges || []).filter((e: any) => e.source === node.id);
       const hasFollowups = outgoingEdges.length > 0;
 
+      // Só botões de LINK (nenhum botão de resposta): o cliente não tem o que
+      // responder, e o link continua funcionando depois. Se a saída de baixo
+      // estiver ligada, o fluxo segue direto (sem ficar "Aguardando resposta").
+      const nodeButtons: any[] = Array.isArray(node.data?.buttons) ? node.data.buttons : [];
+      const onlyLinkButtons = nodeButtons.length > 0 && nodeButtons.every((b: any) => b?.url && String(b.url).startsWith('http'));
+      if (onlyLinkButtons) {
+        const continueEdge = outgoingEdges.find((e: any) => !e.sourceHandle || e.sourceHandle === 'next');
+        const continueNode = continueEdge ? flow.nodes?.find((n: any) => n.id === continueEdge.target) : null;
+        if (continueNode && continueNode.type !== 'waitResponse' && continueNode.type !== 'wait_response') {
+          console.log(`[FLOW-LOG] Node ${node.id} has only link buttons. Continuing to ${continueNode.id} without waiting.`);
+          await supabase.from('crm_contacts').update({
+            flow_state: 'running',
+            current_node_id: continueNode.id,
+            next_execution_time: null,
+            flow_timeout_minutes: null,
+            flow_timeout_node_id: null,
+            last_flow_interaction: new Date().toISOString(),
+          }).eq('id', contactId);
+          const delayAfter = parseInt(node.data?.delayAfter || '1');
+          if (delayAfter > 0) await wait(delayAfter * 1000);
+          return await executeVisualNode(supabase, flow, continueNode, contactId, waId);
+        }
+      }
+
       if (isExplicitWait || (hasButtons && hasFollowups)) {
         // Se o nó espera resposta mas NÃO tem nenhuma aresta de saída (nenhum botão ligado,
         // sem "qualquer resposta", sem timeout), não faz sentido travar o contato aguardando

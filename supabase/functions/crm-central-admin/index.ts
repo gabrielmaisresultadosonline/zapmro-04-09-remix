@@ -553,7 +553,7 @@ serve(async (req) => {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
-      return json({ success: true, users });
+      return json({ success: true, users, numbers_error: numbersError });
     }
 
     // ===== Travar / destravar o acesso de um cadastro =====

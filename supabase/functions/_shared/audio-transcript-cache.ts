@@ -25,6 +25,7 @@ export async function getCachedTranscript(supabase: any, url: string): Promise<s
     const { data } = await supabase
       .from('crm_messages')
       .select('metadata')
+      .eq('message_type', 'audio')
       .eq('media_url', key)
       .not('metadata->>ai_transcript', 'is', null)
       .limit(1)
@@ -51,6 +52,7 @@ export async function saveTranscriptForUrl(supabase: any, url: string, text: str
     const { data } = await supabase
       .from('crm_messages')
       .select('id, metadata')
+      .eq('message_type', 'audio')
       .eq('media_url', key)
       .is('metadata->>ai_transcript', null)
       .limit(500)

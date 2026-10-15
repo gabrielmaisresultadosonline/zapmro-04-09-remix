@@ -6610,8 +6610,8 @@ async function fetchAndStoreIncomingMedia(
       processHumanAlertRenewals(supabase).catch((err: any) =>
         console.error('[HUMAN-ALERT] Renovação falhou:', err?.message || String(err)));
       // Geração de prompt pelos atendimentos: uma rodada pequena por vez, com trava.
-      tickPromptJobs(supabase).catch((err: any) =>
-        console.error('[PROMPT-BUILDER] Rodada falhou:', err?.message || String(err)));
+      runInBackground(tickPromptJobs(supabase).catch((err: any) =>
+        console.error('[PROMPT-BUILDER] Rodada falhou:', err?.message || String(err))));
       console.log(`[BACKGROUND-LOG] Background processing for action: ${action}`);
       const now = new Date().toISOString();
       
@@ -8982,7 +8982,7 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
         });
         if (insErr && !/duplicate|unique/i.test(insErr.message)) return jsonResponse({ success: false, error: insErr.message }, 500);
         const job = await latestJob();
-        if (job?.id) tickPromptJobs(supabase, job.id).catch(() => undefined);
+        if (job?.id) runInBackground(tickPromptJobs(supabase, job.id).catch(() => undefined));
         return jsonResponse({ success: true, job });
       }
       if (mode === 'cancel') {
@@ -8994,7 +8994,7 @@ Retorne apenas a mensagem completamente convertida. Não explique. Não faça ob
       }
       const job = await latestJob();
       // A tela aberta também ajuda a avançar (a trava impede rodadas em dobro).
-      if (job?.status === 'running') tickPromptJobs(supabase, job.id).catch(() => undefined);
+      if (job?.status === 'running') runInBackground(tickPromptJobs(supabase, job.id).catch(() => undefined));
       return jsonResponse({ success: true, job });
     }
 

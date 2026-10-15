@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { expandSettingsPerNumber, mergeNumberSettings, loadNumberSettings } from '../_shared/number-settings.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 import { collectConversations, tickPromptJobs, LOW_VOLUME_CONVERSATIONS, LOW_VOLUME_MESSAGES, PROMPT_JOB_DAYS } from "../_shared/prompt-builder.ts"
+import { transcribeOnce } from "../_shared/audio-transcript-cache.ts"
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
 import {

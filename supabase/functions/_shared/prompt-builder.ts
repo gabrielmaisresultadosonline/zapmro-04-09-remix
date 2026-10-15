@@ -281,6 +281,7 @@ export async function runPromptJobStep(supabase: any, job: any): Promise<void> {
 
 /** Reserva e executa uma rodada do próximo trabalho pendente (se houver). */
 export async function tickPromptJobs(supabase: any, jobId?: string | null): Promise<void> {
+  audioRefusedKeys.clear()
   const { data, error } = await supabase.rpc('crm_claim_ai_prompt_job', { p_job_id: jobId || null })
   if (error) {
     if (!/does not exist|schema cache/i.test(error.message || '')) console.error('[PROMPT-BUILDER] claim falhou:', error.message)

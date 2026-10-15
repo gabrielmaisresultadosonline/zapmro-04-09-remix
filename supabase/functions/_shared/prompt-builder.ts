@@ -13,11 +13,17 @@ import { transcribeOnce } from './audio-transcript-cache.ts'
 
 export const PROMPT_JOB_DAYS = 5
 export const PROMPT_JOB_MAX_CONTACTS = 120
-const CONTACTS_PER_STEP = 2
 const MAX_AUDIOS_PER_CONTACT = 8
 const MAX_TRANSCRIPT_CHARS = 24000
 const MAX_NOTE_CHARS = 1800
 const MAX_ATTEMPTS = 60
+/** Tempo máximo de trabalho por rodada; o progresso é salvo a cada conversa. */
+const STEP_BUDGET_MS = 40_000
+/** Limites de espera para nunca deixar uma rodada presa. */
+const AUDIO_DOWNLOAD_TIMEOUT_MS = 30_000
+const TRANSCRIBE_TIMEOUT_MS = 90_000
+const NOTE_TIMEOUT_MS = 90_000
+const FINAL_TIMEOUT_MS = 180_000
 /** Abaixo disso o resultado tende a ficar fraco: avisamos o usuário. */
 export const LOW_VOLUME_CONVERSATIONS = 5
 export const LOW_VOLUME_MESSAGES = 60
@@ -78,9 +84,10 @@ function sanitizeProviderMessage(msg: string): string {
  * - 401 em chave restrita (Missing scopes) → mensagem específica de permissão.
  * Só vira erro fatal quando o gpt-4o-mini (o mesmo do teste da chave) também é recusado.
  */
-async function openAiChat(apiKey: string, model: string, system: string, user: string, json: boolean, maxTokens: number): Promise<string> {
+async function openAiChat(apiKey: string, model: string, system: string, user: string, json: boolean, maxTokens: number, timeoutMs = NOTE_TIMEOUT_MS): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
@@ -97,10 +104,10 @@ async function openAiChat(apiKey: string, model: string, system: string, user: s
     console.warn(`[PROMPT-BUILDER] OpenAI ${res.status} (${model}${json ? ', json' : ''}): ${errCode} ${providerMsg}`)
     // Modelo maior recusado → mesmo modelo do teste da chave.
     if ([401, 403, 404].includes(res.status) && model !== 'gpt-4o-mini') {
-      return openAiChat(apiKey, 'gpt-4o-mini', system, user, json, maxTokens)
+      return openAiChat(apiKey, 'gpt-4o-mini', system, user, json, maxTokens, timeoutMs)
     }
     // Modo JSON recusado → texto livre (a nota continua útil).
-    if (res.status === 400 && json) return openAiChat(apiKey, model, system, user, false, maxTokens)
+    if (res.status === 400 && json) return openAiChat(apiKey, model, system, user, false, maxTokens, timeoutMs)
     if (res.status === 402 || /insufficient_quota|credit_balance_exhausted|billing_hard_limit/i.test(errCode)) {
       throw new FatalAiError('A conta da OpenAI está sem créditos. Adicione créditos e tente de novo.')
     }
@@ -128,7 +135,7 @@ const audioRefusedKeys = new Set<string>()
 async function transcribe(apiKey: string, url: string): Promise<string> {
   try {
     if (!url || !url.startsWith('http') || audioRefusedKeys.has(apiKey)) return ''
-    const audio = await fetch(url)
+    const audio = await fetch(url, { signal: AbortSignal.timeout(AUDIO_DOWNLOAD_TIMEOUT_MS) })
     if (!audio.ok) return ''
     const blob = await audio.blob()
     if (blob.size > 24 * 1024 * 1024) return ''
@@ -138,6 +145,7 @@ async function transcribe(apiKey: string, url: string): Promise<string> {
     form.append('language', 'pt')
     const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
+      signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
     })
     const data = await res.json().catch(() => ({}))
     if (res.status === 401 || res.status === 402 || res.status === 403) {
@@ -275,7 +283,7 @@ async function resolveWorkingKey(supabase: any, job: any, settings: any): Promis
   let lastMessage = ''
   for (const c of candidates) {
     try {
-      const res = await fetch('https://api.openai.com/v1/models/gpt-4o-mini', { headers: { Authorization: `Bearer ${c.key}` } })
+      const res = await fetch('https://api.openai.com/v1/models/gpt-4o-mini', { headers: { Authorization: `Bearer ${c.key}` }, signal: AbortSignal.timeout(15_000) })
       if (res.ok) {
         console.log('[PROMPT-BUILDER] Chave em uso', JSON.stringify({ job: job.id, source: c.source, tested: candidates.length }))
         workingKeyCache.set(cacheId, c.key)
@@ -318,24 +326,32 @@ export async function runPromptJobStep(supabase: any, job: any): Promise<void> {
 
     const ids: string[] = job.contact_ids || []
     if (job.phase === 'reading' && job.cursor < ids.length) {
-      const batch = ids.slice(job.cursor, job.cursor + CONTACTS_PER_STEP)
+      // Lê conversa por conversa, salvando o progresso depois de cada uma, até
+      // o limite de tempo da rodada. Assim a barra anda e nada se perde se o
+      // servidor encerrar a rodada no meio.
+      const startedAt = Date.now()
       const notes: any[] = Array.isArray(job.notes) ? [...job.notes] : []
       let messages = job.message_count || 0
       let audios = job.audio_count || 0
-      for (const contactId of batch) {
+      let cursor = job.cursor
+      while (cursor < ids.length && (cursor === job.cursor || Date.now() - startedAt < STEP_BUDGET_MS)) {
+        const contactId = ids[cursor]
         const t = await buildTranscript(supabase, apiKey, contactId, job.days || PROMPT_JOB_DAYS)
         messages += t.messages
         audios += t.transcribed
-        if (t.transcript.length < 40) continue
-        const note = await openAiChat(apiKey, 'gpt-4o-mini', NOTE_SYSTEM, t.transcript, true, 1200)
-        notes.push(note.slice(0, MAX_NOTE_CHARS))
+        if (t.transcript.length >= 40) {
+          const note = await openAiChat(apiKey, 'gpt-4o-mini', NOTE_SYSTEM, t.transcript, true, 1200)
+          if (note) notes.push(note.slice(0, MAX_NOTE_CHARS))
+        }
+        cursor++
+        const done = cursor >= ids.length
+        await update({
+          notes, cursor, message_count: messages, audio_count: audios, error: null,
+          phase: done ? 'writing' : 'reading',
+          // Mantém a trava enquanto ainda há tempo nesta rodada.
+          lease_until: done || Date.now() - startedAt >= STEP_BUDGET_MS ? null : new Date(Date.now() + 120_000).toISOString(),
+        })
       }
-      const cursor = job.cursor + batch.length
-      await update({
-        notes, cursor, message_count: messages, audio_count: audios,
-        phase: cursor >= ids.length ? 'writing' : 'reading',
-        lease_until: null,
-      })
       return
     }
 
@@ -354,7 +370,7 @@ export async function runPromptJobStep(supabase: any, job: any): Promise<void> {
       `RESUMOS DE ${notes.length} ATENDIMENTOS REAIS DOS ÚLTIMOS ${job.days || PROMPT_JOB_DAYS} DIAS:`,
       ...notes.map((n, i) => `--- Atendimento ${i + 1} ---\n${n}`),
     ].filter(Boolean).join('\n\n').slice(0, 300000)
-    const prompt = await openAiChat(apiKey, 'gpt-4o', FINAL_SYSTEM, input, false, 6000)
+    const prompt = await openAiChat(apiKey, 'gpt-4o', FINAL_SYSTEM, input, false, 6000, FINAL_TIMEOUT_MS)
     if (!prompt || prompt.length < 200) throw new Error('O prompt gerado veio incompleto; tentando de novo.')
     await update({ status: 'done', phase: 'done', result_prompt: prompt, lease_until: null, error: null })
   } catch (err: any) {

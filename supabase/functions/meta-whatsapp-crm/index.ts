@@ -1098,20 +1098,35 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
       return { success: true, skipped: 'already_replied' };
     }
 
-    await wait(3000); // Reduced wait time for faster response
-    const { data: latestInboundAfterWait } = await supabase
-      .from('crm_messages')
-      .select('id, meta_message_id, content, message_type, media_url')
-      .eq('contact_id', contact.id)
-      .eq('direction', 'inbound')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Espera de acomodação: o cliente costuma mandar 2-3 mensagens seguidas
+    // ("oi" / "tudo bem?" / "quero saber o preço"). Sem esta espera a IA
+    // respondia cada uma separadamente, quase sempre repetindo a mesma coisa.
+    // Aqui a execução aguarda a conversa ficar "quieta": se chegar mensagem
+    // nova durante a janela, esta execução é descartada e a execução da
+    // mensagem mais nova responde tudo de uma vez, com o histórico completo.
+    const AI_SETTLE_WINDOW_MS = 9000;
+    const AI_SETTLE_STEP_MS = 2500;
+    let settleWaited = 0;
+    let latestInboundAfterWait: any = null;
+    while (true) {
+      await wait(AI_SETTLE_STEP_MS);
+      settleWaited += AI_SETTLE_STEP_MS;
+      const { data: latestInbound } = await supabase
+        .from('crm_messages')
+        .select('id, meta_message_id, content, message_type, media_url')
+        .eq('contact_id', contact.id)
+        .eq('direction', 'inbound')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (latestInboundAfterWait?.meta_message_id && latestInboundAfterWait.meta_message_id !== sourceMessageId) {
-      aiLog('skipped_newer_message', { newest_message_id: latestInboundAfterWait.meta_message_id });
-      console.log(`[AI-AGENT] Newer inbound message arrived for ${waId}. Skipping stale response for ${sourceMessageId}.`);
-      return { success: true, skipped: 'newer_message_waiting' };
+      if (latestInbound?.meta_message_id && latestInbound.meta_message_id !== sourceMessageId) {
+        aiLog('skipped_newer_message', { newest_message_id: latestInbound.meta_message_id, waited_ms: settleWaited });
+        console.log(`[AI-AGENT] Newer inbound message arrived for ${waId}. Skipping stale response for ${sourceMessageId}.`);
+        return { success: true, skipped: 'newer_message_waiting' };
+      }
+      latestInboundAfterWait = latestInbound;
+      if (settleWaited >= AI_SETTLE_WINDOW_MS) break;
     }
 
     // Transcreve internamente caso a última mensagem seja áudio.

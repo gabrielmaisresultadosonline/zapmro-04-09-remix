@@ -485,12 +485,18 @@ serve(async (req) => {
 
       // Números WhatsApp por cadastro (sem expor tokens ao navegador).
       const numbersMap = new Map<string, any[]>();
+      let numbersError: string | null = null;
       for (let i = 0; i < userIds.length; i += 500) {
-        const { data: nums } = await supabase
+        const { data: nums, error: numsError } = await supabase
           .from("crm_whatsapp_numbers")
           .select("user_id, label, meta_display_phone_number, meta_verified_name, meta_phone_number_id, meta_access_token, created_at")
           .in("user_id", userIds.slice(i, i + 500))
           .order("created_at", { ascending: true });
+        if (numsError) {
+          numbersError = numsError.message;
+          console.error("[ADMIN] list_users: falha ao ler crm_whatsapp_numbers:", numsError.message);
+          break;
+        }
         for (const n of nums || []) {
           const list = numbersMap.get((n as any).user_id) || [];
           list.push({

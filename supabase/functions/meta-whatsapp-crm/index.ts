@@ -1098,20 +1098,35 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
       return { success: true, skipped: 'already_replied' };
     }
 
-    await wait(3000); // Reduced wait time for faster response
-    const { data: latestInboundAfterWait } = await supabase
-      .from('crm_messages')
-      .select('id, meta_message_id, content, message_type, media_url')
-      .eq('contact_id', contact.id)
-      .eq('direction', 'inbound')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Espera de acomodação: o cliente costuma mandar 2-3 mensagens seguidas
+    // ("oi" / "tudo bem?" / "quero saber o preço"). Sem esta espera a IA
+    // respondia cada uma separadamente, quase sempre repetindo a mesma coisa.
+    // Aqui a execução aguarda a conversa ficar "quieta": se chegar mensagem
+    // nova durante a janela, esta execução é descartada e a execução da
+    // mensagem mais nova responde tudo de uma vez, com o histórico completo.
+    const AI_SETTLE_WINDOW_MS = 9000;
+    const AI_SETTLE_STEP_MS = 2500;
+    let settleWaited = 0;
+    let latestInboundAfterWait: any = null;
+    while (true) {
+      await wait(AI_SETTLE_STEP_MS);
+      settleWaited += AI_SETTLE_STEP_MS;
+      const { data: latestInbound } = await supabase
+        .from('crm_messages')
+        .select('id, meta_message_id, content, message_type, media_url')
+        .eq('contact_id', contact.id)
+        .eq('direction', 'inbound')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (latestInboundAfterWait?.meta_message_id && latestInboundAfterWait.meta_message_id !== sourceMessageId) {
-      aiLog('skipped_newer_message', { newest_message_id: latestInboundAfterWait.meta_message_id });
-      console.log(`[AI-AGENT] Newer inbound message arrived for ${waId}. Skipping stale response for ${sourceMessageId}.`);
-      return { success: true, skipped: 'newer_message_waiting' };
+      if (latestInbound?.meta_message_id && latestInbound.meta_message_id !== sourceMessageId) {
+        aiLog('skipped_newer_message', { newest_message_id: latestInbound.meta_message_id, waited_ms: settleWaited });
+        console.log(`[AI-AGENT] Newer inbound message arrived for ${waId}. Skipping stale response for ${sourceMessageId}.`);
+        return { success: true, skipped: 'newer_message_waiting' };
+      }
+      latestInboundAfterWait = latestInbound;
+      if (settleWaited >= AI_SETTLE_WINDOW_MS) break;
     }
 
     // Transcreve internamente caso a última mensagem seja áudio.
@@ -1254,7 +1269,8 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     11. SAUDAÇÕES: Não envie saudações (como "Oi!", "Olá!", "Bom dia") se você já estiver conversando com o cliente no histórico recente. Se o histórico já contém interações, pule a saudação inicial e vá direto para a resposta ou pergunta.
     12. Nunca saia do personagem.
     12.1. NEGRITO (FORMATO WHATSAPP): para destacar palavras em negrito, envolva-as com UM asterisco de cada lado, assim: *palavra*. NUNCA use dois asteriscos (**palavra**) — o WhatsApp não entende markdown e o cliente veria os asteriscos soltos no texto.
-    13. MEMÓRIA DA CONVERSA: Sempre retome TODO o contexto já conversado no histórico (dados, nomes, valores, combinados, dúvidas pendentes). Nunca repita perguntas cujas respostas já estão no histórico e nunca recomece o atendimento do zero.${kanbanInstruction}${sendingInstruction}${documentsInstruction}`;
+    13. MEMÓRIA DA CONVERSA: Sempre retome TODO o contexto já conversado no histórico (dados, nomes, valores, combinados, dúvidas pendentes). Nunca repita perguntas cujas respostas já estão no histórico e nunca recomece o atendimento do zero.
+    17. MENSAGENS EM SEQUÊNCIA (ANTI-REPETIÇÃO): o cliente costuma mandar várias mensagens curtas seguidas. Trate todas as mensagens recentes dele como UMA única solicitação e responda tudo de uma vez só. NUNCA repita uma resposta que já aparece no histórico, nem com palavras parecidas. Se parte do que o cliente escreveu já foi respondida antes, responda apenas o que ainda não foi respondido — sem repetir saudação, apresentação ou explicação já enviadas.${kanbanInstruction}${sendingInstruction}${documentsInstruction}`;
   
   try {
     const visualAttachments = (recentMessages || [])
@@ -1471,21 +1487,46 @@ ${aiPrompt}
       // Credenciais já resolvidas no início (caixa correta + fallback validado).
       const settings = aiSettings;
 
-      // MODIFICAÇÃO: Verifica se a resposta da IA é igual à última mensagem enviada para evitar duplicidade
-      const { data: lastOutbound } = await supabase
+      // Anti-repetição no envio: compara com as últimas respostas da IA.
+      // Não basta igualdade exata — o modelo costuma reescrever a mesma
+      // resposta com palavras diferentes quando o cliente manda 2 mensagens
+      // seguidas. Consideramos duplicada qualquer resposta com 85%+ das
+      // palavras iguais a uma resposta enviada nas últimas 2 horas.
+      const normalizeForCompare = (s: string) => String(s || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const isNearDuplicateReply = (a: string, b: string) => {
+        const na = normalizeForCompare(a);
+        const nb = normalizeForCompare(b);
+        if (!na || !nb) return false;
+        if (na === nb) return true;
+        const wa = new Set(na.split(' '));
+        const wb = new Set(nb.split(' '));
+        let inter = 0;
+        for (const w of wa) if (wb.has(w)) inter++;
+        const jaccard = inter / (wa.size + wb.size - inter);
+        return jaccard >= 0.85;
+      };
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const { data: recentOutbound } = await supabase
         .from('crm_messages')
-        .select('content')
+        .select('content, created_at')
         .eq('contact_id', contact.id)
         .eq('direction', 'outbound')
+        .gte('created_at', twoHoursAgo)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(3);
+
+      const duplicatedReply = Boolean(reply) && (recentOutbound || []).some((m: any) => isNearDuplicateReply(reply, m?.content || ''));
 
       if (!reply) {
         // Só arquivo, sem texto.
-      } else if (lastOutbound?.content === reply) {
+      } else if (duplicatedReply) {
         aiLog('skipped_duplicate_reply');
-        console.log(`[AI-AGENT] Duplicated response detected for contact ${waId}. Skipping send.`);
+        console.log(`[AI-AGENT] Duplicated (or near-duplicated) response detected for contact ${waId}. Skipping send.`);
       } else {
         console.log(`[AI-AGENT] Sending reply to ${waId}: ${reply.substring(0, 50)}...`);
 

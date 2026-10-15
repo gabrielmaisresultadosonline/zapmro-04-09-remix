@@ -239,6 +239,66 @@ Estrutura obrigatória (títulos em MAIÚSCULAS, sem markdown com **):
 11. O QUE NUNCA FAZER
 Responda apenas com o prompt final, pronto para colar.`
 
+/**
+ * Escolhe a chave da OpenAI que realmente funciona, na mesma ordem do Agente I.A.:
+ * 1) chave do cadastro; 2) chave do dono do WhatsApp (se outro); 3) cadastro legado;
+ * 4) chave do servidor. Cada uma é testada (GET de modelo, sem custo) e a primeira
+ * aceita é usada. Evita o gerador usar uma chave antiga cancelada enquanto o
+ * Agente responde com outra.
+ */
+const workingKeyCache = new Map<string, string>()
+async function resolveWorkingKey(supabase: any, job: any, settings: any): Promise<string> {
+  const cacheId = String(job.id)
+  if (workingKeyCache.has(cacheId)) return workingKeyCache.get(cacheId)!
+  const clean = (v: unknown) => String(v || '').replace(/\s+/g, '')
+  const candidates: Array<{ source: string; key: string }> = []
+  const push = (source: string, key: string) => {
+    if (key && !candidates.some((c) => c.key === key)) candidates.push({ source, key })
+  }
+  push('cadastro', clean(settings?.openai_api_key))
+  try {
+    if (job.whatsapp_number_id) {
+      const { data: num } = await supabase.from('crm_whatsapp_numbers').select('user_id').eq('id', job.whatsapp_number_id).maybeSingle()
+      if (num?.user_id && num.user_id !== job.user_id) {
+        const { data: owner } = await supabase.from('crm_settings').select('openai_api_key').eq('user_id', num.user_id).maybeSingle()
+        push('dono_do_numero', clean(owner?.openai_api_key))
+      }
+    }
+    const { data: legacy } = await supabase.from('crm_settings').select('openai_api_key').eq('id', '00000000-0000-0000-0000-000000000001').maybeSingle()
+    push('legado', clean(legacy?.openai_api_key))
+  } catch (e: any) {
+    console.warn('[PROMPT-BUILDER] Falha ao listar chaves alternativas', e?.message || e)
+  }
+  push('servidor', clean(Deno.env.get('OPENAI_API_KEY')))
+  if (candidates.length === 0) return ''
+
+  let lastMessage = ''
+  for (const c of candidates) {
+    try {
+      const res = await fetch('https://api.openai.com/v1/models/gpt-4o-mini', { headers: { Authorization: `Bearer ${c.key}` } })
+      if (res.ok) {
+        console.log('[PROMPT-BUILDER] Chave em uso', JSON.stringify({ job: job.id, source: c.source, tested: candidates.length }))
+        workingKeyCache.set(cacheId, c.key)
+        return c.key
+      }
+      const body = await res.json().catch(() => ({}))
+      lastMessage = sanitizeProviderMessage(body?.error?.message || `HTTP ${res.status}`)
+      console.warn('[PROMPT-BUILDER] Chave recusada', JSON.stringify({ job: job.id, source: c.source, status: res.status, message: lastMessage }))
+      // Erro que não é da chave (rede/limite): usa esta mesma e deixa a chamada decidir.
+      if (res.status !== 401 && res.status !== 403) {
+        workingKeyCache.set(cacheId, c.key)
+        return c.key
+      }
+    } catch {
+      workingKeyCache.set(cacheId, c.key)
+      return c.key
+    }
+  }
+  // Nenhuma aceita: devolve a do cadastro para gerar a mensagem certa ao usuário.
+  console.warn('[PROMPT-BUILDER] Nenhuma chave aceita pela OpenAI', JSON.stringify({ job: job.id, sources: candidates.map((c) => c.source), last: lastMessage }))
+  return candidates[0].key
+}
+
 /** Executa uma rodada (pequena) de um trabalho já reservado. */
 export async function runPromptJobStep(supabase: any, job: any): Promise<void> {
   const update = async (patch: Record<string, unknown>) => {
@@ -250,12 +310,10 @@ export async function runPromptJobStep(supabase: any, job: any): Promise<void> {
       await update({ status: 'failed', error: 'O processamento passou do limite de tentativas. Tente gerar novamente.', lease_until: null })
       return
     }
-    const { data: settings } = await supabase.from('crm_settings')
+    const { data: settings, error: settingsErr } = await supabase.from('crm_settings')
       .select('openai_api_key, business_description, ai_system_prompt').eq('user_id', job.user_id).maybeSingle()
-    // Mesma regra do Agente I.A.: chave do cadastro; a do servidor só se não houver.
-    // Remove espaços/quebras internas que a OpenAI recusaria com 401.
-    const apiKey = String(settings?.openai_api_key || '').replace(/\s+/g, '') || String(Deno.env.get('OPENAI_API_KEY') || '').trim()
-    console.log('[PROMPT-BUILDER] Chave em uso', JSON.stringify({ job: job.id, source: settings?.openai_api_key ? 'cadastro' : 'servidor', length: apiKey.length }))
+    if (settingsErr) console.warn('[PROMPT-BUILDER] Falha ao ler crm_settings', settingsErr.message)
+    const apiKey = await resolveWorkingKey(supabase, job, settings)
     if (!apiKey) throw new FatalAiError('Cadastre a chave da OpenAI do Agente I.A. para gerar o prompt.')
 
     const ids: string[] = job.contact_ids || []

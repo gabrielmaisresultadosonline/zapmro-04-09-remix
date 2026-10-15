@@ -1487,21 +1487,46 @@ ${aiPrompt}
       // Credenciais já resolvidas no início (caixa correta + fallback validado).
       const settings = aiSettings;
 
-      // MODIFICAÇÃO: Verifica se a resposta da IA é igual à última mensagem enviada para evitar duplicidade
-      const { data: lastOutbound } = await supabase
+      // Anti-repetição no envio: compara com as últimas respostas da IA.
+      // Não basta igualdade exata — o modelo costuma reescrever a mesma
+      // resposta com palavras diferentes quando o cliente manda 2 mensagens
+      // seguidas. Consideramos duplicada qualquer resposta com 85%+ das
+      // palavras iguais a uma resposta enviada nas últimas 2 horas.
+      const normalizeForCompare = (s: string) => String(s || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const isNearDuplicateReply = (a: string, b: string) => {
+        const na = normalizeForCompare(a);
+        const nb = normalizeForCompare(b);
+        if (!na || !nb) return false;
+        if (na === nb) return true;
+        const wa = new Set(na.split(' '));
+        const wb = new Set(nb.split(' '));
+        let inter = 0;
+        for (const w of wa) if (wb.has(w)) inter++;
+        const jaccard = inter / (wa.size + wb.size - inter);
+        return jaccard >= 0.85;
+      };
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const { data: recentOutbound } = await supabase
         .from('crm_messages')
-        .select('content')
+        .select('content, created_at')
         .eq('contact_id', contact.id)
         .eq('direction', 'outbound')
+        .gte('created_at', twoHoursAgo)
         .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(3);
+
+      const duplicatedReply = Boolean(reply) && (recentOutbound || []).some((m: any) => isNearDuplicateReply(reply, m?.content || ''));
 
       if (!reply) {
         // Só arquivo, sem texto.
-      } else if (lastOutbound?.content === reply) {
+      } else if (duplicatedReply) {
         aiLog('skipped_duplicate_reply');
-        console.log(`[AI-AGENT] Duplicated response detected for contact ${waId}. Skipping send.`);
+        console.log(`[AI-AGENT] Duplicated (or near-duplicated) response detected for contact ${waId}. Skipping send.`);
       } else {
         console.log(`[AI-AGENT] Sending reply to ${waId}: ${reply.substring(0, 50)}...`);
 

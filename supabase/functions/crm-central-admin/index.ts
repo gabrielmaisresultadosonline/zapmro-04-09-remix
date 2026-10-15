@@ -470,32 +470,37 @@ serve(async (req) => {
 
       const userIds = allUsers.map((u) => u.id);
 
-      const { data: profiles } = await supabase
-        .from("crm_profiles")
-        .select("user_id, full_name, whatsapp_number, role, created_at, access_locked, access_lock_reason, access_locked_at")
-        .in("user_id", userIds);
-
-
-      const { data: settings } = await supabase
-        .from("crm_settings")
-        .select(
-          "user_id, meta_phone_number_id, meta_display_phone_number, meta_verified_name, meta_waba_id, meta_access_token"
-        )
-        .in("user_id", userIds);
+      // Consultas em lotes pequenos: listas grandes de IDs geram endereços
+      // longos demais e o nginx recusa (414), deixando tudo vazio em silêncio.
+      const CHUNK = 40;
+      const fetchChunked = async (table: string, cols: string) => {
+        const out: any[] = [];
+        for (let i = 0; i < userIds.length; i += CHUNK) {
+          const { data, error } = await supabase.from(table).select(cols).in("user_id", userIds.slice(i, i + CHUNK));
+          if (error) {
+            console.error(`[ADMIN] list_users: falha ao ler ${table}:`, error.message);
+            continue;
+          }
+          out.push(...(data || []));
+        }
+        return out;
+      };
+      const profiles = await fetchChunked("crm_profiles", "user_id, full_name, whatsapp_number, role, created_at, access_locked, access_lock_reason, access_locked_at");
+      const settings = await fetchChunked("crm_settings", "user_id, meta_phone_number_id, meta_display_phone_number, meta_verified_name, meta_waba_id, meta_access_token");
 
       // Números WhatsApp por cadastro (sem expor tokens ao navegador).
       const numbersMap = new Map<string, any[]>();
       let numbersError: string | null = null;
-      for (let i = 0; i < userIds.length; i += 500) {
+      for (let i = 0; i < userIds.length; i += CHUNK) {
         const { data: nums, error: numsError } = await supabase
           .from("crm_whatsapp_numbers")
           .select("user_id, label, meta_display_phone_number, meta_verified_name, meta_phone_number_id, meta_access_token, created_at")
-          .in("user_id", userIds.slice(i, i + 500))
+          .in("user_id", userIds.slice(i, i + CHUNK))
           .order("created_at", { ascending: true });
         if (numsError) {
           numbersError = numsError.message;
           console.error("[ADMIN] list_users: falha ao ler crm_whatsapp_numbers:", numsError.message);
-          break;
+          continue;
         }
         for (const n of nums || []) {
           const list = numbersMap.get((n as any).user_id) || [];
@@ -1136,7 +1141,7 @@ serve(async (req) => {
       const { data: profiles } = await supabase
         .from("crm_profiles")
         .select("user_id, full_name, whatsapp_number, trial_ends_at, access_until, is_paid, plan, created_at")
-        .in("user_id", userIds);
+        .limit(10000);
       const pMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
       // Detectar quem já conectou o WhatsApp (via crm_settings). Se estiver conectado
       // mas ainda não tiver trial_ends_at e não for pago, faz backfill de 2 dias
@@ -1144,7 +1149,7 @@ serve(async (req) => {
       const { data: settings } = await supabase
         .from("crm_settings")
         .select("user_id, meta_phone_number_id, meta_access_token, meta_waba_id, updated_at, created_at")
-        .in("user_id", userIds);
+        .limit(10000);
       const sMap = new Map(
         (settings || []).map((s: any) => [s.user_id, s])
       );

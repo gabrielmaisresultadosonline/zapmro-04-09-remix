@@ -8729,6 +8729,14 @@ async function fetchAndStoreIncomingMedia(
               'SEM SALDO na OpenAI: a chave é válida, mas a conta está sem créditos. Adicione créditos em platform.openai.com/settings/organization/billing.',
           };
         }
+        // Chave cancelada pela própria OpenAI (apagada no painel ou detectada
+        // como exposta publicamente). Não é erro de salvamento do CRM.
+        if (status === 401 && /invalidated|revoked|deactivated|disabled/i.test(String(body?.error?.message || ''))) {
+          return {
+            code: 'key_invalidated',
+            message: 'CHAVE CANCELADA PELA OPENAI: esta chave foi invalidada (apagada ou detectada como exposta). Gere uma chave NOVA em platform.openai.com/api-keys e cole aqui.',
+          };
+        }
         const codeMap: Record<number, { code: string; message: string }> = {
           401: { code: 'invalid_api_key', message: 'API ERRADA: a OpenAI recusou esta chave (401). Gere uma nova em platform.openai.com/api-keys.' },
           403: { code: 'forbidden', message: 'API sem permissão (403): a chave existe mas não pode usar este modelo/projeto.' },

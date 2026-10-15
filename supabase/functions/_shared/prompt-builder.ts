@@ -107,6 +107,9 @@ async function openAiChat(apiKey: string, model: string, system: string, user: s
     if ((res.status === 401 || res.status === 403) && /insufficient permissions|missing scopes|scope/i.test(providerMsg)) {
       throw new FatalAiError(`A chave da OpenAI não tem permissão para gerar textos (chave restrita). Em platform.openai.com/api-keys, edite a chave e marque "All" ou libere "Model capabilities". Detalhe da OpenAI: ${providerMsg}`)
     }
+    if (res.status === 401 && /invalidated|revoked|deactivated|disabled/i.test(providerMsg)) {
+      throw new FatalAiError('A OpenAI cancelou esta chave (foi apagada ou detectada como exposta). Gere uma chave NOVA em platform.openai.com/api-keys, cole no Agente I.A., clique em "Salvar Motor" e gere de novo.')
+    }
     if (res.status === 401) {
       throw new FatalAiError(`A OpenAI recusou a chave salva no Agente I.A. Clique em "Salvar Motor" depois de testar a chave e tente de novo. Detalhe da OpenAI: ${providerMsg}`)
     }

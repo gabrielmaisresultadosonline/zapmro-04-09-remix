@@ -66,7 +66,19 @@ export async function collectConversations(supabase: any, userId: string, number
   }
 }
 
-async function openAiChat(apiKey: string, model: string, system: string, user: string, json: boolean, maxTokens: number) {
+/** Remove trechos de chave (sk-...) da mensagem da OpenAI antes de mostrar/salvar. */
+function sanitizeProviderMessage(msg: string): string {
+  return String(msg || '').replace(/sk-[A-Za-z0-9_\-*.]{4,}/g, 'sk-…').slice(0, 300)
+}
+
+/**
+ * Chamada de chat com recuos automáticos:
+ * - modelo indisponível/sem permissão no projeto (401/403/404 em modelo ≠ mini) → tenta gpt-4o-mini;
+ * - modo JSON recusado (400) → tenta sem response_format;
+ * - 401 em chave restrita (Missing scopes) → mensagem específica de permissão.
+ * Só vira erro fatal quando o gpt-4o-mini (o mesmo do teste da chave) também é recusado.
+ */
+async function openAiChat(apiKey: string, model: string, system: string, user: string, json: boolean, maxTokens: number): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -80,11 +92,25 @@ async function openAiChat(apiKey: string, model: string, system: string, user: s
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const msg = data?.error?.message || `OpenAI ${res.status}`
-    if (res.status === 401) throw new FatalAiError('A chave da OpenAI do Agente I.A. foi recusada. Confira a chave nas configurações.')
-    if (res.status === 402 || data?.error?.code === 'insufficient_quota') throw new FatalAiError('A conta da OpenAI está sem créditos. Adicione créditos e tente de novo.')
-    if (res.status === 404 && model !== 'gpt-4o-mini') return openAiChat(apiKey, 'gpt-4o-mini', system, user, json, maxTokens)
-    throw new Error(msg)
+    const providerMsg = sanitizeProviderMessage(data?.error?.message || `OpenAI ${res.status}`)
+    const errCode = String(data?.error?.code || data?.error?.type || '')
+    console.warn(`[PROMPT-BUILDER] OpenAI ${res.status} (${model}${json ? ', json' : ''}): ${errCode} ${providerMsg}`)
+    // Modelo maior recusado → mesmo modelo do teste da chave.
+    if ([401, 403, 404].includes(res.status) && model !== 'gpt-4o-mini') {
+      return openAiChat(apiKey, 'gpt-4o-mini', system, user, json, maxTokens)
+    }
+    // Modo JSON recusado → texto livre (a nota continua útil).
+    if (res.status === 400 && json) return openAiChat(apiKey, model, system, user, false, maxTokens)
+    if (res.status === 402 || /insufficient_quota|credit_balance_exhausted|billing_hard_limit/i.test(errCode)) {
+      throw new FatalAiError('A conta da OpenAI está sem créditos. Adicione créditos e tente de novo.')
+    }
+    if ((res.status === 401 || res.status === 403) && /insufficient permissions|missing scopes|scope/i.test(providerMsg)) {
+      throw new FatalAiError(`A chave da OpenAI não tem permissão para gerar textos (chave restrita). Em platform.openai.com/api-keys, edite a chave e marque "All" ou libere "Model capabilities". Detalhe da OpenAI: ${providerMsg}`)
+    }
+    if (res.status === 401) {
+      throw new FatalAiError(`A OpenAI recusou a chave salva no Agente I.A. Clique em "Salvar Motor" depois de testar a chave e tente de novo. Detalhe da OpenAI: ${providerMsg}`)
+    }
+    throw new Error(providerMsg)
   }
   return String(data?.choices?.[0]?.message?.content || '').trim()
 }
@@ -223,7 +249,10 @@ export async function runPromptJobStep(supabase: any, job: any): Promise<void> {
     }
     const { data: settings } = await supabase.from('crm_settings')
       .select('openai_api_key, business_description, ai_system_prompt').eq('user_id', job.user_id).maybeSingle()
-    const apiKey = String(settings?.openai_api_key || '').trim() || Deno.env.get('OPENAI_API_KEY') || ''
+    // Mesma regra do Agente I.A.: chave do cadastro; a do servidor só se não houver.
+    // Remove espaços/quebras internas que a OpenAI recusaria com 401.
+    const apiKey = String(settings?.openai_api_key || '').replace(/\s+/g, '') || String(Deno.env.get('OPENAI_API_KEY') || '').trim()
+    console.log('[PROMPT-BUILDER] Chave em uso', JSON.stringify({ job: job.id, source: settings?.openai_api_key ? 'cadastro' : 'servidor', length: apiKey.length }))
     if (!apiKey) throw new FatalAiError('Cadastre a chave da OpenAI do Agente I.A. para gerar o prompt.')
 
     const ids: string[] = job.contact_ids || []

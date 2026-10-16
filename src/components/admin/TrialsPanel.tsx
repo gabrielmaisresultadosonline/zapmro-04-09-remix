@@ -280,6 +280,16 @@ export default function TrialsPanel({ creds }: Props) {
 
   return (
     <div className="space-y-4">
+      {debugLog.length > 0 && (
+        <details className="rounded-lg border bg-[#F0FDF4] p-2 text-xs text-[#075E54]">
+          <summary className="cursor-pointer font-medium">Log da leitura do servidor</summary>
+          <ul className="mt-1 space-y-0.5 font-mono">
+            {debugLog.map((l, i) => (
+              <li key={`${i}-${l}`} className={l.includes("ERRO") ? "text-red-700" : ""}>{l}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <div className="flex flex-wrap gap-2">
           {(["all", "no_trial", "trial_active", "trial_expired", "paid"] as const).map((k) => (
@@ -297,6 +307,14 @@ export default function TrialsPanel({ creds }: Props) {
               {k === "paid" && `Pagos (${counts.paid})`}
             </Button>
           ))}
+          <Button
+            size="sm"
+            variant={onlyConnected ? "default" : "outline"}
+            onClick={() => setOnlyConnected((v) => !v)}
+            className={onlyConnected ? "bg-[#075E54] hover:bg-[#128C7E] text-white" : "text-[#075E54]"}
+          >
+            Com número conectado ({trials.filter((t) => t.whatsapp_connected).length})
+          </Button>
         </div>
         <div className="flex items-center gap-2">
           <Input

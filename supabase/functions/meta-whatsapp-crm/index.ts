@@ -8832,11 +8832,35 @@ async function fetchAndStoreIncomingMedia(
 
         if (probe.ok) {
           console.log('[AI-KEY-VALIDATION] Token válido e com saldo', keyLog({ model: 'gpt-4o-mini' }));
+          // A chave aprovada aqui passa a ser a chave salva do cadastro. Antes a
+          // tela mostrava "API correta" com a chave digitada, mas o Agente lia a
+          // chave antiga do banco e a OpenAI recusava ("Incorrect API key").
+          let persisted = keySource === 'persisted';
+          if (!persisted && userId && rawKey !== persistedKey) {
+            const nowIso = new Date().toISOString();
+            const { data: updatedRows, error: updErr } = await supabase.from('crm_settings')
+              .update({ openai_api_key: rawKey, updated_at: nowIso }).eq('user_id', userId).select('user_id');
+            if (!updErr && (!updatedRows || updatedRows.length === 0)) {
+              const { error: insErr } = await supabase.from('crm_settings')
+                .insert({ user_id: userId, openai_api_key: rawKey, updated_at: nowIso });
+              persisted = !insErr;
+              if (insErr) console.warn('[AI-KEY-VALIDATION] Falha ao criar configurações', keyLog({ error: insErr.message }));
+            } else {
+              persisted = !updErr;
+              if (updErr) console.warn('[AI-KEY-VALIDATION] Falha ao salvar chave', keyLog({ error: updErr.message }));
+            }
+          } else if (rawKey === persistedKey) {
+            persisted = true;
+          }
+          console.log('[AI-KEY-VALIDATION] Chave salva no cadastro', keyLog({ persisted }));
           return jsonResponse({
             success: true,
             valid: true,
             code: 'ok',
-            message: 'API correta — chave válida, com acesso ao gpt-4o-mini e com saldo disponível.',
+            persisted,
+            message: persisted
+              ? 'API correta — chave válida, com saldo e já salva para o Agente I.A.'
+              : 'API correta — chave válida e com saldo. Clique em Salvar Motor para gravar.',
           });
         }
 

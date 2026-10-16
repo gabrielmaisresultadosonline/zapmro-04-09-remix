@@ -14,3 +14,4 @@
 - A geração de prompt pelos atendimentos roda em crm_ai_prompt_jobs (_shared/prompt-builder.ts): rodadas pequenas com trava, avançadas pelo processScheduled e pela tela; nunca processa tudo numa chamada só.
 - O teste grátis bloqueia Disparo em massa e Agente I.A. na tela (planAccess/PaidFeatureLock) e no servidor (_shared/plan-access.ts); a regra de plano deve ficar igual nos dois lados.
 - 'Reiniciar' do AdminCentral grava em crm_client_reload_signals (só service_role); cada CRM aberto anuncia presença no canal crm-online-v1 e recarrega ao receber o sinal.
+- A chave da OpenAI é escolhida só por _shared/openai-key.ts (resolveOpenAiKey: cadastro → dono do contato/número → legado → servidor, testada e em cache) para Agente I.A., Recuperador e gerador de prompt; assim nunca caem numa chave antiga cancelada.

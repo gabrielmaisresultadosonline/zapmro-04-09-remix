@@ -4,6 +4,7 @@ import { expandSettingsPerNumber, mergeNumberSettings, loadNumberSettings } from
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 import { collectConversations, tickPromptJobs, LOW_VOLUME_CONVERSATIONS, LOW_VOLUME_MESSAGES, PROMPT_JOB_DAYS } from "../_shared/prompt-builder.ts"
 import { transcribeOnce } from "../_shared/audio-transcript-cache.ts"
+import { resolveOpenAiKey, markOpenAiKeyRejected, cleanOpenAiKey } from "../_shared/openai-key.ts"
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
 import {
@@ -1364,12 +1365,13 @@ ${aiPrompt}
       aiLog('retry_without_images', { status: attempt.status, error: attempt.data?.error?.message });
       attempt = await callOpenAi(OPENAI_API_KEY, textOnlyContent);
     }
-    // Chave recusada/sem crédito: tenta a chave do servidor, se for diferente.
-    if (!attempt.ok && [401, 403, 429].includes(attempt.status)) {
-      const serverKey = cleanKey(Deno.env.get('OPENAI_API_KEY'));
-      if (serverKey && serverKey !== OPENAI_API_KEY) {
-        aiLog('retry_with_server_key', { status: attempt.status });
-        attempt = await callOpenAi(serverKey, textOnlyContent);
+    // Chave recusada na chamada real: marca e tenta a próxima chave aceita.
+    if (!attempt.ok && (attempt.status === 401 || attempt.status === 403)) {
+      markOpenAiKeyRejected(OPENAI_API_KEY, attempt.status, String(attempt.data?.error?.message || ''));
+      const next = await resolveOpenAiKey(supabase, { userIds: [userId, contact?.user_id], whatsappNumberId: boxId });
+      if (next.key && next.key !== OPENAI_API_KEY && !next.allRejected) {
+        aiLog('retry_with_other_key', { status: attempt.status, source: next.source });
+        attempt = await callOpenAi(next.key, textOnlyContent);
       }
     }
     const aiData = attempt.data;
@@ -1377,10 +1379,10 @@ ${aiPrompt}
     if (!attempt.ok) {
       const rawMsg = String(aiData?.error?.message || '').replace(/sk-[A-Za-z0-9_*.\-]+/g, 'sk-…');
       const code = String(aiData?.error?.code || aiData?.error?.type || '');
-      aiLog('failed_model_request', { status: attempt.status, code, error: rawMsg.slice(0, 200) });
-      console.error(`[AI-AGENT] OpenAI Error for ${waId}: status=${attempt.status} code=${code} ${rawMsg}`);
+      aiLog('failed_model_request', { status: attempt.status, code, error: rawMsg.slice(0, 200), key_source: resolvedKey.source });
+      console.error(`[AI-AGENT] OpenAI Error for ${waId}: status=${attempt.status} code=${code} source=${resolvedKey.source} ${rawMsg}`);
       let friendly = `OpenAI recusou (${attempt.status}${code ? ' ' + code : ''}): ${rawMsg || 'sem detalhe'}`;
-      if (attempt.status === 401) friendly = 'A chave da OpenAI foi recusada (inválida ou cancelada). Gere uma nova chave em platform.openai.com e salve em Configurações.';
+      if (attempt.status === 401) friendly = `A OpenAI recusou todas as chaves encontradas (${resolvedKey.sourcesTried.join(', ')}). Motivo: ${rawMsg || 'chave inválida'}. Cole a chave nova em Configurações → Agente I.A. e clique em Salvar.`;
       else if (code === 'insufficient_quota') friendly = 'A conta da OpenAI está sem crédito. Adicione saldo em platform.openai.com → Billing.';
       else if (attempt.status === 429) friendly = 'A OpenAI limitou as chamadas agora (limite de uso). Tente de novo em instantes.';
       return { success: false, error: friendly };

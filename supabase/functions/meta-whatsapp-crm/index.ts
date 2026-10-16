@@ -1060,9 +1060,17 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     return { success: false, error: 'meta_credentials_missing', whatsapp_number_id: boxId };
   }
 
-  // Espaços/quebras coladas junto da chave fazem a OpenAI recusar (401).
-  const cleanKey = (k: unknown) => String(k || '').replace(/\s+/g, '');
-  const OPENAI_API_KEY = cleanKey(aiSettings?.openai_api_key) || cleanKey(Deno.env.get('OPENAI_API_KEY'));
+  // Chave que a OpenAI realmente aceita: cadastro de quem acionou, dono do
+  // contato, dono do número, legado e, por último, a do servidor. Antes, se o
+  // cadastro não fosse lido, caía direto na chave do servidor (cancelada).
+  const cleanKey = cleanOpenAiKey;
+  const resolvedKey = await resolveOpenAiKey(supabase, {
+    firstKeys: [{ source: 'cadastro_atual', key: aiSettings?.openai_api_key }],
+    userIds: [userId, contact?.user_id],
+    whatsappNumberId: boxId,
+  });
+  const OPENAI_API_KEY = resolvedKey.key;
+  aiLog('openai_key_resolved', { source: resolvedKey.source, all_rejected: resolvedKey.allRejected, tried: resolvedKey.sourcesTried });
 
   if (!OPENAI_API_KEY) {
     aiLog('failed_missing_openai_key');

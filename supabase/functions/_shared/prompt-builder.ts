@@ -10,6 +10,7 @@
  */
 
 import { transcribeOnce } from './audio-transcript-cache.ts'
+import { resolveOpenAiKey } from './openai-key.ts'
 
 export const PROMPT_JOB_DAYS = 5
 export const PROMPT_JOB_MAX_CONTACTS = 120

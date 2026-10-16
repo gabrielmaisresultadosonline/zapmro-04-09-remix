@@ -811,7 +811,9 @@ export default function AdminCentral() {
     loadingRef.current = true;
     setLoading(true);
     try {
-      const data = await adminRead<{ users?: AdminUser[] }>("list_users", creds);
+      const data = await adminRead<{ users?: AdminUser[]; debug?: string[]; numbers_error?: string | null }>("list_users", creds);
+      console.info("[AdminCentral] list_users:", data.debug);
+      if (data.numbers_error) toast.error(`Falha ao ler números: ${data.numbers_error}`);
       if (!mountedRef.current) return;
       setUsers(data.users || []);
     } catch (err) {

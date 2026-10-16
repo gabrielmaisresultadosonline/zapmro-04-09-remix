@@ -1060,7 +1060,9 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     return { success: false, error: 'meta_credentials_missing', whatsapp_number_id: boxId };
   }
 
-  const OPENAI_API_KEY = aiSettings?.openai_api_key || Deno.env.get('OPENAI_API_KEY');
+  // Espaços/quebras coladas junto da chave fazem a OpenAI recusar (401).
+  const cleanKey = (k: unknown) => String(k || '').replace(/\s+/g, '');
+  const OPENAI_API_KEY = cleanKey(aiSettings?.openai_api_key) || cleanKey(Deno.env.get('OPENAI_API_KEY'));
 
   if (!OPENAI_API_KEY) {
     aiLog('failed_missing_openai_key');

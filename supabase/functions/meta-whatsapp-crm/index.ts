@@ -1060,7 +1060,9 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     return { success: false, error: 'meta_credentials_missing', whatsapp_number_id: boxId };
   }
 
-  const OPENAI_API_KEY = aiSettings?.openai_api_key || Deno.env.get('OPENAI_API_KEY');
+  // Espaços/quebras coladas junto da chave fazem a OpenAI recusar (401).
+  const cleanKey = (k: unknown) => String(k || '').replace(/\s+/g, '');
+  const OPENAI_API_KEY = cleanKey(aiSettings?.openai_api_key) || cleanKey(Deno.env.get('OPENAI_API_KEY'));
 
   if (!OPENAI_API_KEY) {
     aiLog('failed_missing_openai_key');
@@ -1328,31 +1330,52 @@ INSTRUÇÕES ESPECÍFICAS DESTE ATENDIMENTO/CONTATO:
 ${aiPrompt}
     `.trim();
 
-    const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: fullSystemPrompt },
-          { role: 'user', content: userContent }
-        ],
-        temperature: 0.7,
-        n: 1
-      }),
-    });
+    const textOnlyContent = typeof userContent === 'string' ? userContent : userContent[0].text;
+    const callOpenAi = async (key: string, content: any) => {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: fullSystemPrompt },
+            { role: 'user', content }
+          ],
+          temperature: 0.7,
+          n: 1
+        }),
+      });
+      let data: any = {};
+      try { data = await r.json(); } catch { data = {}; }
+      return { ok: r.ok, status: r.status, data };
+    };
 
+    let attempt = await callOpenAi(OPENAI_API_KEY, userContent);
+    // Imagem expirada/inacessível derruba a chamada inteira: tenta de novo só com texto.
+    if (!attempt.ok && attempt.status === 400 && typeof userContent !== 'string') {
+      aiLog('retry_without_images', { status: attempt.status, error: attempt.data?.error?.message });
+      attempt = await callOpenAi(OPENAI_API_KEY, textOnlyContent);
+    }
+    // Chave recusada/sem crédito: tenta a chave do servidor, se for diferente.
+    if (!attempt.ok && [401, 403, 429].includes(attempt.status)) {
+      const serverKey = cleanKey(Deno.env.get('OPENAI_API_KEY'));
+      if (serverKey && serverKey !== OPENAI_API_KEY) {
+        aiLog('retry_with_server_key', { status: attempt.status });
+        attempt = await callOpenAi(serverKey, textOnlyContent);
+      }
+    }
+    const aiData = attempt.data;
 
-
-    const aiData = await aiResponse.json();
-    
-    if (!aiResponse.ok) {
-      aiLog('failed_model_request', { status: aiResponse.status });
-      console.error(`[AI-AGENT] OpenAI Error for ${waId}:`, JSON.stringify(aiData));
-      return { success: false, error: "OpenAI API returned error" };
+    if (!attempt.ok) {
+      const rawMsg = String(aiData?.error?.message || '').replace(/sk-[A-Za-z0-9_*.\-]+/g, 'sk-…');
+      const code = String(aiData?.error?.code || aiData?.error?.type || '');
+      aiLog('failed_model_request', { status: attempt.status, code, error: rawMsg.slice(0, 200) });
+      console.error(`[AI-AGENT] OpenAI Error for ${waId}: status=${attempt.status} code=${code} ${rawMsg}`);
+      let friendly = `OpenAI recusou (${attempt.status}${code ? ' ' + code : ''}): ${rawMsg || 'sem detalhe'}`;
+      if (attempt.status === 401) friendly = 'A chave da OpenAI foi recusada (inválida ou cancelada). Gere uma nova chave em platform.openai.com e salve em Configurações.';
+      else if (code === 'insufficient_quota') friendly = 'A conta da OpenAI está sem crédito. Adicione saldo em platform.openai.com → Billing.';
+      else if (attempt.status === 429) friendly = 'A OpenAI limitou as chamadas agora (limite de uso). Tente de novo em instantes.';
+      return { success: false, error: friendly };
     }
     
     const rawReply = aiData.choices?.[0]?.message?.content || "";

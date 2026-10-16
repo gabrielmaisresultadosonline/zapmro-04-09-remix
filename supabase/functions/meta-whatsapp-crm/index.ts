@@ -3581,7 +3581,7 @@ async function processAiRecoveryForAllUsers(supabase: any, onlyUserId?: string |
 
   for (const { settings, boxId: recoveryBoxId } of recoveryUnits) {
     if (await isTrialOnlyUser(supabase, settings.user_id)) continue;
-    const apiKey = settings.openai_api_key || Deno.env.get('OPENAI_API_KEY');
+    const apiKey = (await resolveOpenAiKey(supabase, { firstKeys: [{ source: 'cadastro', key: settings.openai_api_key }], userIds: [settings.user_id], whatsappNumberId: recoveryBoxId })).key;
     if (!apiKey || !settings.meta_phone_number_id || !settings.meta_access_token) continue;
 
     summary.users += 1;

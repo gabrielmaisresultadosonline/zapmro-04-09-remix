@@ -258,53 +258,14 @@ const workingKeyCache = new Map<string, string>()
 async function resolveWorkingKey(supabase: any, job: any, settings: any): Promise<string> {
   const cacheId = String(job.id)
   if (workingKeyCache.has(cacheId)) return workingKeyCache.get(cacheId)!
-  const clean = (v: unknown) => String(v || '').replace(/\s+/g, '')
-  const candidates: Array<{ source: string; key: string }> = []
-  const push = (source: string, key: string) => {
-    if (key && !candidates.some((c) => c.key === key)) candidates.push({ source, key })
-  }
-  push('cadastro', clean(settings?.openai_api_key))
-  try {
-    if (job.whatsapp_number_id) {
-      const { data: num } = await supabase.from('crm_whatsapp_numbers').select('user_id').eq('id', job.whatsapp_number_id).maybeSingle()
-      if (num?.user_id && num.user_id !== job.user_id) {
-        const { data: owner } = await supabase.from('crm_settings').select('openai_api_key').eq('user_id', num.user_id).maybeSingle()
-        push('dono_do_numero', clean(owner?.openai_api_key))
-      }
-    }
-    const { data: legacy } = await supabase.from('crm_settings').select('openai_api_key').eq('id', '00000000-0000-0000-0000-000000000001').maybeSingle()
-    push('legado', clean(legacy?.openai_api_key))
-  } catch (e: any) {
-    console.warn('[PROMPT-BUILDER] Falha ao listar chaves alternativas', e?.message || e)
-  }
-  push('servidor', clean(Deno.env.get('OPENAI_API_KEY')))
-  if (candidates.length === 0) return ''
-
-  let lastMessage = ''
-  for (const c of candidates) {
-    try {
-      const res = await fetch('https://api.openai.com/v1/models/gpt-4o-mini', { headers: { Authorization: `Bearer ${c.key}` }, signal: AbortSignal.timeout(15_000) })
-      if (res.ok) {
-        console.log('[PROMPT-BUILDER] Chave em uso', JSON.stringify({ job: job.id, source: c.source, tested: candidates.length }))
-        workingKeyCache.set(cacheId, c.key)
-        return c.key
-      }
-      const body = await res.json().catch(() => ({}))
-      lastMessage = sanitizeProviderMessage(body?.error?.message || `HTTP ${res.status}`)
-      console.warn('[PROMPT-BUILDER] Chave recusada', JSON.stringify({ job: job.id, source: c.source, status: res.status, message: lastMessage }))
-      // Erro que não é da chave (rede/limite): usa esta mesma e deixa a chamada decidir.
-      if (res.status !== 401 && res.status !== 403) {
-        workingKeyCache.set(cacheId, c.key)
-        return c.key
-      }
-    } catch {
-      workingKeyCache.set(cacheId, c.key)
-      return c.key
-    }
-  }
-  // Nenhuma aceita: devolve a do cadastro para gerar a mensagem certa ao usuário.
-  console.warn('[PROMPT-BUILDER] Nenhuma chave aceita pela OpenAI', JSON.stringify({ job: job.id, sources: candidates.map((c) => c.source), last: lastMessage }))
-  return candidates[0].key
+  const r = await resolveOpenAiKey(supabase, {
+    firstKeys: [{ source: 'cadastro', key: settings?.openai_api_key }],
+    userIds: [job.user_id],
+    whatsappNumberId: job.whatsapp_number_id || null,
+  })
+  console.log('[PROMPT-BUILDER] Chave em uso', JSON.stringify({ job: job.id, source: r.source, all_rejected: r.allRejected, tried: r.sourcesTried }))
+  if (r.key && !r.allRejected) workingKeyCache.set(cacheId, r.key)
+  return r.key
 }
 
 /** Executa uma rodada (pequena) de um trabalho já reservado. */

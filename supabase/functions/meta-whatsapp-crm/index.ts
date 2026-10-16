@@ -7796,7 +7796,7 @@ async function fetchAndStoreIncomingMedia(
              }).eq('id', contactId);
           } else {
              // Dispara a IA mesmo sem texto do cliente para que ela se apresente
-             await processAiAgentResponse(supabase, contactAfterExec, waId, params.text || "Inicie o atendimento se apresentando.", params.sourceMessageId, contactAfterExec.user_id || userId, contactAfterExec.whatsapp_number_id || params.whatsapp_number_id || null);
+             await processAiAgentResponse(supabase, contactAfterExec, waId, params.text || "Inicie o atendimento se apresentando.", params.sourceMessageId, contactAfterExec.user_id || userId, contactAfterExec.whatsapp_number_id || params.whatsapp_number_id || null, userId || null);
           }
         }
 

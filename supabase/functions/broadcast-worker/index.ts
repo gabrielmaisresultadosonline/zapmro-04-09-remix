@@ -57,6 +57,10 @@ async function processOne(req: Request, workerId: string): Promise<Response> {
 
   let claimedItem: Record<string, unknown> | null = null
   try {
+    // Nenhum envio pode "simular sucesso": antes de pegar o próximo item,
+    // acerta como falha tudo que a Meta marcou como não entregue ou que
+    // passou de 24h sem confirmação de entrega. Barato quando não há nada.
+    await admin.rpc('crm_reconcile_broadcast_delivery').then(() => null, () => null)
     const { data: claimedRows, error: claimError } = await admin.rpc('crm_claim_broadcast_item', {
       p_worker_id: workerId,
       p_broadcast_id: requestedBroadcastId,

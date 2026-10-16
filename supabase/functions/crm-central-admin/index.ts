@@ -58,6 +58,43 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
+    // Lê uma tabela inteira em páginas de 1000 linhas, sem lista de IDs na URL
+    // (listas longas estouram o limite do nginx com 414 e voltavam vazias).
+    const adminLog: string[] = [];
+    const loadAll = async (table: string, cols: string): Promise<any[]> => {
+      const out: any[] = [];
+      for (let from = 0; from < 200000; from += 1000) {
+        const { data, error } = await supabase.from(table).select(cols).range(from, from + 999);
+        if (error) {
+          const msg = `${table}: ERRO ${error.message}`;
+          adminLog.push(msg);
+          console.error("[ADMIN]", msg);
+          break;
+        }
+        out.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+      adminLog.push(`${table}: ${out.length} linhas`);
+      return out;
+    };
+    const loadNumbersMap = async () => {
+      const nums = await loadAll("crm_whatsapp_numbers", "id, user_id, label, meta_display_phone_number, meta_verified_name, meta_phone_number_id, meta_access_token, created_at");
+      nums.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+      const map = new Map<string, any[]>();
+      for (const n of nums) {
+        const list = map.get(n.user_id) || [];
+        list.push({
+          id: n.id,
+          label: n.label || null,
+          phone: n.meta_display_phone_number || null,
+          name: n.meta_verified_name || null,
+          connected: !!(n.meta_access_token && n.meta_phone_number_id),
+        });
+        map.set(n.user_id, list);
+      }
+      return map;
+    };
+
     if (action === "login") {
       return json({ success: true });
     }
@@ -470,49 +507,11 @@ serve(async (req) => {
 
       const userIds = allUsers.map((u) => u.id);
 
-      // Consultas em lotes pequenos: listas grandes de IDs geram endereços
-      // longos demais e o nginx recusa (414), deixando tudo vazio em silêncio.
-      const CHUNK = 40;
-      const fetchChunked = async (table: string, cols: string) => {
-        const out: any[] = [];
-        for (let i = 0; i < userIds.length; i += CHUNK) {
-          const { data, error } = await supabase.from(table).select(cols).in("user_id", userIds.slice(i, i + CHUNK));
-          if (error) {
-            console.error(`[ADMIN] list_users: falha ao ler ${table}:`, error.message);
-            continue;
-          }
-          out.push(...(data || []));
-        }
-        return out;
-      };
-      const profiles = await fetchChunked("crm_profiles", "user_id, full_name, whatsapp_number, role, created_at, access_locked, access_lock_reason, access_locked_at");
-      const settings = await fetchChunked("crm_settings", "user_id, meta_phone_number_id, meta_display_phone_number, meta_verified_name, meta_waba_id, meta_access_token");
-
-      // Números WhatsApp por cadastro (sem expor tokens ao navegador).
-      const numbersMap = new Map<string, any[]>();
-      let numbersError: string | null = null;
-      for (let i = 0; i < userIds.length; i += CHUNK) {
-        const { data: nums, error: numsError } = await supabase
-          .from("crm_whatsapp_numbers")
-          .select("user_id, label, meta_display_phone_number, meta_verified_name, meta_phone_number_id, meta_access_token, created_at")
-          .in("user_id", userIds.slice(i, i + CHUNK))
-          .order("created_at", { ascending: true });
-        if (numsError) {
-          numbersError = numsError.message;
-          console.error("[ADMIN] list_users: falha ao ler crm_whatsapp_numbers:", numsError.message);
-          continue;
-        }
-        for (const n of nums || []) {
-          const list = numbersMap.get((n as any).user_id) || [];
-          list.push({
-            label: (n as any).label || null,
-            phone: (n as any).meta_display_phone_number || null,
-            name: (n as any).meta_verified_name || null,
-            connected: !!((n as any).meta_access_token && (n as any).meta_phone_number_id),
-          });
-          numbersMap.set((n as any).user_id, list);
-        }
-      }
+      const profiles = await loadAll("crm_profiles", "user_id, full_name, whatsapp_number, role, created_at, access_locked, access_lock_reason, access_locked_at");
+      const settings = await loadAll("crm_settings", "user_id, meta_phone_number_id, meta_display_phone_number, meta_verified_name, meta_waba_id, meta_access_token");
+      const numbersMap = await loadNumbersMap();
+      const numbersError = adminLog.find((l) => l.includes("ERRO")) || null;
+      adminLog.push(`auth.users: ${allUsers.length}`);
 
       const profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
       const settingsMap = new Map((settings || []).map((s: any) => [s.user_id, s]));
@@ -558,7 +557,9 @@ serve(async (req) => {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
-      return json({ success: true, users, numbers_error: numbersError });
+      adminLog.push(`conectados: ${users.filter((u) => u.connected).length}`);
+      console.log("[ADMIN] list_users", adminLog.join(" | "));
+      return json({ success: true, users, numbers_error: numbersError, debug: adminLog });
     }
 
     // ===== Travar / destravar o acesso de um cadastro =====
@@ -1138,18 +1139,10 @@ serve(async (req) => {
         if (page > 20) break;
       }
       const userIds = allUsers.map((u) => u.id);
-      const { data: profiles } = await supabase
-        .from("crm_profiles")
-        .select("user_id, full_name, whatsapp_number, trial_ends_at, access_until, is_paid, plan, created_at")
-        .limit(10000);
+      const profiles = await loadAll("crm_profiles", "user_id, full_name, whatsapp_number, trial_ends_at, access_until, is_paid, plan, created_at");
       const pMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
-      // Detectar quem já conectou o WhatsApp (via crm_settings). Se estiver conectado
-      // mas ainda não tiver trial_ends_at e não for pago, faz backfill de 2 dias
-      // usando a data em que a conexão foi salva (updated_at) como referência.
-      const { data: settings } = await supabase
-        .from("crm_settings")
-        .select("user_id, meta_phone_number_id, meta_access_token, meta_waba_id, updated_at, created_at")
-        .limit(10000);
+      const settings = await loadAll("crm_settings", "user_id, meta_phone_number_id, meta_display_phone_number, meta_verified_name, meta_access_token, meta_waba_id, updated_at, created_at");
+      const trialNumbersMap = await loadNumbersMap();
       const sMap = new Map(
         (settings || []).map((s: any) => [s.user_id, s])
       );
@@ -1157,7 +1150,8 @@ serve(async (req) => {
       for (const u of allUsers) {
         const p: any = pMap.get(u.id) || {};
         const s: any = sMap.get(u.id);
-        const connected = !!(s && s.meta_phone_number_id && s.meta_access_token && s.meta_waba_id);
+        const connected = !!(s && s.meta_phone_number_id && s.meta_access_token) ||
+          (trialNumbersMap.get(u.id) || []).some((n) => n.connected);
         const nowMs = Date.now();
         const accessUntilMs = p.access_until ? new Date(p.access_until).getTime() : 0;
         const isPaidActive = !!p.is_paid && accessUntilMs > nowMs;
@@ -1185,7 +1179,12 @@ serve(async (req) => {
       const trials = allUsers.map((u) => {
         const p: any = pMap.get(u.id) || {};
         const s: any = sMap.get(u.id);
-        const connected = !!(s && s.meta_phone_number_id && s.meta_access_token && s.meta_waba_id);
+        let numbers = trialNumbersMap.get(u.id) || [];
+        const legacyConnected = !!(s && s.meta_phone_number_id && s.meta_access_token);
+        if (numbers.length === 0 && s && (s.meta_phone_number_id || s.meta_display_phone_number)) {
+          numbers = [{ id: null, label: "WhatsApp principal", phone: s.meta_display_phone_number || null, name: s.meta_verified_name || null, connected: legacyConnected }];
+        }
+        const connected = legacyConnected || numbers.some((n) => n.connected);
         const trialEnds = p.trial_ends_at ? new Date(p.trial_ends_at).getTime() : null;
         const accessUntil = p.access_until ? new Date(p.access_until).getTime() : null;
         const isPaid = !!p.is_paid && accessUntil && accessUntil > now;
@@ -1210,10 +1209,13 @@ serve(async (req) => {
           status,
           hours_left: Math.max(0, Math.floor(msLeft / 3600000)),
           whatsapp_connected: connected,
+          numbers,
         };
       });
       trials.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return json({ success: true, trials });
+      adminLog.push(`auth.users: ${allUsers.length}`, `conectados: ${trials.filter((t) => t.whatsapp_connected).length}`);
+      console.log("[ADMIN] list_trials", adminLog.join(" | "));
+      return json({ success: true, trials, debug: adminLog });
     }
 
     if (action === "grant_access") {

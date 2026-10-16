@@ -34,6 +34,8 @@ interface Trial {
   status: "paid" | "trial_active" | "trial_expired" | "no_trial";
   hours_left: number;
   created_at: string;
+  whatsapp_connected?: boolean;
+  numbers?: { id: string | null; label: string | null; phone: string | null; name: string | null; connected: boolean }[];
 }
 
 interface Props {
@@ -77,6 +79,28 @@ export default function TrialsPanel({ creds }: Props) {
    * a dele. Só troca quando o admin marcar explicitamente nesta linha.
    */
   const [resetPw, setResetPw] = useState<Record<string, boolean>>({});
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [onlyConnected, setOnlyConnected] = useState(false);
+  const [accessId, setAccessId] = useState<string | null>(null);
+
+  /** Abre o CRM do cadastro (mesma ação "Acessar WhatsApp" da aba Cadastros). */
+  const handleAccess = async (t: Trial) => {
+    if (accessId) return;
+    setAccessId(t.id);
+    const tab = window.open("", "_blank");
+    try {
+      const data = await adminCall<{ url?: string }>("impersonate", creds, { userId: t.id });
+      if (!data?.url) throw new Error("Não foi possível gerar o acesso");
+      if (tab) tab.location.href = data.url;
+      else window.open(data.url, "_blank", "noopener,noreferrer");
+      toast.success(`Abrindo o CRM de ${t.email}`);
+    } catch (e) {
+      tab?.close();
+      toast.error(adminErrorMessage(e, "Erro ao acessar o cadastro"));
+    } finally {
+      setAccessId(null);
+    }
+  };
 
   const mountedRef = useRef(true);
   const loadingRef = useRef(false);
@@ -91,9 +115,11 @@ export default function TrialsPanel({ creds }: Props) {
     loadingRef.current = true;
     if (!silent) setLoading(true);
     try {
-      const data = await adminRead<{ trials?: Trial[] }>("list_trials", creds);
+      const data = await adminRead<{ trials?: Trial[]; debug?: string[] }>("list_trials", creds);
       if (!mountedRef.current) return;
       setTrials(data.trials || []);
+      setDebugLog(data.debug || ["Servidor sem log (atualize a VPS para a versão nova)."]);
+      console.info("[AdminCentral] list_trials:", data.debug);
     } catch (e) {
       if (!mountedRef.current || silent) return;
       toast.error(adminErrorMessage(e, "Erro ao carregar cadastros"));
@@ -238,6 +264,7 @@ export default function TrialsPanel({ creds }: Props) {
   };
 
   const filtered = trials.filter((t) => {
+    if (onlyConnected && !t.whatsapp_connected) return false;
     if (filter !== "all" && t.status !== filter) return false;
     if (search) {
       const s = search.toLowerCase();
@@ -253,6 +280,16 @@ export default function TrialsPanel({ creds }: Props) {
 
   return (
     <div className="space-y-4">
+      {debugLog.length > 0 && (
+        <details className="rounded-lg border bg-[#F0FDF4] p-2 text-xs text-[#075E54]">
+          <summary className="cursor-pointer font-medium">Log da leitura do servidor</summary>
+          <ul className="mt-1 space-y-0.5 font-mono">
+            {debugLog.map((l, i) => (
+              <li key={`${i}-${l}`} className={l.includes("ERRO") ? "text-red-700" : ""}>{l}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <div className="flex flex-wrap gap-2">
           {(["all", "no_trial", "trial_active", "trial_expired", "paid"] as const).map((k) => (
@@ -270,6 +307,14 @@ export default function TrialsPanel({ creds }: Props) {
               {k === "paid" && `Pagos (${counts.paid})`}
             </Button>
           ))}
+          <Button
+            size="sm"
+            variant={onlyConnected ? "default" : "outline"}
+            onClick={() => setOnlyConnected((v) => !v)}
+            className={onlyConnected ? "bg-[#075E54] hover:bg-[#128C7E] text-white" : "text-[#075E54]"}
+          >
+            Com número conectado ({trials.filter((t) => t.whatsapp_connected).length})
+          </Button>
         </div>
         <div className="flex items-center gap-2">
           <Input
@@ -311,6 +356,29 @@ export default function TrialsPanel({ creds }: Props) {
                     <div className="text-xs text-muted-foreground">{t.email}</div>
                     {t.whatsapp_number && (
                       <div className="text-xs text-muted-foreground">{t.whatsapp_number}</div>
+                    )}
+                    {(t.numbers || []).length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {(t.numbers || []).map((n, i) => (
+                          <span
+                            key={n.id || `${t.id}-${i}`}
+                            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${n.connected ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}
+                          >
+                            {i + 1}º {n.phone || "sem número"}{n.name ? ` · ${n.name}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {t.whatsapp_connected && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-1 h-7 text-xs text-[#075E54]"
+                        disabled={accessId === t.id}
+                        onClick={() => handleAccess(t)}
+                      >
+                        {accessId === t.id ? "Abrindo..." : "Acessar cadastro"}
+                      </Button>
                     )}
                   </td>
                   <td className="p-3 text-xs">{fmtDate(t.created_at)}</td>

@@ -973,6 +973,8 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     * de "IA ativada mas não responde nada".
     */
    whatsappNumberId?: string | null,
+   /** Quem clicou em "Responder" no CRM: a chave salva por essa pessoa também vale. */
+   requesterUserId?: string | null,
  ) {
    const aiRunId = crypto.randomUUID().slice(0, 8);
    const aiLog = (stage: string, details: Record<string, unknown> = {}) => {
@@ -1066,8 +1068,9 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   // cadastro não fosse lido, caía direto na chave do servidor (cancelada).
   const cleanKey = cleanOpenAiKey;
   const resolvedKey = await resolveOpenAiKey(supabase, {
-    firstKeys: [{ source: 'cadastro_atual', key: aiSettings?.openai_api_key }],
-    userIds: [userId, contact?.user_id],
+    // Quem acionou pela tela vem primeiro: é a chave que acabou de ser testada e salva.
+    firstKeys: requesterUserId && requesterUserId !== userId ? [] : [{ source: 'cadastro_atual', key: aiSettings?.openai_api_key }],
+    userIds: [requesterUserId, userId, contact?.user_id],
     whatsappNumberId: boxId,
   });
   const OPENAI_API_KEY = resolvedKey.key;
@@ -1368,7 +1371,7 @@ ${aiPrompt}
     // Chave recusada na chamada real: marca e tenta a próxima chave aceita.
     if (!attempt.ok && (attempt.status === 401 || attempt.status === 403)) {
       markOpenAiKeyRejected(OPENAI_API_KEY, attempt.status, String(attempt.data?.error?.message || ''));
-      const next = await resolveOpenAiKey(supabase, { userIds: [userId, contact?.user_id], whatsappNumberId: boxId });
+      const next = await resolveOpenAiKey(supabase, { userIds: [requesterUserId, userId, contact?.user_id], whatsappNumberId: boxId });
       if (next.key && next.key !== OPENAI_API_KEY && !next.allRejected) {
         aiLog('retry_with_other_key', { status: attempt.status, source: next.source });
         attempt = await callOpenAi(next.key, textOnlyContent);
@@ -8498,7 +8501,7 @@ async function fetchAndStoreIncomingMedia(
         
       if (!contact) return jsonResponse({ success: false, error: 'Contact not found' });
       
-       const result = await processAiAgentResponse(supabase, contact, params.to || params.waId, params.text, params.sourceMessageId, contact.user_id, contact.whatsapp_number_id || params.whatsapp_number_id || null);
+       const result = await processAiAgentResponse(supabase, contact, params.to || params.waId, params.text, params.sourceMessageId, contact.user_id, contact.whatsapp_number_id || params.whatsapp_number_id || null, userId || null);
       return jsonResponse(result);
     }
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-- [ ] Agente I.A.: reconhecer confirmações no contexto e permitir silêncio sem repetir avisos; validar preservação de novos pedidos e ações pendentes.
+- [x] Agente I.A.: reconhecer confirmações no contexto e permitir silêncio sem repetir avisos; 7 testes da decisão de envio aprovados (novos pedidos, arquivos e transferências preservados). Validação com conversa real depende da atualização na VPS.
 
 - [x] Corrigir normalização, validação duplicada e persistência do token OpenAI.
 - [x] Adicionar logs seguros para diagnóstico do Agente IA.

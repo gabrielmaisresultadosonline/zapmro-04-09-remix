@@ -37,6 +37,25 @@ describe('conversation retention — actual PostgreSQL migration', () => {
     expect(sql('SELECT deleted_messages FROM crm_cleanup_inactive_histories()')).toBe('0');
     expect(sql('SELECT count(*) FROM crm_messages')).toBe('2');
   });
+  it('serializes a concurrent new message before deciding to delete an inactive history', async () => {
+    reset(); message('20 days');
+    const writer = Bun.spawn(['psql', database as string, '-X', '-v', 'ON_ERROR_STOP=1', '-At'], {
+      stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+    });
+    writer.stdin.write(`BEGIN; INSERT INTO crm_messages VALUES(gen_random_uuid(),'${user}','${contact}',now(),NULL,'Retomada','{}'); SELECT pg_sleep(1); COMMIT;`);
+    writer.stdin.end();
+    // Wait until PostgreSQL confirms the writer has acquired its contact lock.
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (sql("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%SELECT pg_sleep(1); COMMIT%' AND wait_event='PgSleep'") === '1') break;
+      await Bun.sleep(10);
+      if (attempt === 99) throw new Error('Concurrent writer did not acquire its lock');
+    }
+    const cleaner = Bun.spawn(['psql', database as string, '-X', '-At', '-c', 'SELECT deleted_messages FROM crm_cleanup_inactive_histories()'], { stdout: 'pipe', stderr: 'pipe' });
+    expect(await writer.exited).toBe(0);
+    expect(await cleaner.exited).toBe(0);
+    expect((await new Response(cleaner.stdout).text()).trim()).toBe('0');
+    expect(sql('SELECT count(*) FROM crm_messages')).toBe('2');
+  });
   it('manual message deletion queues uncatalogued media immediately without deleting contacts', () => {
     reset(); message('1 hour', `'${url}'`); sql('DELETE FROM crm_messages');
     expect(sql('SELECT count(*) FROM crm_media_purge_due(100)')).toBe('1');

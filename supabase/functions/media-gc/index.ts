@@ -132,7 +132,7 @@ async function isStillReferenced(
     p_public_url: url,
     p_path: item.path,
   });
-  if (centralizedCheck.error) return true;
+   if (centralizedCheck.error) throw new Error(centralizedCheck.error.message);
   if (centralizedCheck.data === true) return true;
 
   // A RPC central inclui mensagens, metadados, fluxos, templates, documentos

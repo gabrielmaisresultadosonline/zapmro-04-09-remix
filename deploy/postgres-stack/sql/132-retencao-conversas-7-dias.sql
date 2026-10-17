@@ -18,6 +18,9 @@ AS $$
 DECLARE
   v_cutoff timestamptz := now() - make_interval(days => GREATEST(1, COALESCE(p_inactive_days, 7)));
 BEGIN
+  IF NOT pg_try_advisory_xact_lock(132007) THEN
+    deleted_contacts := 0; deleted_messages := 0; queued_media := 0; RETURN NEXT; RETURN;
+  END IF;
   CREATE TEMP TABLE IF NOT EXISTS pg_temp.retention_contacts (
     contact_id uuid PRIMARY KEY
   ) ON COMMIT DROP;
@@ -90,12 +93,6 @@ BEGIN
     RETURNING 1
   )
   SELECT count(*)::bigint INTO deleted_messages FROM removed;
-
-  UPDATE public.crm_media_assets a
-     SET reference_count = GREATEST(0, a.reference_count - r.removed_references),
-         updated_at = now()
-    FROM pg_temp.retention_removed_media r
-   WHERE a.user_id = r.user_id AND a.public_url = r.public_url;
 
   -- Arquivos registrados no catálogo entram imediatamente na lixeira. A remoção
   -- física continua condicionada à verificação final do worker media-gc.
@@ -171,6 +168,8 @@ BEGIN
     b := split_part(split_part(u, '/storage/v1/object/public/', 2), '/', 1);
     p := regexp_replace(substring(split_part(u, '/storage/v1/object/public/', 2) from length(b)+2), '[?#].*$', '');
     IF b <> '' AND p <> '' THEN
+      UPDATE public.crm_media_assets SET reference_count=GREATEST(0,reference_count-1),updated_at=now()
+      WHERE user_id=OLD.user_id AND bucket=b AND path=p;
       INSERT INTO public.crm_media_gc_queue(media_asset_id,user_id,bucket,path,public_url,reason,purge_after)
       SELECT a.id, OLD.user_id, b, p, u, 'conversa-mensagem-apagada', now()
       FROM (SELECT 1) dummy LEFT JOIN public.crm_media_assets a ON a.user_id=OLD.user_id AND a.bucket=b AND a.path=p

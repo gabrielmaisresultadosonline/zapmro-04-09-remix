@@ -221,8 +221,6 @@ export async function clearConversationHistory(options: {
     return q;
   });
 
-  const urls = collectStorageUrls(messages);
-
   let deleteQuery = supabase.from("crm_messages").delete();
   if (options.contactId) deleteQuery = deleteQuery.eq("contact_id", options.contactId);
   else if (options.userId) deleteQuery = deleteQuery.eq("user_id", options.userId);
@@ -234,17 +232,9 @@ export async function clearConversationHistory(options: {
 
   let removedFiles = 0;
   let keptFiles = 0;
-  if (options.purgeStorage !== false) {
-    // A fila durável do servidor já registrou os arquivos no DELETE.
-    // Acelera o próximo ciclo sem excluir arquivos compartilhados no navegador.
-    const result = await deleteMediaUrlsIfUnused(urls, {
-      userId: options.userId,
-      reason: "conversa-limpa",
-      delayDays: 0,
-    });
-    removedFiles = result.removed;
-    keptFiles = result.kept;
-  }
+  // O trigger do DELETE registra todas as URLs na mesma transação, sem depender
+  // do navegador, de paginação ou de consultas parciais sobre arquivos em uso.
+  // O worker informa a remoção física; não a simulamos como concluída aqui.
 
   console.log("[conversationArchive] histórico limpo", {
     deletedMessages: messages.length,

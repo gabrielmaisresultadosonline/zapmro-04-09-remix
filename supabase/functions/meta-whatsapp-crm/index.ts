@@ -4,6 +4,7 @@ import { expandSettingsPerNumber, mergeNumberSettings, loadNumberSettings } from
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.42.0"
 import { collectConversations, tickPromptJobs, LOW_VOLUME_CONVERSATIONS, LOW_VOLUME_MESSAGES, PROMPT_JOB_DAYS } from "../_shared/prompt-builder.ts"
 import { transcribeOnce } from "../_shared/audio-transcript-cache.ts"
+import { AI_CONTEXT_RESPONSE_RULE, resolveAiResponseDecision } from "../_shared/ai-response-policy.ts"
 import { resolveOpenAiKey, markOpenAiKeyRejected, cleanOpenAiKey } from "../_shared/openai-key.ts"
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
@@ -1340,6 +1341,8 @@ ${aiSettings?.business_description || "Não informada."}
 
 INSTRUÇÕES ESPECÍFICAS DESTE ATENDIMENTO/CONTATO:
 ${aiPrompt}
+
+${AI_CONTEXT_RESPONSE_RULE}
     `.trim();
 
     const textOnlyContent = typeof userContent === 'string' ? userContent : userContent[0].text;
@@ -1391,7 +1394,11 @@ ${aiPrompt}
       return { success: false, error: friendly };
     }
     
-    const rawReply = aiData.choices?.[0]?.message?.content || "";
+    const responseDecision = resolveAiResponseDecision(
+      String(aiData.choices?.[0]?.message?.content || ''),
+      processedRecentMessages.some((m) => m.direction === 'outbound'),
+    );
+    const rawReply = responseDecision.reply;
     const organizerEnabled = aiSettings?.ai_kanban_auto_organizer === true;
     let kanbanCategory = organizerEnabled ? extractAiKanbanCategory(rawReply) : null;
     const customLabel = organizerEnabled ? extractAiCustomLabel(rawReply) : null;
@@ -1465,6 +1472,13 @@ ${aiPrompt}
       }
     }
     
+    // Preserve classifications, but do not send text/files, renew alerts or
+    // change the agent/flow state just because the client acknowledged a notice.
+    if (responseDecision.silent) {
+      aiLog('skipped_context_acknowledgment', { reason: 'no_new_request_or_pending_action' });
+      return { success: true, skipped: 'context_acknowledgment' };
+    }
+
     if (wantsHumanTransfer || kanbanCategory === 'humano') {
       try {
         const alert = await notifyHumanAttendant(supabase, {

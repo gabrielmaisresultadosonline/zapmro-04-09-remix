@@ -129,6 +129,22 @@ REVOKE ALL ON FUNCTION public.crm_cleanup_inactive_histories(integer, integer) F
 GRANT EXECUTE ON FUNCTION public.crm_cleanup_inactive_histories(integer, integer) TO service_role;
 
 
+-- Mesmo bloqueio em TODOS os inserts de mensagem, inclusive chamadas diretas.
+-- Uma entrada iniciada antes do lote termina antes da rechecagem de atividade.
+CREATE OR REPLACE FUNCTION public.crm_lock_message_contact_for_retention()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF NEW.contact_id IS NOT NULL THEN
+    PERFORM 1 FROM public.crm_contacts WHERE id=NEW.contact_id FOR UPDATE;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.crm_lock_message_contact_for_retention() FROM PUBLIC,anon,authenticated;
+DROP TRIGGER IF EXISTS crm_messages_retention_write_lock ON public.crm_messages;
+CREATE TRIGGER crm_messages_retention_write_lock BEFORE INSERT OR UPDATE OF contact_id,created_at ON public.crm_messages
+FOR EACH ROW EXECUTE FUNCTION public.crm_lock_message_contact_for_retention();
+
 -- Referências globais: um arquivo compartilhado entre cadastros também é protegido.
 -- Tabelas opcionais são consultadas apenas quando existem; erros abortam a exclusão.
 CREATE OR REPLACE FUNCTION public.crm_media_is_referenced(p_user_id uuid, p_public_url text, p_path text)
@@ -136,7 +152,10 @@ RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = publi
 DECLARE t text; used boolean;
 BEGIN
   IF coalesce(p_path, '') = '' OR coalesce(p_public_url, '') = '' THEN RETURN true; END IF;
-  FOREACH t IN ARRAY ARRAY['crm_messages','crm_flows','crm_flow_steps','crm_templates','crm_ai_documents','zapi_flows','zapi_flow_steps'] LOOP
+  IF EXISTS(SELECT 1 FROM public.crm_messages m WHERE m.media_url=p_public_url OR m.content=p_public_url
+    OR position(p_path in coalesce(m.media_url,''))>0 OR position(p_path in coalesce(m.content,''))>0
+    OR position(p_path in coalesce(m.metadata::text,''))>0) THEN RETURN true; END IF;
+  FOREACH t IN ARRAY ARRAY['crm_flows','crm_flow_steps','crm_templates','crm_ai_documents','zapi_flows','zapi_flow_steps'] LOOP
     IF to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE format('SELECT EXISTS (SELECT 1 FROM public.%I x WHERE position($1 in x::text) > 0 OR position($2 in x::text) > 0)', t)
       INTO used USING p_path, p_public_url;

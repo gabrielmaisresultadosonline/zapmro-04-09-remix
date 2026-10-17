@@ -8,7 +8,7 @@
  */
 import JSZip from "jszip";
 import { supabase } from "@/integrations/supabase/client";
-import { collectStorageUrls, deleteMediaUrlsIfUnused, parseStorageUrl } from "@/lib/mediaStorage";
+import { collectStorageUrls, parseStorageUrl } from "@/lib/mediaStorage";
 
 export interface ConversationExportOptions {
   /** Inclui os binários (imagens/vídeos/áudios) dentro de um .zip. */
@@ -230,8 +230,8 @@ export async function clearConversationHistory(options: {
   const { error } = await deleteQuery;
   if (error) throw error;
 
-  let removedFiles = 0;
-  let keptFiles = 0;
+  const removedFiles = 0;
+  const keptFiles = 0;
   // O trigger do DELETE registra todas as URLs na mesma transação, sem depender
   // do navegador, de paginação ou de consultas parciais sobre arquivos em uso.
   // O worker informa a remoção física; não a simulamos como concluída aqui.

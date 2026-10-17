@@ -227,6 +227,7 @@ export async function clearConversationHistory(options: {
   if (options.contactId) deleteQuery = deleteQuery.eq("contact_id", options.contactId);
   else if (options.userId) deleteQuery = deleteQuery.eq("user_id", options.userId);
   else throw new Error("Escopo inválido: informe o usuário ou o contato.");
+  if (options.userId && options.contactId) deleteQuery = deleteQuery.eq("user_id", options.userId);
 
   const { error } = await deleteQuery;
   if (error) throw error;
@@ -234,12 +235,14 @@ export async function clearConversationHistory(options: {
   let removedFiles = 0;
   let keptFiles = 0;
   if (options.purgeStorage !== false) {
-    // Não apaga na hora: entra na lixeira e só sai do disco depois de 7 dias.
+    // A fila durável do servidor já registrou os arquivos no DELETE.
+    // Acelera o próximo ciclo sem excluir arquivos compartilhados no navegador.
     const result = await deleteMediaUrlsIfUnused(urls, {
       userId: options.userId,
       reason: "conversa-limpa",
+      delayDays: 0,
     });
-    removedFiles = result.removed + result.queued;
+    removedFiles = result.removed;
     keptFiles = result.kept;
   }
 

@@ -92,7 +92,7 @@ export const ConversationStorageSettings = ({
       const result = await clearConversationHistory({ userId, purgeStorage });
       toast({
         title: "Histórico limpo",
-        description: `${result.deletedMessages} mensagens apagadas. ${result.removedFiles} arquivos removidos do armazenamento (${result.keptFiles} preservados por ainda estarem em uso).`,
+        description: `${result.deletedMessages} mensagens apagadas. Os arquivos exclusivos serão removidos da VPS em até cinco minutos; arquivos compartilhados permanecem salvos.`,
       });
       onHistoryCleared?.();
     } catch (error) {
@@ -138,7 +138,7 @@ export const ConversationStorageSettings = ({
             <div>
               <Label className="text-xs font-bold uppercase tracking-wider">Apagar mídia ao limpar</Label>
               <p className="text-[11px] text-muted-foreground">
-                Remove do armazenamento os arquivos que nenhum fluxo ou mensagem usa mais.
+                A limpeza remove arquivos exclusivos da VPS em até cinco minutos; arquivos compartilhados são preservados.
               </p>
             </div>
             <Switch checked={purgeStorage} onCheckedChange={setPurgeStorage} />

@@ -3,7 +3,8 @@
  *
  * Por quê: quando um fluxo, template ou conversa é apagado, o arquivo NÃO é
  * removido do disco na hora. Ele entra em crm_media_gc_queue com prazo de
- * 7 dias. Esta função roda uma vez por dia, pega apenas os itens vencidos e,
+ * 7 dias para fluxos; conversas apagadas entram com vencimento imediato.
+ * Esta função roda a cada cinco minutos, pega apenas os itens vencidos e,
  * antes de apagar, confere de novo se ninguém voltou a usar o arquivo.
  *
  * Segurança: qualquer dúvida (arquivo ainda referenciado, erro na remoção)
@@ -26,11 +27,18 @@ interface QueueItem {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const backendUrl = Deno.env.get("SUPABASE_URL");
+  if (!serviceKey || !backendUrl) return new Response("Missing configuration", { status: 500, headers: corsHeaders });
+  if (req.headers.get("authorization") !== `Bearer ${serviceKey}`) {
+    return new Response("Unauthorized", { status: 401, headers: corsHeaders });
+  }
 
   try {
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      backendUrl,
+      serviceKey,
     );
 
     let limit = 200;
@@ -73,11 +81,12 @@ Deno.serve(async (req) => {
           .remove([item.path]);
         if (removeError) throw new Error(removeError.message);
 
-        await supabase.rpc("crm_media_mark_purged", {
+        const { error: markError } = await supabase.rpc("crm_media_mark_purged", {
           p_id: item.id,
           p_status: "purged",
           p_error: null,
         });
+        if (markError) throw new Error(markError.message);
         purged += 1;
       } catch (e) {
         failed += 1;

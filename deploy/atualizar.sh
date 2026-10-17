@@ -437,9 +437,9 @@ SELECT cron.schedule('process-broadcast-queue', '10 seconds', \$job\$
   );
 \$job\$);
 
--- Lixeira de mídias: apaga do disco apenas o que venceu o prazo de 7 dias e
--- que nenhuma mensagem, fluxo ou template usa mais.
-SELECT cron.schedule('media-gc-daily', '25 4 * * *', \$job\$
+-- Fluxos mantêm lixeira de 7 dias; mensagens apagadas vencem imediatamente.
+-- Exclusão física em lotes a cada cinco minutos, com verificação de uso.
+SELECT cron.schedule('media-gc-daily', '*/5 * * * *', \$job\$
   SELECT net.http_post(
     url := '${MEDIA_GC_URL}',
     headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
@@ -460,8 +460,8 @@ SELECT cron.schedule('incoming-media-expire', '*/20 * * * *', \$job\$
 \$job\$);
 
 -- Remove diariamente históricos de conversas sem nenhuma mensagem nova por
--- mais de 30 dias. Contatos e configurações permanecem intactos.
-SELECT cron.schedule('inactive-history-cleanup-daily', '5 4 * * *', \$job\$
+-- sete dias. Contatos e configurações permanecem intactos.
+SELECT cron.schedule('inactive-history-cleanup-daily', '7 * * * *', \$job\$
   SELECT net.http_post(
     url := '${RETENTION_CLEANUP_URL}',
     headers := '{"Content-Type":"application/json","apikey":"${ANON_KEY}","Authorization":"Bearer ${SERVICE_ROLE_KEY}"}'::jsonb,
@@ -543,10 +543,10 @@ if printf '%s' "$retention_response" | grep -q '"success":true'; then
   if printf '%s' "$media_gc_response" | grep -q '"success":true'; then
     ok "arquivos órfãos vencidos removidos após a verificação final"
   else
-    warn "a limpeza física não respondeu; o media-gc diário tentará novamente às 04:25"
+    warn "a limpeza física não respondeu; o media-gc tentará novamente em até cinco minutos"
   fi
 else
-  warn "primeira limpeza não respondeu; o cron diário tentará novamente às 04:05"
+  warn "primeira limpeza não respondeu; o cron tentará novamente na próxima hora"
 fi
 
 # --------------------------------------------------------------- 7) frontend --
@@ -718,7 +718,7 @@ fi
 retention_function="$(q "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='crm_cleanup_inactive_histories'")"
 retention_cron="$(q "select count(*) from cron.job where jobname='inactive-history-cleanup-daily'")"
 if [ "$retention_function" = "1" ] && [ "$retention_cron" = "1" ]; then
-  echo -e "  Retenção de históricos : ${C_G}OK${N} (30 dias + cron diário)"
+  echo -e "  Retenção de históricos : ${C_G}OK${N} (7 dias sem atividade + cron horário; arquivos a cada 5 min)"
 else
   die "Migration 108 incompleta; a retenção automática de históricos não foi ativada"
 fi

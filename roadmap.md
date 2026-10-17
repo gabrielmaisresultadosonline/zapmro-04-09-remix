@@ -1,8 +1,9 @@
 # Roadmap
 
-- [ ] Ajustar retenção para sete dias sem atividade, preservar contatos e proteger arquivos compartilhados.
-- [ ] Garantir remoção física de mídias na limpeza manual e automática, com repetição segura e diagnóstico na VPS.
-- [ ] Testar regras de retenção e fornecer comando de atualização; medição real depende de execução na VPS.
+- [x] Ajustar retenção para sete dias sem atividade, preservar contatos e proteger arquivos compartilhados.
+- [x] Implementar fila durável e remoção pela Storage API na limpeza manual e automática, com repetição segura e diagnóstico na VPS.
+- [x] Validar oito testes PostgreSQL, incluindo mensagem simultânea à limpeza, sintaxe dos scripts e verificação das funções.
+- [ ] Aplicar a atualização e medir liberação física real: depende de executar atualizar.sh e verificar-limpeza-conversas.sh na VPS do usuário.
 
 - [x] Agente I.A.: reconhecer confirmações no contexto e permitir silêncio sem repetir avisos; 7 testes da decisão de envio aprovados (novos pedidos, arquivos e transferências preservados). Validação com conversa real depende da atualização na VPS.
 

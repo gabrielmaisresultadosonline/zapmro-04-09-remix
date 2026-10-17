@@ -46,7 +46,7 @@ describe('conversation retention — actual PostgreSQL migration', () => {
     writer.stdin.end();
     // Wait until PostgreSQL confirms the writer has acquired its contact lock.
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (sql("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%SELECT pg_sleep(1); COMMIT%' AND wait_event='PgSleep'") === '1') break;
+      if (sql("SELECT count(*) FROM pg_stat_activity WHERE query LIKE '%pg_sleep(1)%' AND pid<>pg_backend_pid() AND state='active'") === '1') break;
       await Bun.sleep(10);
       if (attempt === 99) throw new Error('Concurrent writer did not acquire its lock');
     }

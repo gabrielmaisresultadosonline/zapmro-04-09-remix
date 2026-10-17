@@ -1,5 +1,7 @@
 # Roadmap
 
+- [ ] Agente I.A.: reconhecer confirmações no contexto e permitir silêncio sem repetir avisos; validar preservação de novos pedidos e ações pendentes.
+
 - [x] Corrigir normalização, validação duplicada e persistência do token OpenAI.
 - [x] Adicionar logs seguros para diagnóstico do Agente IA.
 - [x] Atualizar os scripts da VPS para o novo repositório GitHub.

@@ -2789,14 +2789,17 @@ else if (message.type === "unsupported") {
       let itemsQuery = supabase.from('crm_broadcast_items')
         .select('id, broadcast_id, whatsapp_number_id, processed_at')
         .eq('user_id', userId).eq('status', 'sent').is('reply_flow_started_at', null)
+        .is('reply_flow_cancelled_at', null)
         .in('wa_id', ids).gte('processed_at', sinceIso)
         .order('processed_at', { ascending: false }).limit(10);
       if (contact.whatsapp_number_id) itemsQuery = itemsQuery.eq('whatsapp_number_id', contact.whatsapp_number_id);
       const { data: replyItems, error: replyItemsError } = await itemsQuery;
       if (replyItemsError) throw replyItemsError;
       if (replyItems && replyItems.length > 0) {
+        // Campanhas com resposta cancelada manualmente nunca iniciam o fluxo.
         const { data: replyCampaigns } = await supabase.from('crm_broadcasts')
-          .select('id, reply_flow_id').in('id', replyItems.map((i: any) => i.broadcast_id)).not('reply_flow_id', 'is', null);
+          .select('id, reply_flow_id').in('id', replyItems.map((i: any) => i.broadcast_id))
+          .not('reply_flow_id', 'is', null).is('reply_flow_cancelled_at', null);
         const flowByCampaign = new Map((replyCampaigns || []).map((b: any) => [b.id, b.reply_flow_id]));
         const replyItem = replyItems.find((i: any) => flowByCampaign.has(i.broadcast_id));
         if (replyItem) {

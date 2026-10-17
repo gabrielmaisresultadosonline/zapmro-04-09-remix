@@ -65,6 +65,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import MetaPricingCalculator from "@/components/whatsapp/MetaPricingCalculator";
 import BroadcastFailureLogs from "@/components/crm/BroadcastFailureLogs";
+import BroadcastReplyQueue from "@/components/crm/BroadcastReplyQueue";
 import { SavedContactsReviewDialog, type SavedContact } from "@/components/crm/SavedContactsReviewDialog";
 import TemplateVariablesDialog, { loadDefaultTemplatePreset } from "@/components/whatsapp/TemplateVariablesDialog";
 import {
@@ -243,6 +244,8 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   const [delayMax, setDelayMax] = useState(60);
   const [applyTag, setApplyTag] = useState<string>('');
   const [replyFlowId, setReplyFlowId] = useState<string>('');
+  const [replyQueueOpen, setReplyQueueOpen] = useState(false);
+  const [replyQueueCampaign, setReplyQueueCampaign] = useState<string | null>(null);
   const [savedReview, setSavedReview] = useState<{ total: number; saved: SavedContact[] } | null>(null);
   const savedReviewResolver = useRef<((removed: string[] | null) => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2041,6 +2044,17 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                   <AccordionTrigger className="p-4 hover:no-underline [&[data-state=open]>div>h3]:text-[#00a884] transition-all">
                     <CardTitle className="text-base md:text-lg flex items-center gap-2 text-[#00a884]">
                       <History className="w-5 h-5" /> Histórico Recente
+                      {broadcasts.some(b => b.reply_flow_id) && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); setReplyQueueCampaign(null); setReplyQueueOpen(true); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setReplyQueueCampaign(null); setReplyQueueOpen(true); } }}
+                          className="ml-2 text-[10px] px-2 py-0.5 rounded bg-[#00a884]/20 text-[#00a884] hover:bg-[#00a884]/30 font-normal"
+                        >
+                          Aguardando resposta (todos)
+                        </span>
+                      )}
                     </CardTitle>
                   </AccordionTrigger>
                 </CardHeader>
@@ -2104,6 +2118,18 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                               >
                                 <AlertCircle className="w-2.5 h-2.5" /> Logs
                               </Button>
+                              {b.reply_flow_id && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => { setReplyQueueCampaign(b.id); setReplyQueueOpen(true); }}
+                                  className="text-[9px] px-2 h-6 rounded bg-[#00a884]/20 text-[#00a884] hover:bg-[#00a884]/30 flex items-center gap-1"
+                                  title="Ver quem está aguardando resposta e cancelar o fluxo"
+                                >
+                                  <Clock className="w-2.5 h-2.5" /> {b.reply_flow_cancelled_at ? 'Respostas (canceladas)' : 'Aguardando resposta'}
+                                </Button>
+                              )}
                               {canPause && (
                                 <Button
                                   type="button"
@@ -2206,6 +2232,14 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
         broadcast={logsBroadcast}
         open={!!logsBroadcast}
         onOpenChange={(o) => { if (!o) setLogsBroadcast(null); }}
+      />
+
+      <BroadcastReplyQueue
+        open={replyQueueOpen}
+        onOpenChange={setReplyQueueOpen}
+        broadcasts={broadcasts}
+        initialBroadcastId={replyQueueCampaign}
+        onChanged={fetchBroadcasts}
       />
 
       <Dialog open={!!duplicateDecision} onOpenChange={(open) => { if (!open) setDuplicateDecision(null); }}>

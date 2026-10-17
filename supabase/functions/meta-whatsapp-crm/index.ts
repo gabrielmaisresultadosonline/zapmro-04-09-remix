@@ -2806,7 +2806,7 @@ else if (message.type === "unsupported") {
           // Marca atomicamente: duas mensagens simultâneas não iniciam duas vezes.
           const { data: marked } = await supabase.from('crm_broadcast_items')
             .update({ reply_flow_started_at: new Date().toISOString() })
-            .eq('id', replyItem.id).is('reply_flow_started_at', null).select('id').maybeSingle();
+            .eq('id', replyItem.id).is('reply_flow_started_at', null).is('reply_flow_cancelled_at', null).select('id').maybeSingle();
           const replyFlowId = flowByCampaign.get(replyItem.broadcast_id);
           const { data: replyFlow } = marked
             ? await supabase.from('crm_flows').select('id, name, trigger_type, nodes, edges, user_id, whatsapp_number_id').eq('id', replyFlowId).eq('user_id', userId).maybeSingle()

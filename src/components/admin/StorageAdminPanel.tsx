@@ -163,7 +163,7 @@ export default function StorageAdminPanel({ creds }: { creds: AdminCreds }) {
         <div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar cadastro ou número..." /></div>
         <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Recarregar</Button>
       </div>
-      <p className="text-sm text-muted-foreground">A limpeza automática remove históricos sem atividade há 30 dias. Contatos, números, configurações, fluxos e templates permanecem salvos.</p>
+      <p className="text-sm text-muted-foreground">A limpeza automática remove históricos sem atividade há sete dias. Uma nova mensagem reinicia o prazo. Arquivos exclusivos são removidos da VPS em lotes a cada cinco minutos. Contatos, números, configurações, fluxos e templates permanecem salvos.</p>
       <IncomingMediaPanel creds={creds} />
       <StorageSystemPanel summary={vps} requesting={requestingVpsCleanup} onRequest={() => void requestVpsCleanup()} />
       <StorageResiduesPanel entries={residues} clearingId={clearingId} onClear={(entry) => void clearResidues(entry)} />

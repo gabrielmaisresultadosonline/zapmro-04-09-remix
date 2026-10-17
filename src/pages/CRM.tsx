@@ -139,6 +139,7 @@ import { EmojiPicker } from "@/components/crm/EmojiPicker";
 import { getFileExtension, resolveMimeType } from "@/lib/mime";
 import MediaDedupeScanOverlay from "@/components/crm/MediaDedupeScanOverlay";
 import ConversationStorageSettings from "@/components/crm/ConversationStorageSettings";
+import { clearConversationHistory } from "@/lib/conversationArchive";
 import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from "@/lib/mediaStorage";
 
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
@@ -3604,35 +3605,11 @@ const CRM = () => {
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
-  /**
-   * Coleta as URLs de mídia das mensagens do contato ANTES de apagá-las,
-   * para que a limpeza possa remover o que ficou órfão no armazenamento.
-   */
-  const collectContactMediaUrls = async (contactId: string): Promise<string[]> => {
-    const { data } = await supabase
-      .from('crm_messages')
-      .select('media_url, content, metadata')
-      .eq('contact_id', contactId);
-    return Array.from(collectStorageUrls(data || []));
-  };
-
   const handleClearConversation = async (contactId: string) => {
     try {
-      if (metaSettings.save_deleted_messages) {
-        // Soft delete: preserve messages in server-side history
-        const { error } = await supabase
-          .from('crm_messages')
-          .update({ is_deleted: true, deleted_at: new Date().toISOString(), deleted_by: 'admin' })
-          .eq('contact_id', contactId)
-          .or('is_deleted.is.null,is_deleted.eq.false');
-        if (error) throw error;
-      } else {
-        const mediaUrls = await collectContactMediaUrls(contactId);
-        const { error } = await supabase.from('crm_messages').delete().eq('contact_id', contactId);
-        if (error) throw error;
-        // Só remove do bucket o que nenhuma outra conversa/fluxo referencia.
-        await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current, reason: 'conversa-limpa' });
-      }
+      const userId = currentUserIdRef.current;
+      if (!userId) throw new Error('Entre novamente para limpar a conversa.');
+      await clearConversationHistory({ contactId, userId, purgeStorage: true });
       // Limpar a conversa inicia um histórico novo para os gatilhos, mas
       // preserva o contato e todos os demais dados do CRM.
       const { error: resetContactError } = await supabase
@@ -3668,7 +3645,7 @@ const CRM = () => {
         delete next[contactId];
         return next;
       });
-      toast({ title: "Conversa limpa", description: "Todas as mensagens foram apagadas." });
+      toast({ title: "Conversa limpa", description: "Mensagens apagadas; arquivos exclusivos serão removidos da VPS em até cinco minutos. O contato permanece salvo." });
     } catch (e: any) {
       console.error('[CRM] clearConversation error', e);
       toast({ title: "Erro ao limpar", description: e?.message || "Tente novamente.", variant: "destructive" });
@@ -3676,29 +3653,8 @@ const CRM = () => {
   };
 
   const handleDeleteConversation = async (contactId: string) => {
-    try {
-      const mediaUrls = await collectContactMediaUrls(contactId);
-      const { error: msgErr } = await supabase.from('crm_messages').delete().eq('contact_id', contactId);
-      if (msgErr) throw msgErr;
-      const { error: contactErr } = await supabase.from('crm_contacts').delete().eq('id', contactId);
-      if (contactErr) throw contactErr;
-      await deleteMediaUrlsIfUnused(mediaUrls, { userId: currentUserIdRef.current, reason: 'conversa-excluida' });
-
-      setContacts(prev => prev.filter(c => c.id !== contactId));
-      if (selectedContactRef.current?.id === contactId) {
-        setSelectedContact(null);
-        setChatMessages([]);
-      }
-      setInboundTimestampsByContact(prev => {
-        const next = { ...prev };
-        delete next[contactId];
-        return next;
-      });
-      toast({ title: "Conversa apagada", description: "O contato e suas mensagens foram removidos." });
-    } catch (e: any) {
-      console.error('[CRM] deleteConversation error', e);
-      toast({ title: "Erro ao apagar", description: e?.message || "Tente novamente.", variant: "destructive" });
-    }
+    // Apagar a conversa também preserva o contato; o servidor remove a mídia sem uso.
+    await handleClearConversation(contactId);
   };
 
   /** Regra central (24h comum / 72h anúncio): fechada = só template. */
@@ -12094,7 +12050,7 @@ const CRM = () => {
               {confirmConvAction?.type === 'clear' ? (
                 <>Tem certeza que deseja <strong>limpar todas as mensagens</strong> da conversa com <strong>{confirmConvAction?.contactName}</strong>? O contato permanece, apenas o histórico será apagado. Esta ação não pode ser desfeita.</>
               ) : (
-                <>Tem certeza que deseja <strong>apagar a conversa completa</strong> com <strong>{confirmConvAction?.contactName}</strong>? O contato e todas as mensagens serão removidos. Esta ação não pode ser desfeita.</>
+                <>Tem certeza que deseja <strong>apagar a conversa completa</strong> com <strong>{confirmConvAction?.contactName}</strong>? O contato permanece salvo. As mensagens e os arquivos exclusivos serão apagados da VPS. Esta ação não pode ser desfeita.</>
               )}
             </DialogDescription>
           </DialogHeader>

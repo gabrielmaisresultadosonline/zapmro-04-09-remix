@@ -3,7 +3,8 @@
  *
  * Por quê: quando um fluxo, template ou conversa é apagado, o arquivo NÃO é
  * removido do disco na hora. Ele entra em crm_media_gc_queue com prazo de
- * 7 dias. Esta função roda uma vez por dia, pega apenas os itens vencidos e,
+ * 7 dias para fluxos; conversas apagadas entram com vencimento imediato.
+ * Esta função roda a cada cinco minutos, pega apenas os itens vencidos e,
  * antes de apagar, confere de novo se ninguém voltou a usar o arquivo.
  *
  * Segurança: qualquer dúvida (arquivo ainda referenciado, erro na remoção)
@@ -26,11 +27,18 @@ interface QueueItem {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: corsHeaders });
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const backendUrl = Deno.env.get("SUPABASE_URL");
+  if (!serviceKey || !backendUrl) return new Response("Missing configuration", { status: 500, headers: corsHeaders });
+  if (req.headers.get("authorization") !== `Bearer ${serviceKey}`) {
+    return new Response("Unauthorized", { status: 401, headers: corsHeaders });
+  }
 
   try {
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      backendUrl,
+      serviceKey,
     );
 
     let limit = 200;
@@ -53,7 +61,11 @@ Deno.serve(async (req) => {
     let restored = 0;
     let failed = 0;
 
+    const startedAt = Date.now();
+    let checked = 0;
     for (const item of items) {
+      if (Date.now() - startedAt > 50_000) break;
+      checked += 1;
       try {
         // Última conferência: alguém voltou a usar este arquivo?
         const stillUsed = await isStillReferenced(supabase, item);
@@ -73,11 +85,12 @@ Deno.serve(async (req) => {
           .remove([item.path]);
         if (removeError) throw new Error(removeError.message);
 
-        await supabase.rpc("crm_media_mark_purged", {
+        const { error: markError } = await supabase.rpc("crm_media_mark_purged", {
           p_id: item.id,
           p_status: "purged",
           p_error: null,
         });
+        if (markError) throw new Error(markError.message);
         purged += 1;
       } catch (e) {
         failed += 1;
@@ -93,7 +106,7 @@ Deno.serve(async (req) => {
 
     console.log(`[MEDIA-GC] concluído — apagados=${purged} preservados=${restored} falhas=${failed}`);
     return new Response(
-      JSON.stringify({ success: true, checked: items.length, purged, restored, failed }),
+      JSON.stringify({ success: failed === 0, checked, purged, restored, failed }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (error) {
@@ -119,58 +132,10 @@ async function isStillReferenced(
     p_public_url: url,
     p_path: item.path,
   });
-  if (centralizedCheck.error) return true;
+   if (centralizedCheck.error) throw new Error(centralizedCheck.error.message);
   if (centralizedCheck.data === true) return true;
 
-  const byMedia = await supabase
-    .from("crm_messages")
-    .select("id")
-    .eq("media_url", url)
-    .limit(1);
-  if (byMedia.error) return true;
-  if ((byMedia.data?.length ?? 0) > 0) return true;
-
-  const byContent = await supabase
-    .from("crm_messages")
-    .select("id")
-    .eq("content", url)
-    .limit(1);
-  if (byContent.error) return true;
-  if ((byContent.data?.length ?? 0) > 0) return true;
-
-  const needle = `%${item.path}%`;
-
-  const flows = await supabase
-    .from("crm_flows")
-    .select("id")
-    .eq("user_id", item.user_id)
-    .or(`nodes::text.ilike.${needle},edges::text.ilike.${needle}`)
-    .limit(1);
-  if (flows.error) {
-    // Fallback: varre no cliente (poucos fluxos por usuário).
-    const all = await supabase.from("crm_flows").select("nodes, edges").eq("user_id", item.user_id);
-    if (all.error) return true;
-    if (JSON.stringify(all.data ?? []).includes(item.path)) return true;
-  } else if ((flows.data?.length ?? 0) > 0) {
-    return true;
-  }
-
-  const templates = await supabase
-    .from("crm_templates")
-    .select("components")
-    .eq("user_id", item.user_id);
-  if (templates.error) return true;
-  if (JSON.stringify(templates.data ?? []).includes(item.path)) return true;
-
-  // Mensagens agendadas ainda não foram enviadas, mas podem apontar para a
-  // mesma mídia. Em caso de erro, preserva o arquivo.
-  const scheduled = await supabase
-    .from("crm_scheduled_messages")
-    .select("message_data")
-    .eq("user_id", item.user_id)
-    .in("status", ["pending", "processing"]);
-  if (scheduled.error) return true;
-  if (JSON.stringify(scheduled.data ?? []).includes(item.path)) return true;
-
-  return false;
+  // A RPC central inclui mensagens, metadados, fluxos, templates, documentos
+  // e campanhas/agendamentos ativos em todos os cadastros. Falha preserva.
+  return centralizedCheck.data !== false;
 }

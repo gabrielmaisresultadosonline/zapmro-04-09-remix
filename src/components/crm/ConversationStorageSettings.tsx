@@ -37,7 +37,6 @@ export const ConversationStorageSettings = ({
 }: ConversationStorageSettingsProps) => {
   const { toast } = useToast();
   const [includeFiles, setIncludeFiles] = useState(true);
-  const [purgeStorage, setPurgeStorage] = useState(true);
   const [busy, setBusy] = useState<BusyAction>(null);
   const [progress, setProgress] = useState<string>("");
   const [confirmClear, setConfirmClear] = useState(false);
@@ -89,10 +88,10 @@ export const ConversationStorageSettings = ({
   const handleClear = async () => {
     setBusy("clear");
     try {
-      const result = await clearConversationHistory({ userId, purgeStorage });
+      const result = await clearConversationHistory({ userId, purgeStorage: true });
       toast({
         title: "Histórico limpo",
-        description: `${result.deletedMessages} mensagens apagadas. ${result.removedFiles} arquivos removidos do armazenamento (${result.keptFiles} preservados por ainda estarem em uso).`,
+        description: `${result.deletedMessages} mensagens apagadas. Os arquivos exclusivos serão removidos da VPS em até cinco minutos; arquivos compartilhados permanecem salvos.`,
       });
       onHistoryCleared?.();
     } catch (error) {
@@ -134,15 +133,7 @@ export const ConversationStorageSettings = ({
             </div>
             <Switch checked={includeFiles} onCheckedChange={setIncludeFiles} />
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <Label className="text-xs font-bold uppercase tracking-wider">Apagar mídia ao limpar</Label>
-              <p className="text-[11px] text-muted-foreground">
-                Remove do armazenamento os arquivos que nenhum fluxo ou mensagem usa mais.
-              </p>
-            </div>
-            <Switch checked={purgeStorage} onCheckedChange={setPurgeStorage} />
-          </div>
+
         </div>
 
         <div className="grid gap-2 sm:grid-cols-3">
@@ -195,7 +186,7 @@ export const ConversationStorageSettings = ({
             <AlertDialogHeader>
               <AlertDialogTitle>Limpar todo o histórico de conversas?</AlertDialogTitle>
               <AlertDialogDescription>
-                Todas as mensagens serão apagadas{purgeStorage ? " e os arquivos sem uso serão removidos do armazenamento" : ""}.
+                Todas as mensagens serão apagadas e os arquivos sem uso serão removidos da VPS.
                 Os contatos permanecem na lista. Recomendamos exportar ou salvar um backup antes. Esta ação não pode ser desfeita.
               </AlertDialogDescription>
             </AlertDialogHeader>

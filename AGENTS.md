@@ -3,9 +3,10 @@
 - The AI agent uses the shared response policy and an internal silence marker after contextual reasoning; classification remains active while silence skips sends and alert renewals without changing flow state.
 
 - A gestão de armazenamento do CRM usa RPCs `service_role` pelo AdminCentral; isso mantém métricas e exclusões fora do navegador e isoladas por número.
-- A retenção automática de conversas é de 30 dias de inatividade; contatos, números, configurações, fluxos e templates nunca são removidos por essa rotina.
+- Conversation retention uses a server-side batch RPC and a durable message-delete trigger; media removal runs through the Storage API with global reference checks and retryable failures, preserving contacts and automation records.
 - Métricas do sistema operacional são registradas por cron local em snapshots; o navegador apenas solicita manutenções e nunca acessa Docker ou o disco diretamente.
-- O inventário completo por cadastro é calculado pelo cron em snapshots somente leitura; a tela nunca varre todas as tabelas em tempo real.- Mídias recebidas (crm-media/incoming) expiram após 15 dias via edge function incoming-media-expire pela Storage API; mídia citada em fluxos/templates/agendadas nunca é apagada.
+- O inventário completo por cadastro é calculado pelo cron em snapshots somente leitura; a tela nunca varre todas as tabelas em tempo real.
+- Incoming media expiration only removes unreferenced legacy objects through the Storage API; active conversations and automation references remain protected.
 - Remover um número arquiva seus fluxos (desligados, whatsapp_number_id NULL, origem em archived_from_*) em vez de apagá-los; a tela de escolha de número permite transferi-los.
 - A leitura de uma conversa só avança por ação explícita do usuário; sincronizações automáticas preservam o cursor `last_read_at` monotônico.
 - O histórico de templates enviados guarda o texto final já interpolado e a mídia efetiva; a conversa nunca reconstrói novos envios pelos exemplos aprovados.

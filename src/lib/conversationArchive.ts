@@ -8,7 +8,7 @@
  */
 import JSZip from "jszip";
 import { supabase } from "@/integrations/supabase/client";
-import { collectStorageUrls, deleteMediaUrlsIfUnused, parseStorageUrl } from "@/lib/mediaStorage";
+import { collectStorageUrls, parseStorageUrl } from "@/lib/mediaStorage";
 
 export interface ConversationExportOptions {
   /** Inclui os binários (imagens/vídeos/áudios) dentro de um .zip. */
@@ -221,27 +221,20 @@ export async function clearConversationHistory(options: {
     return q;
   });
 
-  const urls = collectStorageUrls(messages);
-
   let deleteQuery = supabase.from("crm_messages").delete();
   if (options.contactId) deleteQuery = deleteQuery.eq("contact_id", options.contactId);
   else if (options.userId) deleteQuery = deleteQuery.eq("user_id", options.userId);
   else throw new Error("Escopo inválido: informe o usuário ou o contato.");
+  if (options.userId && options.contactId) deleteQuery = deleteQuery.eq("user_id", options.userId);
 
   const { error } = await deleteQuery;
   if (error) throw error;
 
-  let removedFiles = 0;
-  let keptFiles = 0;
-  if (options.purgeStorage !== false) {
-    // Não apaga na hora: entra na lixeira e só sai do disco depois de 7 dias.
-    const result = await deleteMediaUrlsIfUnused(urls, {
-      userId: options.userId,
-      reason: "conversa-limpa",
-    });
-    removedFiles = result.removed + result.queued;
-    keptFiles = result.kept;
-  }
+  const removedFiles = 0;
+  const keptFiles = 0;
+  // O trigger do DELETE registra todas as URLs na mesma transação, sem depender
+  // do navegador, de paginação ou de consultas parciais sobre arquivos em uso.
+  // O worker informa a remoção física; não a simulamos como concluída aqui.
 
   console.log("[conversationArchive] histórico limpo", {
     deletedMessages: messages.length,

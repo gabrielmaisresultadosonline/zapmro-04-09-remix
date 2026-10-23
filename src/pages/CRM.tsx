@@ -309,9 +309,14 @@ const deduplicateConversationContacts = (rows: any[]): any[] => {
     const newest = contactTime >= existingTime ? contact : existing;
     const oldest = newest === contact ? existing : contact;
 
+    // Nome salvo pelo usuário sempre vence o nome do perfil do WhatsApp,
+    // mesmo quando a cópia duplicada (com/sem 9º dígito) teve atividade mais recente.
+    const renamedTime = (c: any) => c?.metadata?.user_renamed ? new Date(c?.metadata?.user_renamed_at || c?.updated_at || 0).getTime() : -1;
+    const nameSource = renamedTime(oldest) > renamedTime(newest) ? oldest : newest;
     byConversation.set(key, {
       ...oldest,
       ...newest,
+      name: nameSource.name,
       last_interaction: getLatestIsoValue(oldest.last_interaction, newest.last_interaction),
       last_message_received_at: getLatestIsoValue(oldest.last_message_received_at, newest.last_message_received_at),
       last_read_at: getLatestIsoValue(oldest.last_read_at, newest.last_read_at),
@@ -11238,12 +11243,40 @@ const CRM = () => {
                   // Só contatos renomeados pelo usuário vão para o Google.
                   if (nameChanged && (contactToView.name || '').trim()) {
                     nextMetadata.user_renamed = true;
+                    nextMetadata.user_renamed_at = new Date().toISOString();
                   }
-                  await supabase.from('crm_contacts').update({
+                  const savedAt = new Date().toISOString();
+                  const { data: savedRows, error: saveError } = await supabase.from('crm_contacts').update({
                     name: contactToView.name,
                     metadata: nextMetadata,
-                    updated_at: new Date().toISOString(),
-                  }).eq('id', id);
+                    updated_at: savedAt,
+                  }).eq('id', id).select('id');
+                  if (saveError || !savedRows?.length) {
+                    toast({ title: "Não foi possível salvar o contato", description: saveError?.message || "Contato não encontrado. Tente de novo.", variant: "destructive" });
+                    return;
+                  }
+                  // Mesma conversa pode existir em duplicidade (com/sem 9º dígito):
+                  // grava o nome em todas as cópias para ele não voltar ao reabrir.
+                  if (nameChanged) {
+                    const canon = getCanonicalConversationPhone(contactToView.wa_id || original?.wa_id);
+                    const siblings = contacts.filter((c: any) => c.id !== id && c.user_id === original?.user_id && canon && getCanonicalConversationPhone(c.wa_id) === canon);
+                    const digits = canon.replace(/\D/g, '');
+                    const variants = digits.startsWith('55') && digits.length === 13 ? [digits, digits.slice(0, 4) + digits.slice(5)] : [digits];
+                    if (original?.user_id && digits) {
+                      await supabase.from('crm_contacts')
+                        .update({ name: contactToView.name, updated_at: savedAt })
+                        .eq('user_id', original.user_id)
+                        .in('wa_id', variants)
+                        .neq('id', id);
+                    }
+                    void siblings;
+                  }
+                  // Atualiza a lista e o cache local na hora.
+                  setContacts(prev => prev.map((c: any) => {
+                    const sameConv = c.id === id || (getCanonicalConversationPhone(c.wa_id) === getCanonicalConversationPhone(contactToView.wa_id) && c.user_id === original?.user_id);
+                    return sameConv ? { ...c, name: contactToView.name, metadata: c.id === id ? nextMetadata : { ...(c.metadata || {}), ...(nameChanged ? { user_renamed: true, user_renamed_at: nextMetadata.user_renamed_at } : {}) }, updated_at: savedAt } : c;
+                  }));
+                  contactToView.metadata = nextMetadata;
                   // Empurra na hora para o Google não esperar o cron.
                   if ((nameChanged || phoneChanged) && googleContactsEnabled) {
                     supabase.functions.invoke('meta-whatsapp-crm', { body: { action: 'syncPendingToGoogle' } }).catch(() => {});

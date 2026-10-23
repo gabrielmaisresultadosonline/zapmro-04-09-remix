@@ -11259,7 +11259,6 @@ const CRM = () => {
                   // grava o nome em todas as cópias para ele não voltar ao reabrir.
                   if (nameChanged) {
                     const canon = getCanonicalConversationPhone(contactToView.wa_id || original?.wa_id);
-                    const siblings = contacts.filter((c: any) => c.id !== id && c.user_id === original?.user_id && canon && getCanonicalConversationPhone(c.wa_id) === canon);
                     const digits = canon.replace(/\D/g, '');
                     const variants = digits.startsWith('55') && digits.length === 13 ? [digits, digits.slice(0, 4) + digits.slice(5)] : [digits];
                     if (original?.user_id && digits) {
@@ -11269,7 +11268,6 @@ const CRM = () => {
                         .in('wa_id', variants)
                         .neq('id', id);
                     }
-                    void siblings;
                   }
                   // Atualiza a lista e o cache local na hora.
                   setContacts(prev => prev.map((c: any) => {

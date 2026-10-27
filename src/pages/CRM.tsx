@@ -11482,15 +11482,15 @@ const CRM = () => {
       />
 
       <Dialog open={isSchedulingOpen} onOpenChange={(open) => { setIsSchedulingOpen(open); if (!open) setScheduleTemplateConfig(null); }}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:w-full max-w-2xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 border-none shadow-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh] bg-white text-zinc-900">
-          <DialogHeader>
+         <DialogContent className="w-[calc(100vw-1rem)] sm:w-full max-w-2xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 border-none shadow-2xl overflow-hidden flex flex-col max-h-[95dvh] sm:max-h-[90dvh] bg-white text-zinc-900">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-xl font-bold flex items-center gap-2 text-primary">
               <CalendarClock className="w-5 h-5" /> Novo Agendamento
             </DialogTitle>
             <DialogDescription className="text-zinc-500">Agende templates aprovados para seus contatos de forma organizada.</DialogDescription>
           </DialogHeader>
           
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 shrink-0">
             <Button 
               variant={selectedCampaignType === 'individual' ? 'default' : 'outline'}
               className={cn("h-11 rounded-xl text-[10px] font-bold px-1 transition-all", 

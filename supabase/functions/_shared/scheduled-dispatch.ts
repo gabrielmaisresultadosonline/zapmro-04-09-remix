@@ -18,7 +18,7 @@ export async function dispatchScheduled(supabase: any) {
   // This avoids duplicate sends if the Meta accepted the message before a timeout.
   const { data: rows, error } = await supabase.rpc('crm_claim_scheduled_messages', { p_limit: 3 });
   if (error) throw error;
-  const results = [];
+  const results: Array<{id:string;success:boolean}> = [];
   await Promise.all((rows || []).map(async (row:any) => {
     try {
       const { data: contact, error: lookupError } = await supabase.from('crm_contacts').select('*').eq('id', row.contact_id).eq('user_id', row.user_id).maybeSingle();

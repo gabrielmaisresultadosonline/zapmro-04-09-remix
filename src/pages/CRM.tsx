@@ -11482,15 +11482,15 @@ const CRM = () => {
       />
 
       <Dialog open={isSchedulingOpen} onOpenChange={(open) => { setIsSchedulingOpen(open); if (!open) setScheduleTemplateConfig(null); }}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:w-full max-w-2xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 border-none shadow-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh] bg-white text-zinc-900">
-          <DialogHeader>
+         <DialogContent className="w-[calc(100vw-1rem)] sm:w-full max-w-2xl rounded-2xl sm:rounded-3xl p-4 sm:p-6 border-none shadow-2xl overflow-hidden flex flex-col max-h-[95dvh] sm:max-h-[90dvh] bg-white text-zinc-900">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-xl font-bold flex items-center gap-2 text-primary">
               <CalendarClock className="w-5 h-5" /> Novo Agendamento
             </DialogTitle>
             <DialogDescription className="text-zinc-500">Agende templates aprovados para seus contatos de forma organizada.</DialogDescription>
           </DialogHeader>
           
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4 shrink-0">
             <Button 
               variant={selectedCampaignType === 'individual' ? 'default' : 'outline'}
               className={cn("h-11 rounded-xl text-[10px] font-bold px-1 transition-all", 
@@ -11533,7 +11533,7 @@ const CRM = () => {
             </Button>
           </div>
 
-          <ScrollArea className="flex-1 pr-2 sm:pr-4 -mr-2 sm:-mr-4 py-4">
+          <ScrollArea className="flex-1 min-h-0 pr-2 sm:pr-4 -mr-2 sm:-mr-4 py-4">
             <div className="space-y-6">
               {/* Configuração baseada no tipo de campanha */}
               {selectedCampaignType === 'individual' && (
@@ -11608,7 +11608,7 @@ const CRM = () => {
                     <Button variant="outline" size="sm" className="h-7 text-[10px] flex-1 rounded-lg border-zinc-200 bg-white hover:bg-zinc-50" onClick={() => setSelectedContactsForScheduling(contacts.map(c => c.id))}>Selecionar Todos</Button>
                     <Button variant="outline" size="sm" className="h-7 text-[10px] flex-1 rounded-lg border-zinc-200 bg-white hover:bg-zinc-50" onClick={() => setSelectedContactsForScheduling([])}>Limpar</Button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto p-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto p-1">
                     {contacts
                       .filter(c => {
                         if (!scheduleSearch) return true;
@@ -11712,7 +11712,7 @@ const CRM = () => {
                         <>
                           <div className="flex gap-2">
                             <Select value={selectedScheduleId} onValueChange={(value) => { setSelectedScheduleId(value); setScheduleTemplateConfig(null); }}>
-                              <SelectTrigger className="h-11 rounded-xl bg-zinc-100 border-none text-zinc-900 flex-1">
+                              <SelectTrigger className="h-11 rounded-xl bg-zinc-100 border-none text-zinc-900 flex-1 min-w-0">
                                 <SelectValue placeholder="Escolha um modelo..." />
                               </SelectTrigger>
                               <SelectContent className="rounded-xl">
@@ -11827,7 +11827,7 @@ const CRM = () => {
             </div>
           </ScrollArea>
 
-          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2 shrink-0 pt-3">
             <Button variant="ghost" onClick={() => { setIsSchedulingOpen(false); setSelectedContactsForScheduling([]); }} className="rounded-xl h-11 px-6 w-full sm:w-auto text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">Cancelar</Button>
             <Button 
               onClick={selectedCampaignType === 'birthday' ? handleScheduleBirthday : handleScheduleBatch} 

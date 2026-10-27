@@ -3933,7 +3933,7 @@ const CRM = () => {
         status: 'pending'
       }));
 
-      const { error } = await supabase.from('crm_scheduled_messages').insert(insertions);
+      const { error } = await (supabase as any).from('crm_scheduled_messages').insert(insertions);
       if (error) throw error;
 
       toast({ title: `${insertions.length} agendamentos criados!` });
@@ -4009,7 +4009,7 @@ const CRM = () => {
         ...(birthdayConfig ? { templateConfig: birthdayConfig } : {}),
       };
 
-      const { error: scheduleError } = await supabase.from('crm_scheduled_messages').insert({
+      const { error: scheduleError } = await (supabase as any).from('crm_scheduled_messages').insert({
         user_id: currentUserId,
         ...numberScopePatch(),
         contact_id: contact.id,
@@ -5081,7 +5081,7 @@ const CRM = () => {
         messageData = { action: 'startFlow', flowId: selectedScheduleId };
       }
 
-      const { error } = await supabase.from('crm_scheduled_messages').insert({
+      const { error } = await (supabase as any).from('crm_scheduled_messages').insert({
         user_id: currentUserId,
         ...numberScopePatch(),
         contact_id: selectedContact.id,

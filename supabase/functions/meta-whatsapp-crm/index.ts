@@ -7,6 +7,7 @@ import { transcribeOnce } from "../_shared/audio-transcript-cache.ts"
 import { AI_CONTEXT_RESPONSE_RULE, resolveAiResponseDecision } from "../_shared/ai-response-policy.ts"
 import { resolveOpenAiKey, markOpenAiKeyRejected, cleanOpenAiKey } from "../_shared/openai-key.ts"
 import { dispatchScheduled } from '../_shared/scheduled-dispatch.ts'
+import { isAlreadyInLanguage } from '../_shared/language-detect.ts'
 import { TranslationSettingsSchema, TranslateSchema, getTranslationSettings, translateText, translateMessage, autoTranslateIncoming } from '../_shared/conversation-translation.ts'
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
@@ -7698,7 +7699,7 @@ async function fetchAndStoreIncomingMedia(
       if (verifiedUserId && params.metadata?.source === 'manual_send' && typeof params.text === 'string') {
         const config=await getTranslationSettings(supabase,verifiedUserId);
         if (params.translate === true && !config.enabled) return jsonResponse({success:false,error:'Ative a tradução no Agente I.A.'},400);
-        if (config.enabled && (config.auto_outgoing || params.translate === true)) {
+        if (config.enabled && (config.auto_outgoing || params.translate === true) && !isAlreadyInLanguage(params.text, config.target_language)) {
           const original=params.text;
           params.text=await translateText(supabase,verifiedUserId,scopedNumberId,original,config.target_language);
           params.metadata={...params.metadata,translation_original:original,translation_language:config.target_language};

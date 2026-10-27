@@ -1,6 +1,7 @@
 import { z } from 'npm:zod@3.25.76';
 import { resolveOpenAiKey, markOpenAiKeyRejected } from './openai-key.ts';
 import { transcribeOnce } from './audio-transcript-cache.ts';
+import { isAlreadyInLanguage } from './language-detect.ts';
 import { isTrialOnlyUser, PAID_ONLY_MESSAGE } from './plan-access.ts';
 
 export const TranslationSettingsSchema = z.object({
@@ -60,7 +61,8 @@ export async function translateMessage(db:any,userId:string,messageId:string,set
     }
     if(!original) throw new Error('Não foi possível transcrever o áudio');
   } else if(!['text','template'].includes(message.message_type)) throw new Error('Selecione uma mensagem de texto ou áudio');
-  const translated=await translateText(db,userId,message.whatsapp_number_id,original,settings.target_language);
+  // Já está no idioma escolhido: guarda sem chamar a OpenAI (economia de tokens).
+  const translated=isAlreadyInLanguage(original,settings.target_language)?original:await translateText(db,userId,message.whatsapp_number_id,original,settings.target_language);
   const {data:result,error:saveError}=await db.from('crm_message_translations').upsert({user_id:userId,message_id:messageId,target_language:settings.target_language,original_text:original,translated_text:translated},{onConflict:'message_id,target_language'}).select('*').single();
   if(saveError) throw saveError;
   return result;
@@ -69,6 +71,10 @@ export async function translateMessage(db:any,userId:string,messageId:string,set
 export async function autoTranslateIncoming(db:any,userId:string,messageId:string,transcribe:(key:string,url:string)=>Promise<string>) {
   try {
     const settings=await getTranslationSettings(db,userId);
-    if(settings.enabled&&settings.auto_incoming) await translateMessage(db,userId,messageId,settings,transcribe);
+    if(!settings.enabled||!settings.auto_incoming) return;
+    // Texto no mesmo idioma não é traduzido nem gravado (zero tokens).
+    const {data:msg}=await db.from('crm_messages').select('content,message_type').eq('id',messageId).eq('user_id',userId).maybeSingle();
+    if(msg&&['text','template'].includes(msg.message_type)&&isAlreadyInLanguage(msg.content,settings.target_language)) return;
+    await translateMessage(db,userId,messageId,settings,transcribe);
   }catch(err:any){console.warn('[TRANSLATION]',messageId,String(err?.message||err).slice(0,200));}
 }

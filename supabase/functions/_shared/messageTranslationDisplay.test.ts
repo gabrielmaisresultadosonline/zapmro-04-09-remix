@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getMessageTranslationDisplay } from '../../lib/messageTranslationDisplay';
+import { getMessageTranslationDisplay } from '../../../src/lib/messageTranslationDisplay';
 
 describe('translated message content selection', () => {
   test('foreign text is replaced by its original and translation pair', () => {

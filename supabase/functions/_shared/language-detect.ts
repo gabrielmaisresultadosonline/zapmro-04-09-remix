@@ -29,5 +29,5 @@ export function isAlreadyInLanguage(text: string, lang: string): boolean {
   if (!target) return false;
   const best = Math.max(...Object.keys(STOPWORDS).filter((l) => l !== lang).map(score));
   // pt/es compartilham palavras; exige vantagem clara do idioma alvo.
-  return target > best || (words.length <= 2 && target >= best && target > 0 && lang === 'pt' && best === 0);
+  return target > best;
 }

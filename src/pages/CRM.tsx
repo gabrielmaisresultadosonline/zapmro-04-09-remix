@@ -11608,7 +11608,7 @@ const CRM = () => {
                     <Button variant="outline" size="sm" className="h-7 text-[10px] flex-1 rounded-lg border-zinc-200 bg-white hover:bg-zinc-50" onClick={() => setSelectedContactsForScheduling(contacts.map(c => c.id))}>Selecionar Todos</Button>
                     <Button variant="outline" size="sm" className="h-7 text-[10px] flex-1 rounded-lg border-zinc-200 bg-white hover:bg-zinc-50" onClick={() => setSelectedContactsForScheduling([])}>Limpar</Button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto p-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto p-1">
                     {contacts
                       .filter(c => {
                         if (!scheduleSearch) return true;
@@ -11712,7 +11712,7 @@ const CRM = () => {
                         <>
                           <div className="flex gap-2">
                             <Select value={selectedScheduleId} onValueChange={(value) => { setSelectedScheduleId(value); setScheduleTemplateConfig(null); }}>
-                              <SelectTrigger className="h-11 rounded-xl bg-zinc-100 border-none text-zinc-900 flex-1">
+                              <SelectTrigger className="h-11 rounded-xl bg-zinc-100 border-none text-zinc-900 flex-1 min-w-0">
                                 <SelectValue placeholder="Escolha um modelo..." />
                               </SelectTrigger>
                               <SelectContent className="rounded-xl">

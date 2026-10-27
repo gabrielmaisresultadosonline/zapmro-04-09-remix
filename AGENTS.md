@@ -1,5 +1,8 @@
 ## Decisões de arquitetura
 
+- Scheduled messages are claimed atomically in PostgreSQL and dispatched by the existing server ticker through the central send actions; ambiguous sends fail without automatic retries to prevent duplicates.
+- Conversation translation settings and cached results live in dedicated owner-scoped PostgreSQL tables; provider calls use the shared OpenAI key resolver, preserve originals and never alter AI/flow state.
+
 - The AI agent uses the shared response policy and an internal silence marker after contextual reasoning; classification remains active while silence skips sends and alert renewals without changing flow state.
 
 - A gestão de armazenamento do CRM usa RPCs `service_role` pelo AdminCentral; isso mantém métricas e exclusões fora do navegador e isoladas por número.

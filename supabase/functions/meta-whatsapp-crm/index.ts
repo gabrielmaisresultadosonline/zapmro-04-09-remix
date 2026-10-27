@@ -6,6 +6,8 @@ import { collectConversations, tickPromptJobs, LOW_VOLUME_CONVERSATIONS, LOW_VOL
 import { transcribeOnce } from "../_shared/audio-transcript-cache.ts"
 import { AI_CONTEXT_RESPONSE_RULE, resolveAiResponseDecision } from "../_shared/ai-response-policy.ts"
 import { resolveOpenAiKey, markOpenAiKeyRejected, cleanOpenAiKey } from "../_shared/openai-key.ts"
+import { dispatchScheduled } from '../_shared/scheduled-dispatch.ts'
+import { TranslationSettingsSchema, TranslateSchema, getTranslationSettings, translateText, translateMessage, autoTranslateIncoming } from '../_shared/conversation-translation.ts'
 import { executeVisualNode, processStep } from "../_shared/flow-executor.ts"
 import { getConversationWindow, isClickToWhatsAppReferral, WINDOW_CLOSED_MESSAGE } from "../_shared/conversation-window.ts"
 import {
@@ -2572,6 +2574,9 @@ else if (message.type === "unsupported") {
       return jsonResponse({ success: false, error: insertMessageError.message }, 500);
     }
      savedInboundMessageId = insertedInboundMessage?.id ?? null;
+     if (savedInboundMessageId && userId && !deferredInboundMedia) {
+       runInBackground(autoTranslateIncoming(supabase, userId, savedInboundMessageId, _transcribeAudioForAi));
+     }
      if (deferredInboundMedia && savedInboundMessageId) {
        const pending = deferredInboundMedia;
        const rowId = savedInboundMessageId;
@@ -2586,6 +2591,7 @@ else if (message.type === "unsupported") {
            media_url: storedUrl,
            metadata: { ...(row?.metadata || {}), media_pending: false, ...(storedUrl ? {} : { media_unavailable: true }) },
          }).eq('id', rowId);
+         if (storedUrl && userId) await autoTranslateIncoming(supabase, userId, rowId, _transcribeAudioForAi);
          console.log('[WEBHOOK] Deferred inbound media finished', { rowId, ok: Boolean(storedUrl) });
        })());
      }
@@ -6348,6 +6354,7 @@ async function fetchAndStoreIncomingMedia(
    )
  
    let userId: string | null = null;
+   let verifiedUserId: string | null = null;
    let userSettings: any = null;
     let trustedInternalRequest = false;
  
@@ -6411,6 +6418,7 @@ async function fetchAndStoreIncomingMedia(
              const { data: { user }, error: authError } = await supabase.auth.getUser(token);
              if (user) {
                userId = user.id;
+             verifiedUserId = user.id;
              } else if (authError) {
                console.warn('[AUTH-DEBUG] getUser failed with token:', token.slice(0, 10) + '...', authError.message);
              }
@@ -6544,6 +6552,29 @@ async function fetchAndStoreIncomingMedia(
         return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
       }
 
+      if (['getTranslationSettings','saveTranslationSettings','translateMessages'].includes(action)) {
+        if (!verifiedUserId || verifiedUserId !== userId) return jsonResponse({ success:false,error:'Entre no seu cadastro para traduzir.' },401);
+        if (action === 'getTranslationSettings') return jsonResponse({ success:true,settings:await getTranslationSettings(supabase,verifiedUserId) });
+        if (action === 'saveTranslationSettings') {
+          const parsed=TranslationSettingsSchema.safeParse(params.settings);
+          if (!parsed.success) return jsonResponse({success:false,error:'Configuração de tradução inválida'},400);
+          const {error}=await supabase.from('crm_translation_settings').upsert({user_id:verifiedUserId,...parsed.data,updated_at:new Date().toISOString()});
+          if(error) throw error;
+          return jsonResponse({success:true,settings:parsed.data});
+        }
+        const parsed=TranslateSchema.safeParse(params);
+        if(!parsed.success) return jsonResponse({success:false,error:'Selecione até 20 mensagens válidas'},400);
+        const config=await getTranslationSettings(supabase,verifiedUserId);
+        if(!config.enabled) return jsonResponse({success:false,error:'Ative a tradução no Agente I.A.'},400);
+        const translations=[];
+        const errors=[];
+        for(const id of parsed.data.messageIds) {
+          try { translations.push(await translateMessage(supabase,verifiedUserId,id,config,_transcribeAudioForAi)); }
+          catch(err:any) { errors.push({id,error:err?.message||'Falha ao traduzir'}); }
+        }
+        return jsonResponse({success:errors.length===0,translations,errors,error:errors[0]?.error});
+      }
+
       if (action === 'getCloudSettings') {
         // PERMITIR getCloudSettings mesmo sem AuthUID para debug inicial, 
         // mas o ideal é que o frontend envie o token
@@ -6665,6 +6696,8 @@ async function fetchAndStoreIncomingMedia(
         return await handleProcessWebhook(supabase, body.entry, false, userId || undefined);
       }
     if (action === 'processScheduled') {
+      // Independent persistent queue: failure never blocks existing flow timers.
+      runInBackground(dispatchScheduled(supabase).catch((err:any)=>console.error('[SCHEDULED] Rodada falhou:',err?.message||String(err))));
       // Renovação da janela do atendente humano (auxiliar, nunca bloqueia fluxos).
       processHumanAlertRenewals(supabase).catch((err: any) =>
         console.error('[HUMAN-ALERT] Renovação falhou:', err?.message || String(err)));
@@ -7662,6 +7695,15 @@ async function fetchAndStoreIncomingMedia(
     }
 
     if (action === 'sendMessage') {
+      if (verifiedUserId && params.metadata?.source === 'manual_send' && typeof params.text === 'string') {
+        const config=await getTranslationSettings(supabase,verifiedUserId);
+        if (params.translate === true && !config.enabled) return jsonResponse({success:false,error:'Ative a tradução no Agente I.A.'},400);
+        if (config.enabled && (config.auto_outgoing || params.translate === true)) {
+          const original=params.text;
+          params.text=await translateText(supabase,verifiedUserId,scopedNumberId,original,config.target_language);
+          params.metadata={...params.metadata,translation_original:original,translation_language:config.target_language};
+        }
+      }
       console.log(`[ACTION] sendMessage iniciado para: ${params.to}. HasInteractive: ${!!params.interactive}`);
       const normalizedTo = normalizePhone(params.to);
       const variants = getBrazilianPhoneVariants(normalizedTo);

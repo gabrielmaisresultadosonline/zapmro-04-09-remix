@@ -6,6 +6,9 @@ import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNu
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { AiDocumentsLibrary } from '@/components/crm/AiDocumentsLibrary';
 import { PromptFromConversations } from '@/components/crm/PromptFromConversations';
+import { TranslationSettings } from '@/components/crm/TranslationSettings';
+import { MessageTranslation } from '@/components/crm/MessageTranslation';
+import { useConversationTranslation } from '@/components/crm/useConversationTranslation';
 import { HumanAlertSettings } from '@/components/crm/HumanAlertSettings';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
 import { WhatsAppAudioPlayer } from '@/components/crm/WhatsAppAudioPlayer';
@@ -934,6 +937,7 @@ const CRM = () => {
   const selectedContactRef = useRef<any>(null);
   const sendQueueRef = useRef<Record<string, Promise<void>>>({});
   const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const translation = useConversationTranslation(currentUserId, selectedContact?.id, chatMessages);
   const [retryingMediaId, setRetryingMediaId] = useState<string | null>(null);
   /** Baixa de novo o arquivo de uma mensagem recebida sem mídia. */
   const handleRetryMedia = async (messageId: string) => {
@@ -3709,7 +3713,7 @@ const CRM = () => {
     }
   };
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = async (translateBeforeSend = false) => {
     if (readOnlyNumber) return;
     if (!newMessage.trim() || !selectedContact) return;
 
@@ -3724,6 +3728,7 @@ const CRM = () => {
     const targetContactId = selectedContact.id;
     const targetWaId = selectedContact.wa_id;
     const wasAiActive = !!selectedContact.ai_active;
+    const sendNumberScope = numberScopePatch();
 
     setNewMessage('');
 
@@ -3757,7 +3762,7 @@ const CRM = () => {
 
         console.log('[CRM][sendText] →', { to: targetWaId, len: textToSend.length, preview: textToSend.slice(0, 80) });
         const { data, error } = await supabase.functions.invoke('meta-whatsapp-crm', {
-          body: { action: 'sendMessage', to: targetWaId, text: textToSend, ...numberScopePatch(), metadata: { source: 'manual_send' } }
+          body: { action: 'sendMessage', to: targetWaId, text: textToSend, ...sendNumberScope, translate: translateBeforeSend, metadata: { source: 'manual_send' } }
         });
         console.log('[CRM][sendText] ← resp', { error, data });
         if (error) throw error;
@@ -3771,6 +3776,7 @@ const CRM = () => {
           setChatMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
         }
         toast({ title: 'Erro ao enviar', description: err.message, variant: 'destructive' });
+        if (selectedContactRef.current?.id === targetContactId) setNewMessage(prev => prev || textToSend);
       }
     });
     sendQueueRef.current[targetContactId] = job.finally(() => {
@@ -3909,6 +3915,7 @@ const CRM = () => {
           return;
         }
         payload.templateName = t?.name;
+        payload.templateId = t?.id;
         payload.language = t?.language || 'pt_BR';
         payload.languageCode = t?.language || 'pt_BR';
         const resolvedConfig = await resolveTemplateSendConfig(t, scheduleTemplateConfig);
@@ -3918,13 +3925,15 @@ const CRM = () => {
       }
 
       const insertions = finalContactIds.map(contactId => ({
+        user_id: currentUserId,
+        ...numberScopePatch(),
         contact_id: contactId,
         scheduled_for: scheduledFor,
         message_data: payload,
         status: 'pending'
       }));
 
-      const { error } = await supabase.from('crm_scheduled_messages').insert(insertions);
+      const { error } = await (supabase as any).from('crm_scheduled_messages').insert(insertions);
       if (error) throw error;
 
       toast({ title: `${insertions.length} agendamentos criados!` });
@@ -4000,7 +4009,9 @@ const CRM = () => {
         ...(birthdayConfig ? { templateConfig: birthdayConfig } : {}),
       };
 
-      const { error: scheduleError } = await supabase.from('crm_scheduled_messages').insert({
+      const { error: scheduleError } = await (supabase as any).from('crm_scheduled_messages').insert({
+        user_id: currentUserId,
+        ...numberScopePatch(),
         contact_id: contact.id,
         scheduled_for: scheduledFor,
         message_data: payload,
@@ -5048,6 +5059,7 @@ const CRM = () => {
         messageData = {
           action: 'sendTemplate',
           templateName: scheduledTemplate?.name || selectedScheduleId,
+          templateId: scheduledTemplate?.id,
           languageCode: scheduledTemplate?.language || 'pt_BR',
           ...(scheduledConfig ? { templateConfig: scheduledConfig } : {}),
         };
@@ -5069,7 +5081,9 @@ const CRM = () => {
         messageData = { action: 'startFlow', flowId: selectedScheduleId };
       }
 
-      const { error } = await supabase.from('crm_scheduled_messages').insert({
+      const { error } = await (supabase as any).from('crm_scheduled_messages').insert({
+        user_id: currentUserId,
+        ...numberScopePatch(),
         contact_id: selectedContact.id,
         scheduled_for: scheduledFor,
         message_data: messageData,
@@ -5455,6 +5469,7 @@ const CRM = () => {
       .select('*')
       .eq('contact_id', contactId)
       .eq('status', 'pending')
+      .eq('user_id', currentUserId || '')
       .order('scheduled_for', { ascending: true });
     
     if (selectedContactRef.current?.id === contactId) {
@@ -5463,7 +5478,7 @@ const CRM = () => {
   };
 
   const fetchAllScheduledMessages = async () => {
-    const { data, error } = await supabase
+    const { data, error } = await scopeQueryToActiveNumberStrict(supabase
       .from('crm_scheduled_messages')
       .select(`
         *,
@@ -5472,6 +5487,7 @@ const CRM = () => {
           wa_id
         )
       `)
+      .eq('user_id', currentUserId || ''))
       .order('scheduled_for', { ascending: true });
     
     if (error) {
@@ -5480,6 +5496,16 @@ const CRM = () => {
     }
     setAllScheduledMessages(data || []);
   };
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    const timer = window.setInterval(() => {
+      void fetchAllScheduledMessages();
+      const contactId = selectedContactRef.current?.id;
+      if (contactId) void fetchScheduledMessages(contactId);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [currentUserId, activeNumberId]);
 
   const handleSaveFlow = async (flow: any) => {
     setSaving(true);
@@ -7697,6 +7723,7 @@ const CRM = () => {
                                         : 'bg-[#dcf8c6] dark:bg-[#005c4b] text-[#111b21] dark:text-[#e9edef] rounded-tr-none border-r-[3px] border-r-transparent',
                                       m.isOptimistic && 'opacity-70 grayscale-[0.5]'
                                     )}>
+                                      <MessageTranslation message={m} translation={translation.translations[m.id]} enabled={translation.settings.enabled && !isTrialPlan} selected={translation.selected.includes(m.id)} busy={translation.busy} onSelect={() => translation.toggle(m.id)} onTranslate={() => translation.translate([m.id])} />
                                       {isTemplate && template ? (
                                         <div className="overflow-hidden rounded-xl bg-white dark:bg-zinc-900 shadow-lg border border-border/50 max-w-[300px]">
                                           {(() => {
@@ -8160,6 +8187,10 @@ const CRM = () => {
                                   </div>
                                  ) : (
                                   <div className="flex flex-col gap-1.5 max-w-5xl mx-auto w-full px-0.5 sm:px-2 pb-2 shrink-0">
+                                    {translation.settings.enabled && !isTrialPlan && <div className="flex flex-wrap items-center gap-2">
+                                      {translation.selected.length > 0 && <Button variant="outline" size="sm" disabled={translation.busy} onClick={() => translation.translate(translation.selected)}><LucideIcons.Languages className="h-4 w-4 mr-2"/>{translation.busy ? 'Traduzindo…' : `Traduzir selecionadas (${translation.selected.length})`}</Button>}
+                                      {newMessage.trim() && <Button variant="outline" size="sm" disabled={isRecording || translation.busy} onClick={() => handleSendMessage(true)}><LucideIcons.Languages className="h-4 w-4 mr-2"/>Traduzir e enviar</Button>}
+                                    </div>}
                                     {isRecording && (
                                       <div className="flex items-center justify-between px-3 py-1 bg-red-500/10 border border-red-500/20 rounded-full animate-pulse mx-1 shrink-0">
                                         <div className="flex items-center gap-1.5">
@@ -8245,7 +8276,7 @@ const CRM = () => {
                                           {newMessage.trim() ? (
                                             <Button 
                                               size="icon" 
-                                              onClick={handleSendMessage} 
+                                              onClick={() => handleSendMessage()} 
                                               className="h-9 w-9 sm:h-10 sm:w-10 shadow-lg rounded-full bg-[#00a884] hover:bg-[#008f6f] text-white active:scale-95 transition-all"
                                             >
                                               <Send className="w-4 h-4 sm:w-5 sm:h-5 ml-0.5" />
@@ -8495,10 +8526,11 @@ const CRM = () => {
                                       msg.status === 'sent' ? "bg-green-500/10 text-green-600 border-green-200" : ""
                                     )}
                                   >
-                                    {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : 'Erro'}
+                                    {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : msg.status === 'processing' ? 'Processando' : 'Erro'}
                                   </Badge>
                                 </div>
                                 <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                                  {msg.last_error && <p className="w-full text-destructive break-words">{msg.last_error}</p>}
                                   <Badge variant="outline" className="capitalize text-[10px]">
                                     {msg.message_data?.action === 'sendMessage' ? 'Texto' : 
                                      msg.message_data?.action === 'sendTemplate' ? 'Template' : 
@@ -8548,8 +8580,9 @@ const CRM = () => {
                                           msg.status === 'sent' ? "bg-green-500/10 text-green-600 border-green-200" : ""
                                         )}
                                       >
-                                        {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : 'Erro'}
+                                        {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : msg.status === 'processing' ? 'Processando' : 'Erro'}
                                       </Badge>
+                                      {msg.last_error && <p className="mt-1 text-xs text-destructive break-words">{msg.last_error}</p>}
                                     </td>
                                     <td className="px-6 py-4 text-muted-foreground">
                                       {new Date(msg.scheduled_for).toLocaleString('pt-BR')}
@@ -8903,6 +8936,7 @@ const CRM = () => {
                   </Card>
 
                   <Accordion type="single" collapsible className="w-full space-y-4">
+                    <TranslationSettings value={translation.settings} onChange={translation.setSettings}/>
                     <AccordionItem value="motor" className="border-none">
                       <Card className="rounded-2xl shadow-sm border overflow-hidden">
                         <CardHeader className="bg-zinc-50 dark:bg-zinc-900/50 border-b p-0">

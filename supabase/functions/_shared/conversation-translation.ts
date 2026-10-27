@@ -12,7 +12,9 @@ const languageNames: Record<string,string> = { pt:'Português', en:'English', es
 
 export async function getTranslationSettings(db: any, userId: string) {
   const { data, error } = await db.from('crm_translation_settings').select('*').eq('user_id',userId).maybeSingle();
-  if (error) throw error;
+  // During a rolling VPS update, ordinary sends must keep working before
+  // the additive migration is installed. Saving/translating still reports errors.
+  if (error && !['42P01','PGRST205'].includes(error.code)) throw error;
   return data || { enabled:false,target_language:'pt',auto_incoming:false,auto_outgoing:false };
 }
 

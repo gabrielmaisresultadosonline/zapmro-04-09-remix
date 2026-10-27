@@ -5478,7 +5478,7 @@ const CRM = () => {
   };
 
   const fetchAllScheduledMessages = async () => {
-    const { data, error } = await supabase
+    const { data, error } = await scopeQueryToActiveNumberStrict(supabase
       .from('crm_scheduled_messages')
       .select(`
         *,
@@ -5487,7 +5487,7 @@ const CRM = () => {
           wa_id
         )
       `)
-      .eq('user_id', currentUserId || '')
+      .eq('user_id', currentUserId || ''))
       .order('scheduled_for', { ascending: true });
     
     if (error) {
@@ -5496,6 +5496,16 @@ const CRM = () => {
     }
     setAllScheduledMessages(data || []);
   };
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    const timer = window.setInterval(() => {
+      void fetchAllScheduledMessages();
+      const contactId = selectedContactRef.current?.id;
+      if (contactId) void fetchScheduledMessages(contactId);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [currentUserId, activeNumberId]);
 
   const handleSaveFlow = async (flow: any) => {
     setSaving(true);

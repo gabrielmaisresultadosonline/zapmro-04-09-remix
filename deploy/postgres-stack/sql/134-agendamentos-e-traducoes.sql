@@ -2,7 +2,7 @@
 ALTER TABLE public.crm_scheduled_messages ADD COLUMN IF NOT EXISTS whatsapp_number_id uuid REFERENCES public.crm_whatsapp_numbers(id) ON DELETE SET NULL;
 ALTER TABLE public.crm_scheduled_messages ADD COLUMN IF NOT EXISTS processed_at timestamptz;
 ALTER TABLE public.crm_scheduled_messages ADD COLUMN IF NOT EXISTS last_error text;
-UPDATE public.crm_scheduled_messages s SET user_id=c.user_id, whatsapp_number_id=c.whatsapp_number_id
+UPDATE public.crm_scheduled_messages s SET user_id=c.user_id, whatsapp_number_id=COALESCE(s.whatsapp_number_id,c.whatsapp_number_id)
 FROM public.crm_contacts c WHERE c.id=s.contact_id AND (s.user_id IS NULL OR s.whatsapp_number_id IS NULL);
 CREATE INDEX IF NOT EXISTS crm_scheduled_due_idx ON public.crm_scheduled_messages(scheduled_for) WHERE status='pending';
 CREATE OR REPLACE FUNCTION public.crm_schedule_owner() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$

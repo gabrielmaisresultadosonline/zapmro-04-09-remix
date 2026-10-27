@@ -26,6 +26,16 @@ describe('actual scheduling and translation PostgreSQL migration',()=>{
   sql(`INSERT INTO crm_translation_settings(user_id,enabled,target_language,auto_incoming,auto_outgoing) VALUES('${user}',true,'es',true,true)`);
   expect(sql('SELECT enabled::text||\'/\'||target_language||\'/\'||auto_incoming::text||\'/\'||auto_outgoing::text FROM crm_translation_settings')).toBe('true/es/true/true');
  });
+ it('isolates saved language preferences from another authenticated registration',()=>{
+  sql('GRANT USAGE ON SCHEMA public,auth TO authenticated; GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated');
+  expect(sql(`BEGIN;SET LOCAL ROLE authenticated;SET LOCAL request.jwt.claim.sub='00000000-0000-4000-8000-000000000009';SELECT count(*) FROM crm_translation_settings;ROLLBACK`)).toContain('\n0\n');
+ });
+ it('allows only one of two simultaneous workers to claim the same schedule',async()=>{
+  sql(`INSERT INTO crm_scheduled_messages(contact_id,scheduled_for,message_data) VALUES('${contact}',now()-interval '1 minute','{"action":"sendTemplate"}')`);
+  const jobs=[0,1].map(()=>Bun.spawn(['psql',database as string,'-X','-At','-c','SELECT count(*) FROM crm_claim_scheduled_messages(10)'],{stdout:'pipe',stderr:'pipe'}));
+  const counts=await Promise.all(jobs.map(async job=>{expect(await job.exited).toBe(0);return Number((await new Response(job.stdout).text()).trim());}));
+  expect(counts.reduce((a,b)=>a+b,0)).toBe(1);
+ });
  it('deleting a message removes its translation without deleting contacts',()=>{
   const message='00000000-0000-4000-8000-000000000004';
   sql(`INSERT INTO crm_messages(id,user_id,contact_id,content) VALUES('${message}','${user}','${contact}','Olá');INSERT INTO crm_message_translations(user_id,message_id,target_language,original_text,translated_text) VALUES('${user}','${message}','es','Olá','Hola');DELETE FROM crm_messages WHERE id='${message}'`);

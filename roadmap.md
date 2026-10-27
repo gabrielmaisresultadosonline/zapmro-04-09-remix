@@ -1,7 +1,8 @@
 # Roadmap
 
-- [ ] Remover repetição do corpo nas mensagens traduzidas, preservando áudio, mídia e botões.
-- [ ] Conferir e testar a independência entre tradutor e respostas automáticas do Agente I.A.
+- [x] Remover repetição do corpo nas mensagens traduzidas, preservando áudio, mídia e botões; comparação visual isolada conferida.
+- [x] Conferir a execução independente do tradutor e do Agente I.A.; 12 testes aprovados e compilação sem erros.
+- [ ] Validar as duas ativações em conversa real: depende da atualização na VPS externa e de sessão autenticada indisponível nesta prévia.
 
 - [x] Corrigir criação e execução de templates agendados por cadastro e WhatsApp.
 - [x] Adicionar tradução persistente de textos/áudios, seleção de mensagens e envio traduzido nas conversas.

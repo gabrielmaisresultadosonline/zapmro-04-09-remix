@@ -11825,7 +11825,7 @@ const CRM = () => {
                 </div>
               </div>
             </div>
-          </ScrollArea>
+          </div>
 
           <DialogFooter className="flex-col-reverse sm:flex-row gap-2 shrink-0 pt-3">
             <Button variant="ghost" onClick={() => { setIsSchedulingOpen(false); setSelectedContactsForScheduling([]); }} className="rounded-xl h-11 px-6 w-full sm:w-auto text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">Cancelar</Button>

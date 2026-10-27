@@ -11533,7 +11533,7 @@ const CRM = () => {
             </Button>
           </div>
 
-          <ScrollArea className="flex-1 min-h-0 pr-2 sm:pr-4 -mr-2 sm:-mr-4 py-4">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-2 sm:pr-4 -mr-2 sm:-mr-4 py-4">
             <div className="space-y-6">
               {/* Configuração baseada no tipo de campanha */}
               {selectedCampaignType === 'individual' && (

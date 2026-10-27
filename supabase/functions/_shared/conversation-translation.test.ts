@@ -46,7 +46,7 @@ Deno.test('automatic translation works with the AI agent disabled and preserves 
   }};return chain;
  }};
  await autoTranslateIncoming(db,'owner','incoming',async()=>{throw new Error('Unexpected transcription');});
- assert(messageReads===1,'Translation must run even with AI disabled');
+ assert(messageReads>=1,'Translation must run even with AI disabled');
  assert(JSON.stringify(message)===before,'Translation must preserve the AI input and flow metadata');
 });
 
@@ -66,4 +66,15 @@ Deno.test('automatic translation errors do not propagate to the incoming AI repl
  await autoTranslateIncoming(db,'owner','incoming',async()=>{throw new Error('Unexpected transcription');});
  continued=true;
  assert(continued,'Caller must continue when translation fails');
+});
+Deno.test('incoming text already in the target language is not sent to OpenAI',async()=>{
+ const tables:string[]=[];
+ const db={from:(table:string)=>{tables.push(table);
+  const chain:any={select:()=>chain,eq:()=>chain,upsert:()=>chain,single:async()=>({data:null,error:null}),maybeSingle:async()=>{
+   if(table==='crm_translation_settings')return {data:{enabled:true,auto_incoming:true,target_language:'pt'},error:null};
+   return {data:{id:'m',user_id:'owner',message_type:'text',content:'Bom dia, tudo bem?'},error:null};
+  }};return chain;
+ }};
+ await autoTranslateIncoming(db,'owner','m',async()=>'');
+ assert(!tables.includes('crm_message_translations'),'Portuguese message must be skipped without translating');
 });

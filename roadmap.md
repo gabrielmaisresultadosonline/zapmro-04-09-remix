@@ -1,5 +1,9 @@
 # Roadmap
 
+- [ ] Corrigir criação e execução de templates agendados por cadastro e WhatsApp.
+- [ ] Adicionar tradução persistente de textos/áudios, seleção de mensagens e envio traduzido nas conversas.
+- [ ] Validar regras e preparar atualização PostgreSQL/VPS; teste autenticado real depende da VPS externa.
+
 - [x] Ajustar retenção para sete dias sem atividade, preservar contatos e proteger arquivos compartilhados.
 - [x] Implementar fila durável e remoção pela Storage API na limpeza manual e automática, com repetição segura e diagnóstico na VPS.
 - [x] Validar oito testes PostgreSQL, incluindo mensagem simultânea à limpeza, sintaxe dos scripts e verificação das funções.

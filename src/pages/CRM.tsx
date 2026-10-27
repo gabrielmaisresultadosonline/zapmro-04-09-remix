@@ -8516,10 +8516,11 @@ const CRM = () => {
                                       msg.status === 'sent' ? "bg-green-500/10 text-green-600 border-green-200" : ""
                                     )}
                                   >
-                                    {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : 'Erro'}
+                                    {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : msg.status === 'processing' ? 'Processando' : 'Erro'}
                                   </Badge>
                                 </div>
                                 <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                                  {msg.last_error && <p className="w-full text-destructive break-words">{msg.last_error}</p>}
                                   <Badge variant="outline" className="capitalize text-[10px]">
                                     {msg.message_data?.action === 'sendMessage' ? 'Texto' : 
                                      msg.message_data?.action === 'sendTemplate' ? 'Template' : 
@@ -8569,8 +8570,9 @@ const CRM = () => {
                                           msg.status === 'sent' ? "bg-green-500/10 text-green-600 border-green-200" : ""
                                         )}
                                       >
-                                        {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : 'Erro'}
+                                        {msg.status === 'sent' ? 'Enviado' : msg.status === 'canceled' ? 'Cancelado' : msg.status === 'processing' ? 'Processando' : 'Erro'}
                                       </Badge>
+                                      {msg.last_error && <p className="mt-1 text-xs text-destructive break-words">{msg.last_error}</p>}
                                     </td>
                                     <td className="px-6 py-4 text-muted-foreground">
                                       {new Date(msg.scheduled_for).toLocaleString('pt-BR')}
@@ -8610,7 +8612,6 @@ const CRM = () => {
                     </Button>
                   </div>
 
-                  <TranslationSettings value={translation.settings} onChange={translation.setSettings}/>
                   <Accordion type="single" collapsible className="w-full space-y-4">
                     <AccordionItem value="flows-list" className="border-none">
                       <AccordionTrigger className="bg-card p-6 rounded-2xl border shadow-sm hover:no-underline">
@@ -8925,6 +8926,7 @@ const CRM = () => {
                   </Card>
 
                   <Accordion type="single" collapsible className="w-full space-y-4">
+                    <TranslationSettings value={translation.settings} onChange={translation.setSettings}/>
                     <AccordionItem value="motor" className="border-none">
                       <Card className="rounded-2xl shadow-sm border overflow-hidden">
                         <CardHeader className="bg-zinc-50 dark:bg-zinc-900/50 border-b p-0">

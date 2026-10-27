@@ -1,6 +1,7 @@
 import { z } from 'npm:zod@3.25.76';
 import { resolveOpenAiKey, markOpenAiKeyRejected } from './openai-key.ts';
 import { transcribeOnce } from './audio-transcript-cache.ts';
+import { isTrialOnlyUser, PAID_ONLY_MESSAGE } from './plan-access.ts';
 
 export const TranslationSettingsSchema = z.object({
   enabled: z.boolean(), target_language: z.enum(['pt','en','es','fr','de','it','ar','ja','zh','ru','ko','hi']),
@@ -16,6 +17,7 @@ export async function getTranslationSettings(db: any, userId: string) {
 }
 
 export async function translateText(db: any,userId: string,numberId: string|null,text: string,language: string) {
+  if(await isTrialOnlyUser(db,userId)) throw new Error(PAID_ONLY_MESSAGE);
   const input = z.string().trim().min(1).max(16000).parse(text);
   if (!languageNames[language]) throw new Error('Idioma inválido');
   for (let attempt=0;attempt<2;attempt++) {

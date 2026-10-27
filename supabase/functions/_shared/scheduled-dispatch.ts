@@ -16,14 +16,24 @@ export function scheduledRequest(row: any, contact: any) {
 export async function dispatchScheduled(supabase: any) {
   // A claimed row is never automatically retried after an ambiguous network result.
   // This avoids duplicate sends if the Meta accepted the message before a timeout.
-  const { data: rows, error } = await supabase.rpc('crm_claim_scheduled_messages', { p_limit: 10 });
+  const { data: rows, error } = await supabase.rpc('crm_claim_scheduled_messages', { p_limit: 3 });
   if (error) throw error;
   const results = [];
-  for (const row of rows || []) {
+  await Promise.all((rows || []).map(async (row:any) => {
     try {
       const { data: contact, error: lookupError } = await supabase.from('crm_contacts').select('*').eq('id', row.contact_id).eq('user_id', row.user_id).maybeSingle();
       if (lookupError) throw lookupError;
       const body = scheduledRequest(row, contact);
+      if (body.action === 'sendTemplate') {
+        let query = supabase.from('crm_templates').select('id,name,language,whatsapp_number_id').eq('user_id',contact.user_id);
+        query = row.message_data?.templateId ? query.eq('id',row.message_data.templateId) : query.eq('name',body.templateName);
+        if(body.whatsapp_number_id) query=query.or(`whatsapp_number_id.eq.${body.whatsapp_number_id},whatsapp_number_id.is.null`).order('whatsapp_number_id',{nullsFirst:false});
+        const {data:template,error:templateError}=await query.limit(1).maybeSingle();
+        if(templateError) throw templateError;
+        if(!template) throw new Error('Template não encontrado para este cadastro e WhatsApp');
+        body.templateName=template.name;
+        body.languageCode=template.language||body.languageCode;
+      }
       const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/meta-whatsapp-crm`, {
         method: 'POST', headers: { Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body), signal: AbortSignal.timeout(90_000),
@@ -39,6 +49,6 @@ export async function dispatchScheduled(supabase: any) {
       console.error('[SCHEDULED]', row.id, message, saveError?.message || '');
       results.push({ id: row.id, success: false });
     }
-  }
+  }));
   return results;
 }

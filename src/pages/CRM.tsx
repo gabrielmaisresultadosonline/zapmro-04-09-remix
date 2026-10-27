@@ -8,6 +8,7 @@ import { AiDocumentsLibrary } from '@/components/crm/AiDocumentsLibrary';
 import { PromptFromConversations } from '@/components/crm/PromptFromConversations';
 import { TranslationSettings } from '@/components/crm/TranslationSettings';
 import { MessageTranslation } from '@/components/crm/MessageTranslation';
+import { getMessageTranslationDisplay } from '@/lib/messageTranslationDisplay';
 import { useConversationTranslation } from '@/components/crm/useConversationTranslation';
 import { HumanAlertSettings } from '@/components/crm/HumanAlertSettings';
 import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from 'react';
@@ -7679,6 +7680,7 @@ const CRM = () => {
                                 const currentDay = new Date(m.created_at).toDateString();
                                 const prevDay = prev ? new Date(prev.created_at).toDateString() : null;
                                 const showDaySeparator = currentDay !== prevDay;
+                                const translationDisplay = getMessageTranslationDisplay(m, translation.translations[m.id]);
                                 const isTemplate = m.message_type === 'template' || (m.message_type !== 'carousel' && m.content?.includes('[Template:'));
                                 const templateName = m.content?.match(/\[Template: (.*?)\]/)?.[1];
                                 let template = isTemplate ? templates.find(t => t.name === templateName) : null;
@@ -7756,7 +7758,7 @@ const CRM = () => {
                                             </div>
                                           )}
                                           <div className="p-3 space-y-2">
-                                            <div className="text-[13px] md:text-sm leading-relaxed text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap">
+                                            {!translationDisplay.replaceBody && <div className="text-[13px] md:text-sm leading-relaxed text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap">
                                               {(() => {
                                                 // Texto real digitado/salvo (quando existir)
                                                 const raw = (m.content || '').replace(/\[Template: .*?\]\s*/, '').trim();
@@ -7768,7 +7770,7 @@ const CRM = () => {
                                                 const examples = template?.components?.find((c: any) => c.type === 'BODY')?.example?.body_text?.[0] || [];
                                                 return bodyText.replace(/\{\{(\d+)\}\}/g, (_: string, n: string) => examples[Number(n) - 1] ?? '');
                                               })()}
-                                            </div>
+                                            </div>}
 
                                             {template.components?.find((c: any) => c.type === 'FOOTER') && (
                                               <div className="text-[10px] opacity-60 uppercase font-medium">
@@ -7967,12 +7969,12 @@ const CRM = () => {
                                           )}
                                           {(m.message_text || m.content) && m.message_type !== 'reaction' && m.message_type !== 'audio' && m.message_type !== 'voice' && m.message_type !== 'unsupported' && !((m.message_text || m.content || '').trim() === '[Mensagem de Áudio]') && !/^\[(image|video|document|audio|sticker|imagem|vídeo|video|documento|áudio|audio)\]$/i.test((m.message_text || m.content || '').trim()) && (
                                             <div className="space-y-2">
-                                              <div
+                                              {!translationDisplay.replaceBody && <div
                                                 className="text-sm md:text-[15px] leading-relaxed break-words whitespace-pre-wrap px-0.5"
                                                 style={{ fontFamily: `system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", "Twemoji Mozilla", "EmojiOne Color", sans-serif` }}
                                               >
                                                 {m.message_text || m.content}
-                                              </div>
+                                              </div>}
                                               
                                               {/* Botões Interativos no Histórico */}
                                               {m.metadata?.interactive?.action?.buttons && (

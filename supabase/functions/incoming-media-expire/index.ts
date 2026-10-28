@@ -26,11 +26,13 @@ Deno.serve(async (req) => {
   if (!serviceKey || auth !== `Bearer ${serviceKey}`) return json({ success: false, error: "unauthorized" }, 401);
 
   try {
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
-    let batches = 5;
+    const url = Deno.env.get("SUPABASE_URL");
+    if (!url) throw new Error("SUPABASE_URL não configurada");
+    const supabase = createClient(url, serviceKey);
+    let batches = 1;
     try {
       const body = await req.json();
-      if (typeof body?.batches === "number") batches = Math.min(50, Math.max(1, Math.floor(body.batches)));
+      if (typeof body?.batches === "number") batches = Math.min(2, Math.max(1, Math.floor(body.batches)));
     } catch { /* cron sem corpo */ }
 
     let files = 0;
@@ -38,8 +40,8 @@ Deno.serve(async (req) => {
     let messages = 0;
     const startedAt = Date.now();
 
-    for (let i = 0; i < batches && Date.now() - startedAt < 240_000; i++) {
-      const { data, error } = await supabase.rpc("crm_incoming_media_expired_batch", { p_days: 15, p_limit: 300 });
+    for (let i = 0; i < batches && Date.now() - startedAt < 90_000; i++) {
+      const { data, error } = await supabase.rpc("crm_incoming_media_expired_batch", { p_days: 15, p_limit: 20 });
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as ExpiredRow[];
       if (rows.length === 0) break;

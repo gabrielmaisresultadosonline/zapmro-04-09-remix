@@ -1,5 +1,9 @@
 # Roadmap
 
+- [x] Corrigir a expiração de mídia que acumulou consultas por até 15 horas: limitar varredura e concorrência, preservando referências e contatos.
+- [x] Validar dez testes em PostgreSQL e seleção indexada com 50 mil arquivos; fornecer atualização/diagnóstico seguro em deploy/CORRIGIR-LENTIDAO-MIDIAS.md.
+- [ ] Aplicar migração 135 e medir CPU, disco e abertura real do CRM: depende de acesso à VPS externa do usuário.
+
 - [x] Remover repetição do corpo nas mensagens traduzidas, preservando áudio, mídia e botões; comparação visual isolada conferida.
 - [x] Conferir a execução independente do tradutor e do Agente I.A.; 12 testes aprovados e compilação sem erros.
 - [ ] Validar as duas ativações em conversa real: depende da atualização na VPS externa e de sessão autenticada indisponível nesta prévia.

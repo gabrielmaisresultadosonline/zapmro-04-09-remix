@@ -11,7 +11,7 @@ function sql(query: string): string {
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
   return result.stdout.toString().trim();
 }
-for (const file of ['deploy/postgres-stack/tests/retention-cleanup-fixture.sql', 'deploy/postgres-stack/sql/132-retencao-conversas-7-dias.sql']) {
+for (const file of ['deploy/postgres-stack/tests/retention-cleanup-fixture.sql', 'deploy/postgres-stack/sql/132-retencao-conversas-7-dias.sql', 'deploy/postgres-stack/sql/135-limitar-expiracao-midias.sql']) {
   const result = Bun.spawnSync(['psql', database, '-X', '-v', 'ON_ERROR_STOP=1', '-f', resolve(base, file)]);
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
 }
@@ -20,6 +20,7 @@ const contact = '00000000-0000-4000-8000-000000000002';
 const url = 'https://local/storage/v1/object/public/crm-media/incoming/old.jpg';
 function reset(): void {
   sql(`TRUNCATE crm_messages,crm_contacts,crm_media_assets,crm_media_gc_queue,crm_flows,crm_templates,crm_ai_documents,crm_broadcasts,crm_scheduled_messages,storage.objects;
+  UPDATE crm_incoming_expiration_cursor SET after_created_at=NULL,after_name=NULL,next_run_at='-infinity';
   INSERT INTO crm_contacts VALUES ('${contact}','${user}','Contato preservado');`);
 }
 function message(age: string, media = 'NULL'): void {
@@ -92,6 +93,29 @@ describe('conversation retention — actual PostgreSQL migration', () => {
     sql("INSERT INTO storage.objects VALUES('crm-media','incoming/old.jpg',now()-interval '20 days','{\"size\":100}')");
     expect(sql('SELECT count(*) FROM crm_incoming_media_expired_batch()')).toBe('0');
     sql('DELETE FROM crm_messages');
+    sql("UPDATE crm_incoming_expiration_cursor SET after_created_at=NULL,after_name=NULL,next_run_at='-infinity'");
     expect(sql('SELECT count(*) FROM crm_incoming_media_expired_batch()')).toBe('1');
+  });
+  it('caps work at 20 candidates and advances past protected files', () => {
+    reset();
+    sql(`INSERT INTO storage.objects SELECT 'crm-media','incoming/'||lpad(i::text,3,'0'),now()-interval '20 days','{"size":100}' FROM generate_series(1,40) i;
+    INSERT INTO crm_templates VALUES(gen_random_uuid(),'{"media":"incoming/001"}');`);
+    expect(sql('SELECT count(*) FROM crm_incoming_media_expired_batch(15,1000)')).toBe('19');
+    expect(sql('SELECT after_name FROM crm_incoming_expiration_cursor')).toBe('incoming/020');
+    expect(sql('SELECT count(*) FROM crm_incoming_media_expired_batch()')).toBe('0');
+    sql("UPDATE crm_incoming_expiration_cursor SET next_run_at='-infinity'");
+    expect(sql('SELECT count(*) FROM crm_incoming_media_expired_batch()')).toBe('20');
+  });
+  it('skips concurrent scans before reading storage', async () => {
+    reset();
+    const holder = Bun.spawn(['psql', database as string, '-X', '-At', '-c', 'BEGIN; SELECT pg_advisory_xact_lock(135015); SELECT pg_sleep(2); COMMIT'], {stdout:'pipe',stderr:'pipe'});
+    for(let i=0;i<100;i++) {
+      if(sql("SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND objid=135015 AND granted")==='1') break;
+      await Bun.sleep(10);
+      if(i===99) throw new Error('Lock not acquired');
+    }
+    expect(sql('SELECT count(*) FROM crm_incoming_media_expired_batch()')).toBe('0');
+    expect(sql("SELECT next_run_at='-infinity'::timestamptz FROM crm_incoming_expiration_cursor")).toBe('t');
+    expect(await holder.exited).toBe(0);
   });
 });

@@ -10,7 +10,7 @@
 - Conversation retention uses a server-side batch RPC and a durable message-delete trigger; media removal runs through the Storage API with global reference checks and retryable failures, preserving contacts and automation records.
 - Métricas do sistema operacional são registradas por cron local em snapshots; o navegador apenas solicita manutenções e nunca acessa Docker ou o disco diretamente.
 - O inventário completo por cadastro é calculado pelo cron em snapshots somente leitura; a tela nunca varre todas as tabelas em tempo real.
-- Incoming media expiration only removes unreferenced legacy objects through the Storage API; active conversations and automation references remain protected.
+- Incoming media expiration only removes unreferenced legacy objects through the Storage API; a persistent bounded cursor, advisory lock, cooldown and targeted pg_cron cancellation prevent overlapping full scans while preserving global conversation and automation references.
 - Remover um número arquiva seus fluxos (desligados, whatsapp_number_id NULL, origem em archived_from_*) em vez de apagá-los; a tela de escolha de número permite transferi-los.
 - A leitura de uma conversa só avança por ação explícita do usuário; sincronizações automáticas preservam o cursor `last_read_at` monotônico.
 - O histórico de templates enviados guarda o texto final já interpolado e a mídia efetiva; a conversa nunca reconstrói novos envios pelos exemplos aprovados.

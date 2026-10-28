@@ -6,7 +6,8 @@ import {
   activateNumber,
   deleteNumberPermanently,
   describeNumber,
-  fetchUserNumbers,
+  fetchUserNumbersStrict,
+  getCachedUserNumbers,
   isNumberUnlocked,
   isNumberConnected,
   setNumberPin,
@@ -43,8 +44,9 @@ export function WhatsAppNumberSelector({
   onSelected,
   onConnectNew,
 }: WhatsAppNumberSelectorProps) {
-  const [numbers, setNumbers] = useState<WhatsAppNumberRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [numbers, setNumbers] = useState<WhatsAppNumberRecord[]>(() => getCachedUserNumbers(userId) ?? []);
+  const [loading, setLoading] = useState(() => getCachedUserNumbers(userId) === null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pinTarget, setPinTarget] = useState<WhatsAppNumberRecord | null>(null);
   const [pinValue, setPinValue] = useState("");
@@ -64,9 +66,17 @@ export function WhatsAppNumberSelector({
   };
 
   const load = async () => {
-    setLoading(true);
-    setNumbers(await fetchUserNumbers(userId));
-    setLoading(false);
+    const cached = getCachedUserNumbers(userId);
+    if (cached) setNumbers(cached);
+    setLoading(!cached);
+    setLoadError(null);
+    try {
+      setNumbers(await fetchUserNumbersStrict(userId));
+    } catch (err) {
+      setLoadError((err as Error)?.message || "Servidor não respondeu");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -156,7 +166,22 @@ export function WhatsAppNumberSelector({
           </div>
         ) : (
           <div className="space-y-3">
-            {numbers.length === 0 && (
+            {loadError && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-center">
+                <p className="text-amber-200 text-sm">
+                  O servidor está demorando para responder.{" "}
+                  {numbers.length > 0 ? "Mostrando os últimos números salvos." : "Seus números não foram apagados."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-[#00a884] hover:underline"
+                >
+                  <RefreshCw className="w-4 h-4" /> Tentar novamente
+                </button>
+              </div>
+            )}
+            {numbers.length === 0 && !loadError && (
               <p className="text-center text-white/40 text-sm py-6">
                 Nenhum WhatsApp conectado ainda. Conecte o primeiro abaixo.
               </p>

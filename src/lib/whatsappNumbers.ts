@@ -97,17 +97,73 @@ export async function fetchMaxWhatsAppNumbers(userId: string): Promise<number> {
   return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
-export async function fetchUserNumbers(userId: string): Promise<WhatsAppNumberRecord[]> {
-  const { data, error } = await supabase
-    .from("crm_whatsapp_numbers" as any)
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true });
-  if (error) {
-    console.warn("[whatsappNumbers] falha ao listar números:", error.message);
-    return [];
+const numbersCacheKey = (userId: string) => `crm_numbers_cache_${userId}`;
+
+function readNumbersCache(userId: string): WhatsAppNumberRecord[] | null {
+  try {
+    const raw = localStorage.getItem(numbersCacheKey(userId));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? (parsed as WhatsAppNumberRecord[]) : null;
+  } catch {
+    return null;
   }
-  return (data || []) as unknown as WhatsAppNumberRecord[];
+}
+
+function writeNumbersCache(userId: string, list: WhatsAppNumberRecord[]) {
+  try { localStorage.setItem(numbersCacheKey(userId), JSON.stringify(list)); } catch { /* noop */ }
+}
+
+/** Uma tentativa com tempo limite, para o banco lento não travar a tela. */
+async function queryNumbersOnce(userId: string, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const { data, error } = await supabase
+      .from("crm_whatsapp_numbers" as any)
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .abortSignal(controller.signal);
+    if (error) throw new Error(error.message || "falha ao listar números");
+    return (data || []) as unknown as WhatsAppNumberRecord[];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Lista os números com novas tentativas. Lança erro quando o servidor não
+ * responde — nunca confunde "servidor lento" com "nenhum número".
+ */
+export async function fetchUserNumbersStrict(userId: string): Promise<WhatsAppNumberRecord[]> {
+  const timeouts = [12_000, 20_000, 30_000];
+  let lastError: unknown = null;
+  for (let i = 0; i < timeouts.length; i++) {
+    try {
+      const list = await queryNumbersOnce(userId, timeouts[i]);
+      writeNumbersCache(userId, list);
+      return list;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[whatsappNumbers] tentativa ${i + 1} falhou:`, (err as Error)?.message);
+      if (i < timeouts.length - 1) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Servidor não respondeu");
+}
+
+/** Últimos números conhecidos deste cadastro (abre a tela na hora). */
+export function getCachedUserNumbers(userId: string): WhatsAppNumberRecord[] | null {
+  return readNumbersCache(userId);
+}
+
+export async function fetchUserNumbers(userId: string): Promise<WhatsAppNumberRecord[]> {
+  try {
+    return await fetchUserNumbersStrict(userId);
+  } catch (err) {
+    console.warn("[whatsappNumbers] falha ao listar números:", (err as Error)?.message);
+    return readNumbersCache(userId) ?? [];
+  }
 }
 
 /**

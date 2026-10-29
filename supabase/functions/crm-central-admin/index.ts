@@ -136,7 +136,7 @@ serve(async (req) => {
       const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/incoming-media-expire`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-        body: JSON.stringify({ batches: 20 }),
+        body: JSON.stringify({ batches: 60, force: true }),
       });
       const result = await res.json().catch(() => ({}));
       if (!res.ok || result?.success === false) return json({ success: false, error: result?.error || `HTTP ${res.status}` }, 500);

@@ -29,22 +29,31 @@ Deno.serve(async (req) => {
     const url = Deno.env.get("SUPABASE_URL");
     if (!url) throw new Error("SUPABASE_URL não configurada");
     const supabase = createClient(url, serviceKey);
+    // Cron: 1 rodada curta. Botão do AdminCentral: force=true, várias rodadas.
     let batches = 1;
+    let force = false;
     try {
       const body = await req.json();
-      if (typeof body?.batches === "number") batches = Math.min(2, Math.max(1, Math.floor(body.batches)));
+      if (typeof body?.batches === "number") batches = Math.min(60, Math.max(1, Math.floor(body.batches)));
+      force = body?.force === true;
     } catch { /* cron sem corpo */ }
+    const budgetMs = force ? 240_000 : 90_000;
 
     let files = 0;
+    let scanned = 0;
     let bytes = 0;
     let messages = 0;
     const startedAt = Date.now();
 
-    for (let i = 0; i < batches && Date.now() - startedAt < 90_000; i++) {
-      const { data, error } = await supabase.rpc("crm_incoming_media_expired_batch", { p_days: 15, p_limit: 20 });
+    for (let i = 0; i < batches && Date.now() - startedAt < budgetMs; i++) {
+      const { data, error } = await supabase.rpc("crm_incoming_media_expired_batch", { p_days: 15, p_limit: 200, p_force: force });
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as ExpiredRow[];
-      if (rows.length === 0) break;
+      if (rows.length === 0) {
+        // Lote só com arquivos protegidos: o cursor já avançou, segue para o próximo.
+        if (force && scanned++ < 200) continue;
+        break;
+      }
 
       for (let j = 0; j < rows.length; j += 100) {
         const chunk = rows.slice(j, j + 100);

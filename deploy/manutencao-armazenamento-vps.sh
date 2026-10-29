@@ -7,6 +7,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STACK="$ROOT/deploy/postgres-stack"
 [ -f "$STACK/.env" ] || exit 0
 set -a; . "$STACK/.env"; set +a
+# Uma execução por vez: antes rodava a cada 10 min e as conferências se acumulavam.
+exec 9>/var/lock/zapmro-storage-maintenance.lock
+flock -n 9 || exit 0
 
 DB_CONT="${DB_CONT:-zapmro-db}"
 ST_CONT="${ST_CONT:-zapmro-storage}"
@@ -25,23 +28,13 @@ docker_total_bytes="$(bytes_dir /var/lib/docker)"
 project_bytes="$(bytes_dir "$ROOT")"
 system_logs_bytes="$(bytes_dir /var/log)"
 
-# Espaço órfão no disco: arquivo sem linha correspondente em storage.objects.
-db_objects="$(mktemp)"; disk_objects="$(mktemp)"; trap 'rm -f "$db_objects" "$disk_objects"' EXIT
-q "select bucket_id || '/' || name from storage.objects" 2>/dev/null | sort -u > "$db_objects"
-docker exec "$ST_CONT" find /var/lib/storage -type f -mmin +120 -printf '%P\n' 2>/dev/null | sort -u > "$disk_objects" || true
+# Espaço órfão no disco: mesma conferência dos scripts de limpeza (rápida, por awk).
+. "$ROOT/deploy/lib-orfaos-storage.sh"
+orf_dir="$(mktemp -d)"; trap 'rm -rf "$orf_dir"' EXIT
 orphan_disk_bytes=0
-while IFS= read -r rel; do
-  [ -n "$rel" ] || continue
-  without_tenant="${rel#*/}"
-  if ! grep -Fqx -- "$rel" "$db_objects" \
-     && [ "$without_tenant" != "$rel" ] \
-     && ! grep -Fqx -- "$without_tenant" "$db_objects" \
-     && [[ "$without_tenant" == */* ]] \
-     && [[ "$rel" != *.metadata ]]; then
-    size="$(docker exec "$ST_CONT" stat -c %s "/var/lib/storage/$rel" 2>/dev/null || echo 0)"
-    orphan_disk_bytes=$((orphan_disk_bytes + size))
-  fi
-done < "$disk_objects"
+if orf_coletar "$orf_dir" 120 "$DB_CONT" "$ST_CONT" "$DB_NAME"; then
+  orphan_disk_bytes="$(orf_bytes "$orf_dir")"
+fi
 
 q "insert into public.crm_vps_storage_snapshots(database_bytes,storage_bytes,docker_logs_bytes,backups_bytes,orphan_disk_bytes,root_total_bytes,root_used_bytes,root_available_bytes,docker_total_bytes,project_bytes,system_logs_bytes,details) values (${database_bytes:-0},${storage_bytes:-0},${docker_logs_bytes:-0},${backups_bytes:-0},${orphan_disk_bytes:-0},${root_total_bytes:-0},${root_used_bytes:-0},${root_available_bytes:-0},${docker_total_bytes:-0},${project_bytes:-0},${system_logs_bytes:-0},jsonb_build_object('host',current_setting('server_version'),'measured_at',now())); select public.crm_refresh_customer_storage_snapshots(); delete from public.crm_vps_storage_snapshots where created_at < now() - interval '90 days';" >/dev/null
 

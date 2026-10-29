@@ -21,35 +21,14 @@ log() { echo "$*" | tee -a "$OUT"; }
 log "== $(date '+%F %T') — arquivos órfãos do storage =="
 log "-- disco antes: $(df -h / | tail -1 | awk '{print $3" usados de "$2}')"
 
-# 1) Registros do banco: bucket <TAB> nome <TAB> versão
-docker exec -i "$DB_CONT" psql -U postgres -d postgres -At -F $'\t' \
-  -c "select bucket_id, name, coalesce(version,'') from storage.objects" > "$W/db.tsv" || { log "falha ao ler o banco"; exit 1; }
+. "$ROOT/deploy/lib-orfaos-storage.sh"
+orf_coletar "$W" 360 "$DB_CONT" "$ST_CONT" "${POSTGRES_DB:-postgres}" || { log "falha ao ler banco/disco"; exit 1; }
 log "registros no banco: $(wc -l < "$W/db.tsv")"
-
-# 2) Arquivos no disco: tamanho <TAB> caminho relativo (tenant/bucket/nome/versão)
-docker exec "$ST_CONT" sh -c 'cd /var/lib/storage && find . -type f -mmin +360 -printf "%s\t%P\n"' > "$W/disk.tsv" 2>/dev/null \
-  || docker exec "$ST_CONT" sh -c 'cd /var/lib/storage && find . -type f -mmin +360 -exec stat -c "%s	%n" {} \;' | sed 's#\t\./#\t#' > "$W/disk.tsv"
 log "arquivos no disco (mais de 6h): $(wc -l < "$W/disk.tsv")"
-
-# 3) Cruza: arquivo é órfão se bucket+nome não existe ou a versão é outra.
-awk -F'\t' '
-  NR==FNR { key[$1 "\t" $2]=1; ver[$1 "\t" $2 "\t" $3]=1; next }
-  {
-    size=$1; rel=$2; n=split(rel, p, "/");
-    if (n < 3) next;
-    bucket=p[2]; name=""; for (i=3;i<n;i++) name = name (name==""?"":"/") p[i];
-    version=p[n];
-    # Sem versão (layout antigo): o último pedaço já é o nome.
-    if (!((bucket "\t" name) in key)) { alt=name (name==""?"":"/") version;
-      if ((bucket "\t" alt) in key) next; }
-    else if ((bucket "\t" name "\t" version) in ver || (bucket "\t" name "\t") in ver) next;
-    else { print size "\t" rel "\tversao-antiga"; next }
-    print size "\t" rel "\tsem-registro";
-  }' "$W/db.tsv" "$W/disk.tsv" > "$W/orfaos.tsv"
 
 total=$(awk -F'\t' '{s+=$1} END {printf "%.2f", s/1024/1024/1024}' "$W/orfaos.tsv")
 log "ÓRFÃOS: $(wc -l < "$W/orfaos.tsv") arquivos = ${total} GB"
-awk -F'\t' '{split($2,p,"/"); k=p[2]" ("$3")"; s[k]+=$1; c[k]++} END {for (k in s) printf "  %-40s %7d arquivos  %8.2f GB\n", k, c[k], s[k]/1024/1024/1024}' "$W/orfaos.tsv" | sort -k4 -nr | tee -a "$OUT"
+awk -F'\t' '{split($2,p,"/"); k=p[3]" ("$3")"; s[k]+=$1; c[k]++} END {for (k in s) printf "  %-40s %7d arquivos  %8.2f GB\n", k, c[k], s[k]/1024/1024/1024}' "$W/orfaos.tsv" | sort -k4 -nr | tee -a "$OUT"
 
 # 4) Uso por pasta do storage (para ver o que mais pesa)
 log "-- maiores pastas do storage:"
@@ -61,14 +40,25 @@ docker exec -i "$DB_CONT" psql -U postgres -d postgres -At -c "
   from (select sum((metadata->>'size')::bigint) - max((metadata->>'size')::bigint) extra
         from storage.objects where bucket_id='crm-media' and name like 'incoming/%'
         group by regexp_replace(name,'_[0-9]{13}\.[a-z0-9]+$',''), metadata->>'size' having count(*)>1) t" | tee -a "$OUT"
+log "-- mídias recebidas que nenhuma conversa usa (apagadas pelo botão Limpar mídias antigas):"
+docker exec -i "$DB_CONT" psql -U postgres -d postgres -At -c "
+  select count(*)||' arquivos, '||pg_size_pretty(coalesce(sum((s.metadata->>'size')::bigint),0))
+  from storage.objects s where s.bucket_id='crm-media' and s.name like 'incoming/%' and s.name not like 'incoming/%/%'
+    and s.created_at < now()-interval '24 hours'
+    and not exists (select 1 from public.crm_messages m where m.media_url like '%/crm-media/incoming/%'
+      and substring(m.media_url from '/crm-media/(incoming/[^?#]+)') = s.name)" | tee -a "$OUT"
 log "-- volumes Docker sem uso (não apagados):"
 docker volume ls -qf dangling=true | while read -r v; do
   log "  $v $(docker run --rm -v "$v":/v alpine du -sh /v 2>/dev/null | cut -f1)"; done
 
 if [ "$APAGAR" = 1 ] && [ -s "$W/orfaos.tsv" ]; then
-  cut -f2 "$W/orfaos.tsv" | docker exec -i "$ST_CONT" sh -c 'cd /var/lib/storage && while IFS= read -r f; do rm -f -- "$f"; done; find . -mindepth 2 -type d -empty -delete'
-  log "✔ órfãos apagados"
-  log "-- disco depois: $(df -h / | tail -1 | awk '{print $3" usados de "$2}')"
+  if ! orf_seguro "$W"; then
+    log "✘ Órfãos acima de ${ORF_MAX_PCT}% dos arquivos — conferência suspeita, NADA foi apagado. Envie este relatório."
+  else
+    orf_apagar "$W" "$ST_CONT"
+    log "✔ órfãos apagados"
+    log "-- disco depois: $(df -h / | tail -1 | awk '{print $3" usados de "$2}')"
+  fi
 elif [ -s "$W/orfaos.tsv" ]; then
   log "Nada foi apagado. Para apagar: sudo bash deploy/limpar-arquivos-orfaos.sh --apagar"
 fi

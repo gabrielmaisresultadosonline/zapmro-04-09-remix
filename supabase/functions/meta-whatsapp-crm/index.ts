@@ -581,6 +581,14 @@ function isPlaceholderContent(content: unknown) {
   ].includes(normalized);
 }
 
+// Após avisar que vai passar para um humano, o Agente I.A. fica 12h sem
+// responder naquela conversa e volta sozinho depois.
+const AI_HUMAN_PAUSE_MS = 12 * 60 * 60 * 1000;
+function isAiHumanPauseActive(contact: any, now = Date.now()): boolean {
+  const until = Date.parse(String(contact?.metadata?.ai_human_pause_until || ''));
+  return Number.isFinite(until) && until > now;
+}
+
 type AiKanbanCategory = 'frio' | 'quente' | 'cliente' | 'humano';
 
 const AI_KANBAN_DEFINITIONS: Record<AiKanbanCategory, { label: string; value: string; color: string; sortOrder: number }> = {

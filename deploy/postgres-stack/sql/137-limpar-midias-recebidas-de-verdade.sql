@@ -33,6 +33,7 @@ $$;
 REVOKE ALL ON FUNCTION public.crm_media_is_protected_asset(text,text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.crm_media_is_protected_asset(text,text) TO service_role;
 
+DROP FUNCTION IF EXISTS public.crm_incoming_media_expired_batch(integer,integer);
 DROP FUNCTION IF EXISTS public.crm_incoming_media_expired_batch(integer,integer,boolean);
 CREATE OR REPLACE FUNCTION public.crm_incoming_media_expired_batch(p_days integer DEFAULT 15, p_limit integer DEFAULT 200, p_force boolean DEFAULT false)
 RETURNS TABLE(name text, size_bytes bigint)

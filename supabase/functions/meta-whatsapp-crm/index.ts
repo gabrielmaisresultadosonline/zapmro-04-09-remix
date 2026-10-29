@@ -998,7 +998,15 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
      flow_state: contact?.flow_state || null,
      has_input_text: Boolean(text),
    });
-   if (await isTrialOnlyUser(supabase, userId || contact?.user_id)) {
+  if (!requesterUserId) {
+    // Respostas automáticas respeitam a pausa de 12h após passar para humano.
+    const { data: pauseRow } = await supabase.from('crm_contacts').select('metadata').eq('id', contact?.id).maybeSingle();
+    if (isAiHumanPauseActive(pauseRow || contact)) {
+      aiLog('skipped_human_handoff_pause', { until: (pauseRow || contact)?.metadata?.ai_human_pause_until });
+      return { success: true, skipped: 'human_handoff_pause' };
+    }
+  }
+  if (await isTrialOnlyUser(supabase, userId || contact?.user_id)) {
      aiLog('skipped_trial_plan');
      return;
    }
@@ -1490,6 +1498,17 @@ ${AI_CONTEXT_RESPONSE_RULE}
         aiLog('human_alert', alert);
       } catch (alertErr: any) {
         aiLog('human_alert_failed', { error: alertErr?.message || String(alertErr) });
+      }
+      // Desliga o Agente I.A. desta conversa por 12h (reativa sozinho depois).
+      try {
+        const pauseUntil = new Date(Date.now() + AI_HUMAN_PAUSE_MS).toISOString();
+        const { data: fresh } = await supabase.from('crm_contacts').select('metadata').eq('id', contact.id).maybeSingle();
+        const metadata = { ...(fresh?.metadata || contact?.metadata || {}), ai_human_pause_until: pauseUntil };
+        await supabase.from('crm_contacts').update({ metadata }).eq('id', contact.id);
+        contact.metadata = metadata;
+        aiLog('human_pause_started', { until: pauseUntil });
+      } catch (pauseErr: any) {
+        aiLog('human_pause_failed', { error: pauseErr?.message || String(pauseErr) });
       }
     }
 
@@ -3341,7 +3360,10 @@ else if (message.type === "unsupported") {
   // já tinha IA ativa, processa via processAiAgentResponse.
   // IMPORTANTE: Adicionado bypass de verificação de 'idle' se o global estiver ativo, 
   // para garantir que mesmo conversas novas ou recém-limpas sejam atendidas.
-  const manualAiOff = contact?.metadata?.manual_ai_off === true;
+  // Pausa de 12h após o Agente I.A. passar a conversa para um humano.
+  const humanPauseActive = isAiHumanPauseActive(contact);
+  const manualAiOff = contact?.metadata?.manual_ai_off === true || humanPauseActive;
+  if (humanPauseActive) console.log(`[WEBHOOK-AI-DEBUG] Contact ${waId} in human handoff pause until ${contact?.metadata?.ai_human_pause_until}.`);
   const shouldActivateAi = !manualAiOff && (isGlobalAiEnabled || (contact && contact.ai_active));
   
   // LOG PARA DEBUG: Verifica por que a IA não está disparando

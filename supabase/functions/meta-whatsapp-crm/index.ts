@@ -3683,6 +3683,7 @@ async function processAiRecoveryForAllUsers(supabase: any, onlyUserId?: string |
         }
         if (contact.status === finalizedLabel) continue;
         if (contact.flow_state && contact.flow_state !== 'idle') continue;
+        if (isAiHumanPauseActive(contact, now)) continue;
 
         const lastRecoveryAt = metadata.ai_recovery_last_at ? new Date(metadata.ai_recovery_last_at).getTime() : 0;
         if (lastRecoveryAt && now - lastRecoveryAt < delayMinutes * 60 * 1000) continue;

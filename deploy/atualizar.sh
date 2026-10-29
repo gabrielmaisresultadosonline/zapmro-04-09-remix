@@ -376,6 +376,11 @@ sudo_ tee /etc/cron.d/zapmro-storage-maintenance >/dev/null <<EOF
 EOF
 sudo_ chmod 644 /etc/cron.d/zapmro-storage-maintenance
 ok "medição de armazenamento do VPS agendada a cada 10 minutos"
+sudo_ tee /etc/cron.d/zapmro-liberar-espaco >/dev/null <<EOF
+40 4 * * * root cd $ROOT && bash deploy/liberar-espaco-diario.sh >/var/log/zapmro-liberar-espaco.log 2>&1
+EOF
+sudo_ chmod 644 /etc/cron.d/zapmro-liberar-espaco
+ok "liberação diária de espaço agendada (04:40)"
 
 # 5.1 — cron das Edge Functions apontando SEMPRE para esta VPS (nunca Supabase)
 info "reagendando cron das functions para a API local…"

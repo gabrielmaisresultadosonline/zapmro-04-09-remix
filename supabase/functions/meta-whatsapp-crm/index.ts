@@ -6302,17 +6302,6 @@ async function fetchAndStoreIncomingMedia(
     const mimeType = metaJson?.mime_type || mimeHint || 'application/octet-stream';
     if (!url) return null;
 
-    // 2) Baixa o binário (precisa do Bearer token)
-    const binRes = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-    if (!binRes.ok) {
-      console.error('[INCOMING-MEDIA] Failed to download media', mediaId, binRes.status);
-      return null;
-    }
-    // Arquivos grandes (ex.: vídeo de 97 MB enviado como documento) estouravam a
-    // memória da função ao usar blob(); agora seguem em streaming direto ao Storage.
-    const contentLength = Number(binRes.headers.get('content-length') || declaredSize || 0);
-    const useStream = !contentLength || contentLength > STREAM_UPLOAD_THRESHOLD;
-
     // 3) Determina extensão
     let ext = 'bin';
     if (type === 'image') ext = mimeType.includes('png') ? 'png' : (mimeType.includes('webp') ? 'webp' : 'jpg');
@@ -6329,7 +6318,29 @@ async function fetchAndStoreIncomingMedia(
       if (m) ext = m[1].toLowerCase();
     }
     const safeName = String(name).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filePath = `incoming/${safeName}_${Date.now()}.${ext}`;
+    // Nome fixo por mídia da Meta: se o webhook chegar repetido (a Meta reenvia
+    // quando o servidor demora), a mesma mídia não é baixada e gravada de novo.
+    const safeMediaId = String(mediaId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileBase = `${safeName}_m${safeMediaId}.${ext}`;
+    const filePath = `incoming/${fileBase}`;
+    const { data: existing } = await supabase.storage.from('crm-media').list('incoming', { search: fileBase, limit: 1 });
+    if (Array.isArray(existing) && existing.some((f: any) => f?.name === fileBase)) {
+      const { data: { publicUrl } } = supabase.storage.from('crm-media').getPublicUrl(filePath);
+      console.log('[INCOMING-MEDIA] Reaproveitada (webhook repetido)', { mediaId });
+      return toPublicMediaUrl(publicUrl);
+    }
+
+    // 2) Baixa o binário (precisa do Bearer token)
+    const binRes = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+    if (!binRes.ok) {
+      console.error('[INCOMING-MEDIA] Failed to download media', mediaId, binRes.status);
+      return null;
+    }
+    // Arquivos grandes (ex.: vídeo de 97 MB enviado como documento) estouravam a
+    // memória da função ao usar blob(); agora seguem em streaming direto ao Storage.
+    const contentLength = Number(binRes.headers.get('content-length') || declaredSize || 0);
+    const useStream = !contentLength || contentLength > STREAM_UPLOAD_THRESHOLD;
+
     if (useStream && binRes.body) {
       const baseUrl = (Deno.env.get('SUPABASE_URL') ?? '').replace(/\/$/, '');
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';

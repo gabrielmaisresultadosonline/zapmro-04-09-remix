@@ -74,36 +74,13 @@ else
 fi
 
 sec "4) Arquivos órfãos no disco (sem registro no banco)"
-# Lista relativa ao STORAGE_ROOT: <bucket>/<caminho...>
-mapfile -t DISK_FILES < <(docker exec "$ST_CONT" find "$STORAGE_ROOT" -type f -mmin "+$IDADE_MIN" -printf '%P\n' 2>/dev/null || true)
-info "arquivos no disco com mais de ${IDADE_MIN}min: ${#DISK_FILES[@]}"
-
-ORFAOS_FILE="/tmp/zapmro-orfaos-$(date +%s).txt"
-: > "$ORFAOS_FILE"
-if [ "${#DISK_FILES[@]}" -gt 0 ]; then
-  # Carrega o índice do banco uma vez (bucket/nome) — comparação local, sem N queries.
-  psql_q "select bucket_id || '/' || name from storage.objects;" | sort -u > /tmp/zapmro-db-objects.txt
-  printf '%s\n' "${DISK_FILES[@]}" | sort -u > /tmp/zapmro-disk-objects.txt
-  # O backend "file" normalmente acrescenta o tenant antes de bucket/caminho.
-  # Só classificamos como órfão quando o caminho tem estrutura reconhecível e
-  # não existe no banco nem com nem sem o prefixo do tenant. Arquivos auxiliares
-  # desconhecidos são preservados: dúvida nunca pode virar exclusão.
-  while IFS= read -r rel; do
-    [ -n "$rel" ] || continue
-    candidate="$rel"
-    if ! grep -Fqx -- "$candidate" /tmp/zapmro-db-objects.txt; then
-      without_tenant="${candidate#*/}"
-      if [ "$without_tenant" != "$candidate" ] \
-         && ! grep -Fqx -- "$without_tenant" /tmp/zapmro-db-objects.txt \
-         && [[ "$without_tenant" == */* ]] \
-         && [[ "$candidate" != *.metadata ]]; then
-        printf '%s\n' "$rel" >> "$ORFAOS_FILE"
-      fi
-    fi
-  done < /tmp/zapmro-disk-objects.txt
-fi
+. "$ROOT/deploy/lib-orfaos-storage.sh"
+ORF_DIR="/tmp/zapmro-orfaos-$(date +%s)"
+orf_coletar "$ORF_DIR" "$IDADE_MIN" "$DB_CONT" "$ST_CONT" "${POSTGRES_DB:-postgres}" || die "falha ao ler banco/disco do storage"
+ORFAOS_FILE="$ORF_DIR/orfaos.tsv"
+info "arquivos no disco com mais de ${IDADE_MIN}min: $(wc -l < "$ORF_DIR/disk.tsv")"
 QTD_ORFAOS="$(wc -l < "$ORFAOS_FILE" | tr -d ' ')"
-info "órfãos identificados: $QTD_ORFAOS  (lista: $ORFAOS_FILE)"
+info "órfãos identificados: $QTD_ORFAOS  ($(numfmt --to=iec "$(orf_bytes "$ORF_DIR")" 2>/dev/null)) lista: $ORFAOS_FILE"
 [ "$QTD_ORFAOS" -gt 0 ] && head -10 "$ORFAOS_FILE" | sed 's/^/    /'
 
 if [ "$CONFIRMAR" != "1" ]; then
@@ -115,13 +92,12 @@ fi
 
 sec "5) Limpando órfãos do disco"
 if [ "$QTD_ORFAOS" -gt 0 ]; then
-  # Apaga um a um dentro do container, ignorando falhas individuais.
-  while IFS= read -r rel; do
-    [ -n "$rel" ] || continue
-    docker exec "$ST_CONT" rm -f -- "$STORAGE_ROOT/$rel" >/dev/null 2>&1 || true
-  done < "$ORFAOS_FILE"
-  docker exec "$ST_CONT" find "$STORAGE_ROOT" -type d -empty -delete >/dev/null 2>&1 || true
-  ok "$QTD_ORFAOS arquivos órfãos removidos"
+  if orf_seguro "$ORF_DIR"; then
+    orf_apagar "$ORF_DIR" "$ST_CONT"
+    ok "$QTD_ORFAOS arquivos órfãos removidos"
+  else
+    warn "órfãos acima de ${ORF_MAX_PCT}% dos arquivos — conferência suspeita, nada apagado"
+  fi
 else
   ok "nenhum órfão para remover"
 fi

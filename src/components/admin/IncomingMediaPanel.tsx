@@ -10,6 +10,8 @@ interface IncomingSummary {
   total_bytes?: number;
   expired_files?: number;
   expired_bytes?: number;
+  unreferenced_files?: number;
+  unreferenced_bytes?: number;
 }
 
 const gb = (v?: number) => `${(Number(v || 0) / 1024 ** 3).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} GB`;
@@ -32,7 +34,7 @@ export function IncomingMediaPanel({ creds }: { creds: AdminCreds }) {
 
   async function expireNow() {
     if (running) return;
-    if (!window.confirm("Apagar mídias recebidas com mais de 15 dias? Fluxos, templates, agendamentos, contatos e textos das conversas são preservados.")) return;
+    if (!window.confirm("Apagar mídias recebidas com mais de 15 dias e as que nenhuma conversa usa mais? Fluxos, templates, agendamentos, contatos e textos das conversas são preservados.")) return;
     setRunning(true);
     try {
       const r = await adminCall<{ files?: number; bytes?: number }>("expire_incoming_media", creds, {}, { timeoutMs: 300000 });
@@ -57,10 +59,11 @@ export function IncomingMediaPanel({ creds }: { creds: AdminCreds }) {
       {summary === null ? (
         <Loader2 className="h-5 w-5 animate-spin text-primary" />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div><p className="text-xs text-muted-foreground">Total guardado</p><p className="text-xl font-bold">{gb(summary.total_bytes)}</p><p className="text-xs text-muted-foreground">{Number(summary.total_files || 0).toLocaleString("pt-BR")} arquivos</p></div>
           <div><p className="text-xs text-muted-foreground">Mais de 15 dias</p><p className="text-xl font-bold">{gb(summary.expired_bytes)}</p><p className="text-xs text-muted-foreground">{Number(summary.expired_files || 0).toLocaleString("pt-BR")} arquivos</p></div>
-          <Button variant="destructive" onClick={() => void expireNow()} disabled={running || !summary.expired_files} className="self-center">
+          <div><p className="text-xs text-muted-foreground">Sem conversa (sobras)</p><p className="text-xl font-bold">{gb(summary.unreferenced_bytes)}</p><p className="text-xs text-muted-foreground">{Number(summary.unreferenced_files || 0).toLocaleString("pt-BR")} arquivos</p></div>
+          <Button variant="destructive" onClick={() => void expireNow()} disabled={running || (!summary.expired_files && !summary.unreferenced_files)} className="self-center">
             {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Limpar mídias antigas
           </Button>
         </div>

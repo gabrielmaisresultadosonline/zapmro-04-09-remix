@@ -2,6 +2,9 @@
  * incoming-media-expire — apaga mídias recebidas (crm-media/incoming/*) com mais
  * de 15 dias que não estão em fluxos, templates ou agendamentos.
  *
+ * Também remove mídias recebidas com mais de 24 h que nenhuma mensagem cita
+ * (histórico já apagado ou cópia repetida de webhook) — migração 138.
+ *
  * Remoção pela Storage API (apaga arquivo + registro juntos). Depois marca as
  * mensagens como "mídia expirada". Contatos e históricos de texto permanecem.
  * Exige service_role (cron ou AdminCentral).
@@ -68,8 +71,32 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`[INCOMING-EXPIRE] arquivos=${files} bytes=${bytes} mensagens=${messages}`);
-    return json({ success: true, files, bytes, messages });
+    // Fase 2: arquivos sem nenhuma conversa citando (histórico apagado / cópias).
+    let orphanFiles = 0;
+    let orphanBytes = 0;
+    const orphanBatches = force ? 60 : 3;
+    for (let i = 0; i < orphanBatches && Date.now() - startedAt < budgetMs; i++) {
+      const { data, error } = await supabase.rpc("crm_incoming_media_unreferenced_batch", { p_min_age_hours: 24, p_limit: 200 });
+      if (error) {
+        // Migração 138 ainda não aplicada: não derruba a fase 1.
+        console.error("[INCOMING-EXPIRE] sem-conversa indisponível", error.message);
+        break;
+      }
+      const rows = (data ?? []) as ExpiredRow[];
+      if (rows.length === 0) break;
+      for (let j = 0; j < rows.length; j += 100) {
+        const chunk = rows.slice(j, j + 100);
+        const { error: removeError } = await supabase.storage.from("crm-media").remove(chunk.map((r) => r.name));
+        if (removeError) throw new Error(removeError.message);
+        orphanFiles += chunk.length;
+        orphanBytes += chunk.reduce((s, r) => s + Number(r.size_bytes || 0), 0);
+      }
+    }
+    files += orphanFiles;
+    bytes += orphanBytes;
+
+    console.log(`[INCOMING-EXPIRE] arquivos=${files} bytes=${bytes} mensagens=${messages} sem_conversa=${orphanFiles}`);
+    return json({ success: true, files, bytes, messages, orphanFiles, orphanBytes });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[INCOMING-EXPIRE] erro", message);

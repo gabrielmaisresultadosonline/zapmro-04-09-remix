@@ -16,7 +16,7 @@ BEGIN
     EXECUTE 'DELETE FROM net._http_response WHERE created < now() - interval ''1 day''';
     GET DIAGNOSTICS n = ROW_COUNT; r := r || jsonb_build_object('http_responses', n);
   END IF;
-  DELETE FROM public.crm_media_gc_queue WHERE status = 'purged' AND coalesce(purged_at, updated_at, created_at) < now() - interval '7 days';
+  DELETE FROM public.crm_media_gc_queue WHERE status = 'purged' AND coalesce(purged_at, queued_at) < now() - interval '7 days';
   GET DIAGNOSTICS n = ROW_COUNT; r := r || jsonb_build_object('gc_purged_rows', n);
   -- Arquivos cujas conversas já sumiram voltam para a fila imediatamente.
   UPDATE public.crm_media_gc_queue SET purge_after = now()

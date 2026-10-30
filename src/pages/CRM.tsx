@@ -3663,8 +3663,35 @@ const CRM = () => {
   };
 
   const handleDeleteConversation = async (contactId: string) => {
-    // Apagar a conversa também preserva o contato; o servidor remove a mídia sem uso.
-    await handleClearConversation(contactId);
+    // "Apagar/Remover": apaga o histórico (com a mídia exclusiva) e remove o
+    // contato da lista de conversas. "Limpar" continua preservando o contato.
+    try {
+      const userId = currentUserIdRef.current;
+      if (!userId) throw new Error('Entre novamente para remover a conversa.');
+      await clearConversationHistory({ contactId, userId, purgeStorage: true });
+      // crm_activities não tem exclusão em cascata; remove antes do contato.
+      await supabase.from('crm_activities').delete().eq('contact_id', contactId);
+      const { error: deleteError } = await supabase
+        .from('crm_contacts')
+        .delete()
+        .eq('id', contactId);
+      if (deleteError) throw deleteError;
+
+      setContacts(prev => prev.filter(contact => contact.id !== contactId));
+      if (selectedContactRef.current?.id === contactId) {
+        setChatMessages([]);
+        setSelectedContact(null);
+      }
+      setInboundTimestampsByContact(prev => {
+        const next = { ...prev };
+        delete next[contactId];
+        return next;
+      });
+      toast({ title: "Conversa removida", description: "O contato e todo o histórico foram removidos da lista de conversas." });
+    } catch (e: any) {
+      console.error('[CRM] deleteConversation error', e);
+      toast({ title: "Erro ao remover", description: e?.message || "Tente novamente.", variant: "destructive" });
+    }
   };
 
   /** Regra central (24h comum / 72h anúncio): fechada = só template. */
@@ -12117,7 +12144,7 @@ const CRM = () => {
               {confirmConvAction?.type === 'clear' ? (
                 <>Tem certeza que deseja <strong>limpar todas as mensagens</strong> da conversa com <strong>{confirmConvAction?.contactName}</strong>? O contato permanece, apenas o histórico será apagado. Esta ação não pode ser desfeita.</>
               ) : (
-                <>Tem certeza que deseja <strong>apagar a conversa completa</strong> com <strong>{confirmConvAction?.contactName}</strong>? O contato permanece salvo. As mensagens e os arquivos exclusivos serão apagados da VPS. Esta ação não pode ser desfeita.</>
+                <>Tem certeza que deseja <strong>remover</strong> <strong>{confirmConvAction?.contactName}</strong> das conversas? O contato e todo o histórico (mensagens e arquivos exclusivos) serão apagados. Esta ação não pode ser desfeita.</>
               )}
             </DialogDescription>
           </DialogHeader>

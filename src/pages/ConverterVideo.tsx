@@ -105,7 +105,7 @@ export default function ConverterVideo() {
 
       // captureStream do video element (inclui áudio)
       const stream: MediaStream = video.captureStream
-          video.captureStream()
+          ? video.captureStream()
         : // @ts-expect-error
           video.mozCaptureStream();
 

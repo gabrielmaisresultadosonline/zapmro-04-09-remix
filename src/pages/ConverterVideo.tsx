@@ -104,10 +104,8 @@ export default function ConverterVideo() {
       const audioBitrate = 64_000;
 
       // captureStream do video element (inclui áudio)
-      // @ts-expect-error captureStream may not be in TS lib
       const stream: MediaStream = video.captureStream
-        ? // @ts-expect-error
-          video.captureStream()
+          ? video.captureStream()
         : // @ts-expect-error
           video.mozCaptureStream();
 

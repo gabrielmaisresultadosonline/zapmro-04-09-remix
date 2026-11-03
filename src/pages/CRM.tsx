@@ -3668,16 +3668,34 @@ const CRM = () => {
     try {
       const userId = currentUserIdRef.current;
       if (!userId) throw new Error('Entre novamente para remover a conversa.');
-      await clearConversationHistory({ contactId, userId, purgeStorage: true });
+      // Inclui as cópias do mesmo número (com/sem 9º dígito) no mesmo WhatsApp,
+      // senão a cópia restante reaparece na lista como se nada fosse removido.
+      const base = contacts.find((c: any) => c.id === contactId);
+      let ids: string[] = [contactId];
+      if (base?.wa_id) {
+        let q = supabase.from('crm_contacts').select('id')
+          .in('wa_id', getPhoneVariants(base.wa_id))
+          .eq('user_id', base.user_id || userId);
+        q = base.whatsapp_number_id ? q.eq('whatsapp_number_id', base.whatsapp_number_id) : q.is('whatsapp_number_id', null);
+        const { data: dupes } = await q;
+        ids = Array.from(new Set([contactId, ...((dupes || []).map((d: any) => d.id))]));
+      }
+      for (const id of ids) {
+        await clearConversationHistory({ contactId: id, userId, purgeStorage: true });
+      }
       // crm_activities não tem exclusão em cascata; remove antes do contato.
-      await supabase.from('crm_activities').delete().eq('contact_id', contactId);
-      const { error: deleteError } = await supabase
+      await supabase.from('crm_activities').delete().in('contact_id', ids);
+      const { data: deleted, error: deleteError } = await supabase
         .from('crm_contacts')
         .delete()
-        .eq('id', contactId);
+        .in('id', ids)
+        .select('id');
       if (deleteError) throw deleteError;
+      if (!deleted || deleted.length === 0) {
+        throw new Error('O histórico foi limpo, mas o contato não pôde ser removido: ele pertence a outro cadastro. Peça ao dono do número para remover.');
+      }
 
-      setContacts(prev => prev.filter(contact => contact.id !== contactId));
+      setContacts(prev => prev.filter(contact => !ids.includes(contact.id)));
       if (selectedContactRef.current?.id === contactId) {
         setChatMessages([]);
         setSelectedContact(null);

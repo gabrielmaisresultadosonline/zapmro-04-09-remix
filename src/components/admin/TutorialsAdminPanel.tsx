@@ -60,56 +60,76 @@ type Tutorial = {
   transcode_error?: string | null;
 };
 
-type TranscodeCounts = { total: number; ready: number; pending: number; processing: number; error: number };
 
 /**
  * Converte os vídeos em streaming adaptativo (qualidade sobe conforme a
  * conexão). O trabalho pesado roda no servidor; aqui só enfileiramos e
  * acompanhamos o andamento.
  */
+type TranscodeRow = {
+  id: string; title: string; status: string; step: string | null; progress: number;
+  error: string | null; started: string | null; done: string | null;
+};
+
 function TranscodeCard() {
-  const [counts, setCounts] = useState<TranscodeCounts | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [rows, setRows] = useState<TranscodeRow[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from("sales_tutorials").select("*").not("video_url", "is", null);
-    if (error) return;
-    const rows = (data || []) as Tutorial[];
-    const c: TranscodeCounts = { total: rows.length, ready: 0, pending: 0, processing: 0, error: 0 };
-    const errs: string[] = [];
-    rows.forEach((r) => {
-      const st = r.transcode_status || "pending";
-      if (st === "ready") c.ready++;
-      else if (st === "processing") c.processing++;
-      else if (st === "error") { c.error++; errs.push(`${r.title}: ${r.transcode_error || "erro"}`); }
-      else c.pending++;
-    });
-    setCounts(c);
-    setErrors(errs.slice(0, 5));
+    if (error) { setLoadError(error.message); return; }
+    setLoadError(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list = ((data || []) as any[]).map((r) => ({
+      id: r.id, title: r.title || "Sem título",
+      status: r.transcode_status || "pending",
+      step: r.transcode_step ?? null,
+      progress: Number(r.transcode_progress) || 0,
+      error: r.transcode_error ?? null,
+      started: r.transcode_started_at ?? null,
+      done: r.transcoded_at ?? null,
+    })) as TranscodeRow[];
+    const order: Record<string, number> = { processing: 0, error: 1, pending: 2, ready: 3 };
+    list.sort((x, y) => (order[x.status] ?? 2) - (order[y.status] ?? 2));
+    setRows(list);
+    setLastSync(new Date());
   }, []);
+
+  const active = rows?.some((r) => r.status === "processing" || r.status === "pending") ?? false;
 
   useEffect(() => {
     load();
-    const t = window.setInterval(load, 10000);
+    const t = window.setInterval(load, active ? 3000 : 10000);
     return () => window.clearInterval(t);
-  }, [load]);
+  }, [load, active]);
 
   async function transcodeAll() {
     setBusy(true);
+    // Só coloca na fila o que ainda não está pronto — vídeos já convertidos continuam valendo.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase.from("sales_tutorials") as any)
-      .update({ transcode_status: "pending", transcode_error: null })
+      .update({ transcode_status: "pending", transcode_error: null, transcode_progress: 0, transcode_step: null })
       .not("video_url", "is", null)
-      .neq("transcode_status", "processing");
+      .or("transcode_status.is.null,transcode_status.in.(error,none,pending)");
     setBusy(false);
     if (error) return toast.error(`Não foi possível iniciar: ${error.message}`);
-    toast.success("Transcodificação iniciada. Os vídeos continuam disponíveis enquanto isso.");
+    toast.success("Conversão iniciada. Os vídeos continuam disponíveis enquanto isso.");
     load();
   }
 
-  const working = counts ? counts.pending + counts.processing : 0;
-  const pct = counts && counts.total ? Math.round((counts.ready / counts.total) * 100) : 0;
+  const total = rows?.length ?? 0;
+  const ready = rows?.filter((r) => r.status === "ready").length ?? 0;
+  const processing = rows?.filter((r) => r.status === "processing").length ?? 0;
+  const pending = rows?.filter((r) => r.status === "pending").length ?? 0;
+  const errors = rows?.filter((r) => r.status === "error").length ?? 0;
+  const partial = rows?.reduce((acc, r) => acc + (r.status === "ready" ? 100 : r.status === "processing" ? r.progress : 0), 0) ?? 0;
+  const pct = total ? Math.round(partial / total) : 0;
+
+  const label = (r: TranscodeRow) =>
+    r.status === "ready" ? "pronto" : r.status === "processing" ? (r.step || "convertendo") :
+    r.status === "error" ? `erro: ${r.error || "desconhecido"}` : "na fila";
 
   return (
     <Card className="p-4 bg-gradient-to-r from-[#F0FBF7] to-white border-[#25D366]/20">
@@ -125,28 +145,47 @@ function TranscodeCard() {
               quem assiste. Vídeos novos são convertidos sozinhos.
             </p>
           </div>
-          {counts && (
+          {rows && (
             <div className="space-y-1">
               <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
-                <div className="h-full bg-[#25D366] transition-all" style={{ width: `${pct}%` }} />
+                <div className="h-full bg-[#25D366] transition-all duration-700" style={{ width: `${pct}%` }} />
               </div>
               <p className="text-xs text-[#075E54]">
-                {counts.ready} de {counts.total} prontos
-                {counts.processing > 0 && ` · ${counts.processing} convertendo agora`}
-                {counts.pending > 0 && ` · ${counts.pending} na fila`}
-                {counts.error > 0 && ` · ${counts.error} com erro`}
+                {pct}% · {ready} de {total} prontos
+                {processing > 0 && ` · ${processing} convertendo agora`}
+                {pending > 0 && ` · ${pending} na fila`}
+                {errors > 0 && ` · ${errors} com erro`}
+                {lastSync && ` · atualizado ${lastSync.toLocaleTimeString("pt-BR")}`}
               </p>
-              {errors.map((e) => (
-                <p key={e} className="text-[11px] text-red-600 break-words">{e}</p>
-              ))}
             </div>
           )}
+          {loadError && <p className="text-[11px] text-red-600">Erro ao ler o andamento: {loadError}</p>}
         </div>
         <Button onClick={transcodeAll} disabled={busy} className="bg-[#25D366] hover:bg-[#128C7E] text-white">
-          {busy || working > 0 ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Zap className="h-4 w-4 mr-1" />}
+          {busy || active ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Zap className="h-4 w-4 mr-1" />}
           Transcodificar todos
         </Button>
       </div>
+      {rows && rows.length > 0 && (
+        <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-[#E8F5F1] bg-white divide-y divide-[#E8F5F1]">
+          {rows.map((r) => (
+            <div key={r.id} className="px-3 py-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-[#075E54] truncate">{r.title}</span>
+                <span className={`shrink-0 ${r.status === "error" ? "text-red-600" : r.status === "ready" ? "text-[#128C7E]" : "text-slate-500"}`}>
+                  {r.status === "processing" ? `${r.progress}%` : r.status === "ready" ? "✓" : ""}
+                </span>
+              </div>
+              <p className={`break-words ${r.status === "error" ? "text-red-600" : "text-slate-500"}`}>{label(r)}</p>
+              {r.status === "processing" && (
+                <div className="mt-1 h-1 rounded-full bg-slate-200 overflow-hidden">
+                  <div className="h-full bg-[#25D366] transition-all duration-700" style={{ width: `${r.progress}%` }} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

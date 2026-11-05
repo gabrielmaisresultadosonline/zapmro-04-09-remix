@@ -60,7 +60,6 @@ type Tutorial = {
   transcode_error?: string | null;
 };
 
-type TranscodeCounts = { total: number; ready: number; pending: number; processing: number; error: number };
 
 /**
  * Converte os vídeos em streaming adaptativo (qualidade sobe conforme a

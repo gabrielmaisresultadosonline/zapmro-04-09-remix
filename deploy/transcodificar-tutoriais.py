@@ -58,11 +58,18 @@ def remove_prefix(prefix):
         print(f"[transcoder] aviso: não removeu versão antiga {prefix}: {e}")
 
 
+def step(tid, text, pct):
+    try:
+        sql(f"UPDATE public.sales_tutorials SET transcode_step={lit(text)}, transcode_progress={int(pct)} WHERE id={lit(tid)};")
+    except Exception:
+        pass
+
+
 def main():
     if not KEY:
         print("[transcoder] SERVICE_ROLE_KEY ausente"); return 1
     row = sql("""
-      UPDATE public.sales_tutorials t SET transcode_status='processing', transcode_started_at=now(), transcode_error=NULL
+      UPDATE public.sales_tutorials t SET transcode_status='processing', transcode_started_at=now(), transcode_error=NULL, transcode_step='iniciando', transcode_progress=0
        WHERE t.id = (SELECT id FROM public.sales_tutorials
                       WHERE video_url IS NOT NULL
                         AND (transcode_status='pending'
@@ -81,6 +88,7 @@ def main():
             raise RuntimeError("vídeo fora do Storage do sistema")
         public_base, obj = src.split(MARK, 1)
         print(f"[transcoder] {tid}: baixando {obj}")
+        step(tid, "baixando o vídeo original", 2)
         local = os.path.join(work, "src")
         last = None
         for attempt in range(6):  # o gateway pode estar reiniciando (ex.: durante a atualização)
@@ -112,7 +120,7 @@ def main():
         out = os.path.join(work, "hls")
         os.makedirs(out)
         master = ["#EXTM3U", "#EXT-X-VERSION:3"]
-        for size, vk, ak in ladder:
+        for idx, (size, vk, ak) in enumerate(ladder):
             scale = f"scale=-2:{size}" if w >= h else f"scale={size}:-2"
             ow, oh = (round(w * size / h / 2) * 2, size) if w >= h else (size, round(h * size / w / 2) * 2)
             name = f"{size}p"
@@ -125,6 +133,7 @@ def main():
             cmd += ["-f", "hls", "-hls_time", "4", "-hls_playlist_type", "vod",
                     "-hls_segment_filename", os.path.join(out, f"{name}_%04d.ts"), os.path.join(out, f"{name}.m3u8")]
             print(f"[transcoder] {tid}: gerando {name}")
+            step(tid, f"gerando {name} ({idx + 1} de {len(ladder)})", 5 + int(75 * idx / len(ladder)))
             subprocess.run(cmd, check=True, timeout=3600)
             bw = (vk + (ak if has_audio else 0)) * 1000
             master += [f"#EXT-X-STREAM-INF:BANDWIDTH={int(bw*1.1)},RESOLUTION={ow}x{oh}", f"{name}.m3u8"]
@@ -134,12 +143,14 @@ def main():
         prefix = f"tutorials/hls/{tid}/{int(time.time())}"
         files = sorted(os.listdir(out))
         for i, fn in enumerate(files):
+            if i % 10 == 0:
+                step(tid, f"enviando arquivos ({i} de {len(files)})", 80 + int(19 * i / len(files)))
             ctype = "application/vnd.apple.mpegurl" if fn.endswith(".m3u8") else "video/mp2t"
             with open(os.path.join(out, fn), "rb") as f:
                 storage("POST", f"object/{BUCKET}/{prefix}/{urllib.parse.quote(fn)}", f.read(), ctype)
         hls_url = f"{public_base}{MARK}{BUCKET}/{prefix}/master.m3u8"
         sql(f"""UPDATE public.sales_tutorials SET hls_url={lit(hls_url)}, transcode_status='ready',
-                transcoded_at=now(), transcode_error=NULL WHERE id={lit(tid)} AND video_url={lit(src)};""")
+                transcoded_at=now(), transcode_error=NULL, transcode_step='pronto', transcode_progress=100 WHERE id={lit(tid)} AND video_url={lit(src)};""")
         print(f"[transcoder] {tid}: pronto ({len(files)} arquivos, {', '.join(f'{l[0]}p' for l in ladder)})")
         old = job.get("hls_url") or ""
         if MARK in old:
@@ -151,7 +162,7 @@ def main():
         msg = str(e)[:400]
         print(f"[transcoder] {tid}: ERRO {msg}")
         try:
-            sql(f"UPDATE public.sales_tutorials SET transcode_status='error', transcode_error={lit(msg)} WHERE id={lit(tid)};")
+            sql(f"UPDATE public.sales_tutorials SET transcode_status='error', transcode_error={lit(msg)}, transcode_step='erro' WHERE id={lit(tid)};")
         except Exception:
             pass
         return 1

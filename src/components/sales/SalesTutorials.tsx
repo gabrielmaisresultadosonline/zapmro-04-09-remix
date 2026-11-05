@@ -26,6 +26,7 @@ type Tutorial = {
   description: string | null;
   cover_url: string | null;
   video_url: string | null;
+  hls_url?: string | null;
   button1_label: string | null;
   button1_url: string | null;
   button2_label: string | null;
@@ -190,6 +191,7 @@ export default function SalesTutorials({ variant = "light" }: SalesTutorialsProp
                   <SmoothVideo
                     key={active.id}
                     src={resolveMediaUrl(active.video_url)}
+                    hlsSrc={active.hls_url ? resolveMediaUrl(active.hls_url) : null}
                     poster={resolveMediaUrl(active.cover_url) || undefined}
                     controls
                     autoPlay

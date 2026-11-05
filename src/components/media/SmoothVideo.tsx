@@ -10,6 +10,11 @@ export interface SmoothVideoProps
   className?: string;
   /** Classe do contêiner que posiciona o indicador de carregamento. */
   containerClassName?: string;
+  /**
+   * Playlist HLS adaptativa (opcional). Quando existe, o vídeo começa na
+   * qualidade mais leve e sobe conforme a conexão; se falhar, volta para `src`.
+   */
+  hlsSrc?: string | null;
 }
 
 /**
@@ -33,6 +38,7 @@ const STALL_TIMEOUT_MS = 8000;
 
 export const SmoothVideo: React.FC<SmoothVideoProps> = ({
   src,
+  hlsSrc,
   className,
   containerClassName,
   poster,
@@ -46,6 +52,9 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
   const stallTimerRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  // true enquanto o hls.js (ou HLS nativo do Safari) controla o vídeo.
+  const [, setHlsActive] = useState(false);
+  const hlsActiveRef = useRef(false);
 
   const clearStallTimer = useCallback(() => {
     if (stallTimerRef.current !== null) {
@@ -102,9 +111,76 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
     return clearStallTimer;
   }, [src, clearStallTimer]);
 
+  // Liga o streaming adaptativo quando há playlist HLS.
+  useEffect(() => {
+    const el = videoRef.current;
+    hlsActiveRef.current = false;
+    setHlsActive(false);
+    if (!el || !hlsSrc) return;
+    let destroyed = false;
+    let hls: { destroy: () => void } | null = null;
+    const fallback = () => {
+      hlsActiveRef.current = false;
+      setHlsActive(false);
+      hls?.destroy();
+      hls = null;
+      el.src = src;
+      el.load();
+      if (rest.autoPlay) void el.play().catch(() => undefined);
+    };
+
+    // Safari/iOS tocam HLS nativamente (com troca de qualidade automática).
+    if (el.canPlayType("application/vnd.apple.mpegurl")) {
+      hlsActiveRef.current = true;
+      setHlsActive(true);
+      el.src = hlsSrc;
+      const onNativeError = () => fallback();
+      el.addEventListener("error", onNativeError, { once: true });
+      return () => el.removeEventListener("error", onNativeError);
+    }
+
+    void import("hls.js").then(({ default: Hls }) => {
+      if (destroyed) return;
+      if (!Hls.isSupported()) return fallback(); // toca o MP4 normal
+      hlsActiveRef.current = true;
+      setHlsActive(true);
+      const inst = new Hls({
+        startLevel: 0, // começa na qualidade mais leve: abre rápido
+        capLevelToPlayerSize: true,
+        abrEwmaDefaultEstimate: 400_000,
+        maxBufferLength: 30,
+        fragLoadingMaxRetry: 6,
+        manifestLoadingMaxRetry: 4,
+      });
+      hls = inst;
+      let mediaRecoveries = 0;
+      inst.on(Hls.Events.ERROR, (_e, data) => {
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && mediaRecoveries < 3) {
+          mediaRecoveries += 1;
+          inst.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveries < 3) {
+          mediaRecoveries += 1;
+          inst.recoverMediaError();
+        } else {
+          fallback();
+        }
+      });
+      inst.loadSource(hlsSrc);
+      inst.attachMedia(el);
+    }).catch(() => { if (!destroyed) fallback(); });
+
+    return () => {
+      destroyed = true;
+      hls?.destroy();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hlsSrc, src]);
+
   const handleWaiting = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     setLoading(true);
-    scheduleStallRecovery();
+    // Com HLS o próprio hls.js recupera e baixa a qualidade sozinho.
+    if (!hlsActiveRef.current) scheduleStallRecovery();
     onWaiting?.(e);
   };
 
@@ -121,6 +197,7 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
 
   const handleError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     clearStallTimer();
+    if (hlsActiveRef.current) return; // tratado pelo hls.js / fallback
     if (retriesRef.current < MAX_AUTO_RETRIES) {
       retriesRef.current += 1;
       // Espera progressiva: alivia o servidor quando muitos abrem ao mesmo tempo.
@@ -162,7 +239,7 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
 
       <video
         ref={videoRef}
-        src={src}
+        src={hlsSrc ? undefined : src}
         poster={poster}
         playsInline
         // "metadata" evita que dezenas de espectadores puxem o arquivo inteiro

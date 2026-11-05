@@ -12,6 +12,7 @@ type Tutorial = {
   description: string | null;
   cover_url: string | null;
   video_url: string | null;
+  hls_url?: string | null;
 };
 
 type Props = {
@@ -33,7 +34,7 @@ export default function FirstTutorialVideo({
     (async () => {
       const { data } = await supabase
         .from("sales_tutorials")
-        .select("id,title,description,cover_url,video_url")
+        .select("*")
         .eq("is_active", true)
         .order("order_index", { ascending: true })
         .range(orderIndex, orderIndex)
@@ -103,6 +104,7 @@ export default function FirstTutorialVideo({
           <div className="relative bg-black w-full flex items-center justify-center" style={{ maxHeight: "75vh" }}>
             <SmoothVideo
               src={resolveMediaUrl(video.video_url)}
+              hlsSrc={video.hls_url ? resolveMediaUrl(video.hls_url) : null}
               poster={resolveMediaUrl(video.cover_url) || undefined}
               controls
               autoPlay

@@ -53,7 +53,7 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   // true enquanto o hls.js (ou HLS nativo do Safari) controla o vídeo.
-  const [hlsActive, setHlsActive] = useState(false);
+  const [, setHlsActive] = useState(false);
   const hlsActiveRef = useRef(false);
 
   const clearStallTimer = useCallback(() => {
@@ -141,7 +141,7 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
 
     void import("hls.js").then(({ default: Hls }) => {
       if (destroyed) return;
-      if (!Hls.isSupported()) return; // fica no MP4 normal
+      if (!Hls.isSupported()) return fallback(); // toca o MP4 normal
       hlsActiveRef.current = true;
       setHlsActive(true);
       const inst = new Hls({
@@ -168,7 +168,7 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
       });
       inst.loadSource(hlsSrc);
       inst.attachMedia(el);
-    }).catch(() => undefined);
+    }).catch(() => { if (!destroyed) fallback(); });
 
     return () => {
       destroyed = true;
@@ -239,7 +239,7 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
 
       <video
         ref={videoRef}
-        src={hlsSrc ? (hlsActive ? undefined : undefined) : src}
+        src={hlsSrc ? undefined : src}
         poster={poster}
         playsInline
         // "metadata" evita que dezenas de espectadores puxem o arquivo inteiro

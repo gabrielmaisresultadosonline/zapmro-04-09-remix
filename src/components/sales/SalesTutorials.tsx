@@ -190,6 +190,7 @@ export default function SalesTutorials({ variant = "light" }: SalesTutorialsProp
                   <SmoothVideo
                     key={active.id}
                     src={resolveMediaUrl(active.video_url)}
+                    hlsSrc={active.hls_url ? resolveMediaUrl(active.hls_url) : null}
                     poster={resolveMediaUrl(active.cover_url) || undefined}
                     controls
                     autoPlay

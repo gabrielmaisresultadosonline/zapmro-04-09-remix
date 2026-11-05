@@ -22,3 +22,4 @@
 - O teste grátis bloqueia Disparo em massa e Agente I.A. na tela (planAccess/PaidFeatureLock) e no servidor (_shared/plan-access.ts); a regra de plano deve ficar igual nos dois lados.
 - 'Reiniciar' do AdminCentral grava em crm_client_reload_signals (só service_role); cada CRM aberto anuncia presença no canal crm-online-v1 e recarrega ao receber o sinal.
 - A chave da OpenAI é escolhida só por _shared/openai-key.ts (resolveOpenAiKey: cadastro → dono do contato/número → legado → servidor, testada e em cache) para Agente I.A., Recuperador e gerador de prompt; assim nunca caem numa chave antiga cancelada.
+- Tutorial videos stream as adaptive HLS produced by the host service zapmro-tutorial-transcoder (queue in sales_tutorials.transcode_status); the original MP4 is never modified and remains the player fallback.

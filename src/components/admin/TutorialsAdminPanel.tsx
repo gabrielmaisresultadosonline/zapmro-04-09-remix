@@ -97,9 +97,9 @@ function TranscodeCard() {
 
   async function transcodeAll() {
     setBusy(true);
-    const { error } = await supabase
-      .from("sales_tutorials")
-      .update({ transcode_status: "pending", transcode_error: null } as never)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from("sales_tutorials") as any)
+      .update({ transcode_status: "pending", transcode_error: null })
       .not("video_url", "is", null)
       .neq("transcode_status", "processing");
     setBusy(false);

@@ -26,6 +26,7 @@ type Tutorial = {
   description: string | null;
   cover_url: string | null;
   video_url: string | null;
+  hls_url?: string | null;
   button1_label: string | null;
   button1_url: string | null;
   button2_label: string | null;

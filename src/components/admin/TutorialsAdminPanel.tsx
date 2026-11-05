@@ -29,6 +29,7 @@ import {
   Eye,
   EyeOff,
   Layers,
+  Zap,
 } from "lucide-react";
 
 type Module = {
@@ -54,7 +55,101 @@ type Tutorial = {
   button2_url: string | null;
   order_index: number;
   is_active: boolean;
+  hls_url?: string | null;
+  transcode_status?: string | null;
+  transcode_error?: string | null;
 };
+
+type TranscodeCounts = { total: number; ready: number; pending: number; processing: number; error: number };
+
+/**
+ * Converte os vídeos em streaming adaptativo (qualidade sobe conforme a
+ * conexão). O trabalho pesado roda no servidor; aqui só enfileiramos e
+ * acompanhamos o andamento.
+ */
+function TranscodeCard() {
+  const [counts, setCounts] = useState<TranscodeCounts | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.from("sales_tutorials").select("*").not("video_url", "is", null);
+    if (error) return;
+    const rows = (data || []) as Tutorial[];
+    const c: TranscodeCounts = { total: rows.length, ready: 0, pending: 0, processing: 0, error: 0 };
+    const errs: string[] = [];
+    rows.forEach((r) => {
+      const st = r.transcode_status || "pending";
+      if (st === "ready") c.ready++;
+      else if (st === "processing") c.processing++;
+      else if (st === "error") { c.error++; errs.push(`${r.title}: ${r.transcode_error || "erro"}`); }
+      else c.pending++;
+    });
+    setCounts(c);
+    setErrors(errs.slice(0, 5));
+  }, []);
+
+  useEffect(() => {
+    load();
+    const t = window.setInterval(load, 10000);
+    return () => window.clearInterval(t);
+  }, [load]);
+
+  async function transcodeAll() {
+    setBusy(true);
+    const { error } = await supabase
+      .from("sales_tutorials")
+      .update({ transcode_status: "pending", transcode_error: null } as never)
+      .not("video_url", "is", null)
+      .neq("transcode_status", "processing");
+    setBusy(false);
+    if (error) return toast.error(`Não foi possível iniciar: ${error.message}`);
+    toast.success("Transcodificação iniciada. Os vídeos continuam disponíveis enquanto isso.");
+    load();
+  }
+
+  const working = counts ? counts.pending + counts.processing : 0;
+  const pct = counts && counts.total ? Math.round((counts.ready / counts.total) * 100) : 0;
+
+  return (
+    <Card className="p-4 bg-gradient-to-r from-[#F0FBF7] to-white border-[#25D366]/20">
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="p-2 rounded-lg bg-[#25D366]/10">
+          <Zap className="h-5 w-5 text-[#128C7E]" />
+        </div>
+        <div className="flex-1 min-w-[220px] space-y-2">
+          <div>
+            <p className="text-sm font-bold text-[#075E54]">Vídeos sem travar (qualidade adaptativa)</p>
+            <p className="text-xs text-[#128C7E]/70">
+              Converte todos os vídeos para começarem em qualidade baixa e melhorarem conforme a internet de
+              quem assiste. Vídeos novos são convertidos sozinhos.
+            </p>
+          </div>
+          {counts && (
+            <div className="space-y-1">
+              <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                <div className="h-full bg-[#25D366] transition-all" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="text-xs text-[#075E54]">
+                {counts.ready} de {counts.total} prontos
+                {counts.processing > 0 && ` · ${counts.processing} convertendo agora`}
+                {counts.pending > 0 && ` · ${counts.pending} na fila`}
+                {counts.error > 0 && ` · ${counts.error} com erro`}
+              </p>
+              {errors.map((e) => (
+                <p key={e} className="text-[11px] text-red-600 break-words">{e}</p>
+              ))}
+            </div>
+          )}
+        </div>
+        <Button onClick={transcodeAll} disabled={busy} className="bg-[#25D366] hover:bg-[#128C7E] text-white">
+          {busy || working > 0 ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Zap className="h-4 w-4 mr-1" />}
+          Transcodificar todos
+        </Button>
+      </div>
+    </Card>
+  );
+}
 
 async function uploadFile(file: File, prefix: string): Promise<string | null> {
   const ext = file.name.split(".").pop() || "bin";
@@ -202,6 +297,8 @@ export default function TutorialsAdminPanel() {
           <Plus className="h-4 w-4 mr-1" /> Novo módulo
         </Button>
       </div>
+
+      <TranscodeCard />
 
       {loading ? (
         <div className="flex justify-center py-16">
@@ -585,6 +682,7 @@ function ModuleDetail({ module, onBack }: { module: Module; onBack: () => void }
                 {v.video_url && (
                   <Badge className="absolute top-2 right-2 bg-[#25D366] text-white border-0 gap-1 text-[10px]">
                     <VideoIcon className="h-2.5 w-2.5" />
+                    {v.transcode_status === "ready" ? "HD auto" : v.transcode_status === "error" ? "erro" : v.transcode_status === "processing" ? "convertendo" : "na fila"}
                   </Badge>
                 )}
                 {!v.is_active && (

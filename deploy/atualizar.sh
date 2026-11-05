@@ -510,6 +510,33 @@ else
   warn "systemd indisponível; fluxos dependem apenas do pg_cron"
 fi
 
+# 5.3 — Conversão dos vídeos dos tutoriais em qualidade adaptativa (HLS).
+if command -v systemctl >/dev/null 2>&1; then
+  command -v ffmpeg >/dev/null 2>&1 || { sudo_ apt-get install -y ffmpeg >/dev/null 2>&1 || warn "não instalou ffmpeg"; }
+  chmod +x "$ROOT/deploy/zapmro-tutorial-transcoder.sh" 2>/dev/null || true
+  sudo_ tee /etc/systemd/system/zapmro-tutorial-transcoder.service >/dev/null <<EOF
+[Unit]
+Description=ZapMRO - transcodifica videos dos tutoriais (HLS adaptativo)
+After=docker.service network-online.target
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env bash $ROOT/deploy/zapmro-tutorial-transcoder.sh
+Restart=always
+RestartSec=10
+User=root
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo_ systemctl daemon-reload
+  sudo_ systemctl enable zapmro-tutorial-transcoder >/dev/null 2>&1 || true
+  sudo_ systemctl restart zapmro-tutorial-transcoder && ok "transcodificação dos tutoriais ativa (zapmro-tutorial-transcoder)" \
+    || warn "veja: journalctl -u zapmro-tutorial-transcoder"
+fi
+
 # depois de garantir roles/senhas, os serviços que conectam no banco precisam
 # reconectar (PostgREST fica em Restarting se subiu antes das roles existirem)
 info "reiniciando serviços que dependem do banco e recarregando o gateway…"

@@ -66,6 +66,8 @@ def main():
        WHERE t.id = (SELECT id FROM public.sales_tutorials
                       WHERE video_url IS NOT NULL
                         AND (transcode_status='pending'
+                             OR (transcode_status='error' AND transcode_started_at < now()-interval '15 minutes'
+                                 AND transcode_error ILIKE ANY (ARRAY['%closed connection%','%timed out%','%refused%','%reset%','%HTTP Error 5%','%download falhou%']))
                              OR (transcode_status='processing' AND transcode_started_at < now()-interval '2 hours'))
                       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING json_build_object('id',t.id,'video_url',t.video_url,'hls_url',t.hls_url);""")
@@ -80,9 +82,20 @@ def main():
         public_base, obj = src.split(MARK, 1)
         print(f"[transcoder] {tid}: baixando {obj}")
         local = os.path.join(work, "src")
-        req = urllib.request.Request(f"{GW}{MARK}{obj}", headers=headers())
-        with urllib.request.urlopen(req, timeout=600) as r, open(local, "wb") as f:
-            shutil.copyfileobj(r, f)
+        last = None
+        for attempt in range(6):  # o gateway pode estar reiniciando (ex.: durante a atualização)
+            try:
+                req = urllib.request.Request(f"{GW}{MARK}{obj}", headers=headers())
+                with urllib.request.urlopen(req, timeout=600) as r, open(local, "wb") as f:
+                    shutil.copyfileobj(r, f)
+                last = None
+                break
+            except Exception as e:
+                last = e
+                print(f"[transcoder] {tid}: download falhou ({e}), tentativa {attempt + 1}/6")
+                time.sleep(10 * (attempt + 1))
+        if last:
+            raise last
 
         probe = json.loads(subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",

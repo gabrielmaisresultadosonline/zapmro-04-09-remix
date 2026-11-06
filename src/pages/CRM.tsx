@@ -8690,9 +8690,41 @@ const CRM = () => {
                         </div>
                       </AccordionTrigger>
                       <AccordionContent className="pt-6">
+                        {flows.length > 0 && (
+                          <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-2">
+                            <div className="relative flex-1">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                              <Input
+                                value={flowSearch}
+                                onChange={(e) => setFlowSearch(e.target.value)}
+                                placeholder="Pesquisar fluxo pelo nome..."
+                                aria-label="Pesquisar fluxos pelo nome"
+                                className="pl-9 pr-9 h-10 rounded-xl bg-card"
+                              />
+                              {flowSearch && (
+                                <button
+                                  type="button"
+                                  onClick={() => setFlowSearch('')}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground"
+                                  aria-label="Limpar pesquisa"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {flows.filter((f) => matchesSearch(f.name, flowSearch)).length} de {flows.length} fluxos
+                            </span>
+                          </div>
+                        )}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-6">
+                          {flows.length > 0 && flowSearch.trim() && !flows.some((f) => matchesSearch(f.name, flowSearch)) && (
+                            <div className="col-span-full py-12 text-center bg-card rounded-2xl border-2 border-dashed border-muted text-sm text-muted-foreground">
+                              Nenhum fluxo encontrado para "{flowSearch}".
+                            </div>
+                          )}
                           {flows.length > 0 ? (
-                            flows.map((flow) => (
+                            flows.filter((f) => matchesSearch(f.name, flowSearch)).map((flow) => (
                               <Card key={flow.id} className="group overflow-hidden border-zinc-200 dark:border-zinc-800 hover:shadow-md transition-all">
                                 <CardHeader className="bg-muted/30 pb-4 border-b">
                                   <div className="flex justify-between items-start mb-2">

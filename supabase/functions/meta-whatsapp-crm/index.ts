@@ -5027,7 +5027,7 @@ async function fetchMediaWithFallback(url: string) {
       console.warn(`[UPLOAD] Falha ao baixar mídia em ${candidate}:`, err?.message || err);
     }
   }
-  throw new Error(`Falha ao baixar mídia (${lastStatus}) — o arquivo não foi encontrado no Storage da VPS: ${url}`);
+  throw new Error(`Arquivo de mídia não encontrado (${lastStatus}). Tivemos uma sobrecarga no servidor e alguns arquivos se perderam: refaça a parte do fluxo/disparo que tem mídias (áudios, imagens, vídeos, PDFs) enviando os arquivos de novo. Falha ao baixar mídia: ${url}`);
 }
 
 async function uploadMediaToMeta(accessToken: string, phoneNumberId: string, media: { type: string; url: string; mime: string; fileName: string }) {

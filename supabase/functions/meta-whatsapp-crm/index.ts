@@ -4984,10 +4984,10 @@ async function fetchMediaWithFallback(url: string) {
     try {
       const response = await fetch(candidate, { signal: AbortSignal.timeout(25_000) });
       if (response.ok) return response;
-      lastStatus = String(response.status);
+      if (lastStatus === 'sem resposta' || candidate !== url) lastStatus = String(response.status);
       console.warn(`[UPLOAD] Mídia indisponível (${response.status}) em ${candidate}`);
     } catch (err: any) {
-      lastStatus = err?.name === 'TimeoutError' ? 'tempo esgotado' : 'falha de rede';
+      if (lastStatus === 'sem resposta') lastStatus = err?.name === 'TimeoutError' ? 'tempo esgotado' : 'falha de rede';
       console.warn(`[UPLOAD] Falha ao baixar mídia em ${candidate}:`, err?.message || err);
     }
   }

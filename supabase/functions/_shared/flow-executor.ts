@@ -364,11 +364,17 @@ export async function executeVisualNode(supabase: any, flow: any, node: any, con
         }
 
         if (result && !result.success) {
-          console.error(`[FLOW-LOG] Result ERROR in meta-whatsapp-crm for ${node.type}:`, result.error);
-          throw new Error(result.error || `Erro no envio de ${node.type}`);
+          // Arquivo ausente no Storage: pula só este bloco para o restante do
+          // fluxo continuar; o editor mostra "Arquivo não encontrado".
+          if (/Falha ao baixar mídia/i.test(String(result.error || ''))) {
+            console.warn(`[FLOW-LOG] SKIP: ${node.type} do bloco ${node.id} não existe mais no Storage — seguindo o fluxo. ${result.error}`);
+          } else {
+            console.error(`[FLOW-LOG] Result ERROR in meta-whatsapp-crm for ${node.type}:`, result.error);
+            throw new Error(result.error || `Erro no envio de ${node.type}`);
+          }
+        } else {
+          console.log(`[FLOW-LOG] SUCCESS: ${node.type} sent. Result:`, JSON.stringify(result));
         }
-
-        console.log(`[FLOW-LOG] SUCCESS: ${node.type} sent. Result:`, JSON.stringify(result));
       } else {
         console.error(`[FLOW-LOG] FAILED: No media URL for node ${node.id} (${node.type})`);
       }

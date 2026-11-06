@@ -39,7 +39,7 @@ mkdir -p "$ALVO.tmp"
 
 # 1) Banco
 docker exec zapmro-db pg_dumpall -U postgres --globals-only | gzip -1 > "$ALVO.tmp/roles.sql.gz"
-docker exec zapmro-db pg_dump -U postgres -d postgres --no-owner=false | gzip -1 > "$ALVO.tmp/banco.sql.gz"
+docker exec zapmro-db pg_dump -U postgres -d postgres | gzip -1 > "$ALVO.tmp/banco.sql.gz"
 [ "$(stat -c %s "$ALVO.tmp/banco.sql.gz")" -gt 1048576 ] || { echo "✘ dump do banco muito pequeno — algo errado"; rm -rf "$ALVO.tmp"; exit 1; }
 echo "✔ banco: $(du -h "$ALVO.tmp/banco.sql.gz" | cut -f1)"
 

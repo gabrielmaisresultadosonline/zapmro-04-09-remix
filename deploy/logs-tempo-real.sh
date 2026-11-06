@@ -50,7 +50,7 @@ systemctl is-active zapmro-flow-ticker >/dev/null 2>&1 \
   || echo "zapmro-flow-ticker: PARADO  -> sudo systemctl restart zapmro-flow-ticker"
 
 titulo "1) Arquivos do Agente I.A. — o arquivo existe de verdade?"
-sqlraw "SELECT d.code, d.is_active, coalesce(n.display_phone_number, n.phone_number, 'sem número'), d.media_url
+sqlraw "SELECT d.code, d.is_active, coalesce(n.meta_display_phone_number, n.label, 'sem número'), d.media_url
           FROM public.crm_ai_documents d
           LEFT JOIN public.crm_whatsapp_numbers n ON n.id = d.whatsapp_number_id
          ORDER BY d.created_at DESC LIMIT 40" | while IFS='|' read -r code ativo numero url; do

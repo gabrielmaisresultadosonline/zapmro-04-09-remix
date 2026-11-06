@@ -397,6 +397,10 @@ const getMetaErrorCode = (message: any): string => {
   ).trim();
 };
 
+// Mídia perdida na sobrecarga do servidor (arquivo não existe mais) ou recusada pela Meta.
+const MEDIA_LOST_RE = /media upload error|falha ao baixar m[ií]dia|n[aã]o foi encontrado no storage|arquivo .* n[aã]o foi enviado|AI_DOCUMENT_FAILED/i;
+const MEDIA_LOST_NOTICE = 'Não encontramos este arquivo (áudio, imagem, vídeo ou PDF). Tivemos uma sobrecarga no servidor e alguns arquivos se perderam. Refaça a parte deste fluxo/disparo que tem mídias — envie de novo os áudios, imagens, vídeos e PDFs — e salve para voltar a funcionar corretamente.';
+
 const getMetaDeliveryErrorMessage = (message: any) => {
   const raw = String(message?.error_message || message?.metadata?.last_meta_status?.errors?.[0]?.message || '').trim();
   const code = getMetaErrorCode(message);
@@ -411,8 +415,8 @@ const getMetaDeliveryErrorMessage = (message: any) => {
   if (/not been verified|business.*verification/i.test(raw)) {
     return 'A Meta bloqueou o envio porque o seu Negócio (Business Manager) ainda não foi verificado. Você consegue receber mensagens, mas não enviar até concluir a verificação.';
   }
-  if (/media upload error/i.test(raw)) {
-    return 'A Meta recusou o arquivo de áudio/mídia após o upload. Grave novamente ou envie outro formato.';
+  if (MEDIA_LOST_RE.test(raw) || MEDIA_LOST_RE.test(String(message?.error_code || ''))) {
+    return MEDIA_LOST_NOTICE;
   }
   return raw || 'A Meta informou falha na entrega desta mensagem.';
 };
@@ -429,8 +433,8 @@ const getMetaDeliveryErrorExplanation = (message: any) => {
   if (/business account locked|not been verified|business.*verification|verifica(c|ç)/i.test(raw)) {
     return 'O Business Manager precisa concluir a verificação para liberar envios. Até lá você só recebe mensagens.';
   }
-  if (/media upload error/i.test(raw)) {
-    return 'A Meta recusou o arquivo enviado após o upload. Tente gravar/enviar novamente, de preferência em outro formato ou com menor duração.';
+  if (MEDIA_LOST_RE.test(raw) || MEDIA_LOST_RE.test(String(message?.error_code || ''))) {
+    return MEDIA_LOST_NOTICE;
   }
   if (code === '131047') {
     return 'A janela de 24 horas de atendimento expirou. Para falar novamente é preciso enviar um template aprovado pela Meta.';

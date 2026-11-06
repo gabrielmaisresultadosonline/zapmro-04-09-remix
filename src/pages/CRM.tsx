@@ -171,6 +171,7 @@ import ConversationRulesGuide from "@/components/crm/ConversationRulesGuide";
 import { Progress } from "@/components/ui/progress";
 import AnnouncementPopup from "@/components/AnnouncementPopup";
 import RetentionNoticePopup from "@/components/crm/RetentionNoticePopup";
+import { IncidentNoticeDialog } from "@/components/crm/IncidentNoticeDialog";
 import FirstTutorialVideo from "@/components/sales/FirstTutorialVideo";
 import { WhatsAppNumberSelector } from "@/components/crm/WhatsAppNumberSelector";
 import {

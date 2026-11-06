@@ -1442,11 +1442,20 @@ ${AI_CONTEXT_RESPONSE_RULE}
       }
       // Remove linhas que sobraram vazias ou só com rótulos internos (ex.: "Ação operacional:").
       reply = reply.split('\n')
-        .filter((line) => !/^\s*[`*_\-•]*\s*(a[çc][aã]o operacional|a[çc][aã]o interna|enviar arquivo|arquivo)\s*:?\s*[`*_.\s]*$/i.test(line))
+        .filter((line) => !/^\s*[`*_\-•]*\s*(a[çc][aã]o operacional|a[çc][aã]o interna|a[çc][aã]o|a[çc][oõ]es|enviar arquivo|enviar|arquivo|anexo)\s*:?\s*[`*_.\s]*$/i.test(line))
         .join('\n').replace(/\n{3,}/g, '\n\n').trim();
       for (const d of aiDocuments) if (wanted.has(d.code.toLowerCase())) documentsToSend.push(d);
 
       if (documentsToSend.length > 0) aiLog('documents_requested', { codes: documentsToSend.map((d) => d.code) });
+      else if (/\b(pdf|documenta[çc][aã]o|documento|arquivo|encaminh|envi(o|ar|ando))\b/i.test(reply)) {
+        // A IA prometeu um arquivo mas não marcou nenhum código: registra para diagnóstico.
+        aiLog('documents_promised_without_code', {
+          available: aiDocuments.map((d) => d.code),
+          raw_reply_tail: rawReply.slice(-200),
+        });
+      }
+    } else {
+      aiLog('documents_none_available', { box_id: boxId || null });
     }
     const sendAiDocuments = async () => {
       for (const d of documentsToSend.slice(0, 5)) {
@@ -1455,11 +1464,36 @@ ${AI_CONTEXT_RESPONSE_RULE}
         else if (d.media_type === 'video') mediaParams.videoUrl = d.media_url;
         else if (d.media_type === 'audio') mediaParams.audioUrl = d.media_url;
         else { mediaParams.documentUrl = d.media_url; mediaParams.fileName = d.file_name || `${d.title}.pdf`; mediaParams.mimeType = d.mime_type || undefined; }
+        aiLog('document_send_started', { code: d.code, media_type: d.media_type, media_url: d.media_url });
+        let failure: string | null = null;
         try {
-          await handleInternalSendMessage(supabase, aiSettings.meta_phone_number_id, aiSettings.meta_access_token, mediaParams, contact, aiSettings.vps_transcoder_url, userId || contact.user_id);
-          aiLog('document_sent', { code: d.code, media_type: d.media_type });
+          const res: any = await handleInternalSendMessage(supabase, aiSettings.meta_phone_number_id, aiSettings.meta_access_token, mediaParams, contact, aiSettings.vps_transcoder_url, userId || contact.user_id);
+          // handleInternalSendMessage devolve Response (com success:false) em vez de lançar erro.
+          const body = res instanceof Response ? await res.clone().json().catch(() => ({})) : (res || {});
+          if (body?.success === false) failure = String(body.message || body.error || body.code || 'Meta recusou o envio');
+          else aiLog('document_sent', { code: d.code, media_type: d.media_type, message_id: body?.messageId || null });
         } catch (docErr: any) {
-          aiLog('document_send_failed', { code: d.code, error: docErr?.message || String(docErr) });
+          failure = docErr?.message || String(docErr);
+        }
+        if (failure) {
+          aiLog('document_send_failed', { code: d.code, media_url: d.media_url, error: failure });
+          console.error(`[AI-DOC-FAIL] ${d.code} → ${failure}`);
+          // Deixa a falha visível na conversa (nunca simula envio).
+          try {
+            await supabase.from('crm_messages').insert({
+              contact_id: contact.id,
+              user_id: userId || contact.user_id || null,
+              ...(boxId ? { whatsapp_number_id: boxId } : {}),
+              direction: 'outbound',
+              message_type: d.media_type === 'document' ? 'document' : d.media_type,
+              content: `[Arquivo ${d.code} não enviado]`,
+              media_url: d.media_url,
+              status: 'failed',
+              error_code: 'AI_DOCUMENT_FAILED',
+              error_message: `Arquivo ${d.code} não foi enviado: ${failure}`.slice(0, 500),
+              metadata: { ai_run_id: aiRunId, ai_document_code: d.code, source_message_id: sourceMessageId },
+            });
+          } catch (_) { /* registro auxiliar */ }
         }
         await new Promise((resolve) => setTimeout(resolve, 1200));
       }

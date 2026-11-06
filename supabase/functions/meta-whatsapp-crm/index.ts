@@ -1466,11 +1466,13 @@ ${AI_CONTEXT_RESPONSE_RULE}
         else { mediaParams.documentUrl = d.media_url; mediaParams.fileName = d.file_name || `${d.title}.pdf`; mediaParams.mimeType = d.mime_type || undefined; }
         aiLog('document_send_started', { code: d.code, media_type: d.media_type, media_url: d.media_url });
         let failure: string | null = null;
+        let alreadySaved = false;
         try {
           const res: any = await handleInternalSendMessage(supabase, aiSettings.meta_phone_number_id, aiSettings.meta_access_token, mediaParams, contact, aiSettings.vps_transcoder_url, userId || contact.user_id);
           // handleInternalSendMessage devolve Response (com success:false) em vez de lançar erro.
           const body = res instanceof Response ? await res.clone().json().catch(() => ({})) : (res || {});
-          if (body?.success === false) failure = String(body.message || body.error || body.code || 'Meta recusou o envio');
+          // Recusa da Meta / janela fechada já gravam a mensagem como falha.
+          if (body?.success === false) { failure = String(body.message || body.error || body.code || 'Meta recusou o envio'); alreadySaved = true; }
           else aiLog('document_sent', { code: d.code, media_type: d.media_type, message_id: body?.messageId || null });
         } catch (docErr: any) {
           failure = docErr?.message || String(docErr);
@@ -1479,7 +1481,7 @@ ${AI_CONTEXT_RESPONSE_RULE}
           aiLog('document_send_failed', { code: d.code, media_url: d.media_url, error: failure });
           console.error(`[AI-DOC-FAIL] ${d.code} → ${failure}`);
           // Deixa a falha visível na conversa (nunca simula envio).
-          try {
+          if (!alreadySaved) try {
             await supabase.from('crm_messages').insert({
               contact_id: contact.id,
               user_id: userId || contact.user_id || null,

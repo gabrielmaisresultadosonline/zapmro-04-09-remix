@@ -27,6 +27,41 @@ load_env() {
 }
 
 load_env
+
+# --- Disparo em massa: mesmo motivo dos fluxos. Se o pg_cron/pg_net não chamar
+# o broadcast-worker (ex.: banco restaurado sem os jobs), a fila não anda.
+# Este laço chama o worker pelo gateway local; o "lease" no banco impede que
+# duas chamadas mandem a mesma campanha ao mesmo tempo.
+broadcast_loop() {
+  local streak=0
+  while true; do
+    load_env
+    if [ -z "${SERVICE_ROLE_KEY:-}" ]; then sleep 30; continue; fi
+    local bcode
+    bcode=$(curl -s -o /tmp/zapmro-broadcast-ticker.last.json -w '%{http_code}' -m 90 \
+      -X POST "http://127.0.0.1:${GATEWAY_PORT:-8000}/functions/v1/broadcast-worker" \
+      -H "Content-Type: application/json" \
+      -H "apikey: ${ANON_KEY:-}" \
+      -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+      --data '{}' 2>/dev/null || echo 000)
+    if grep -q '"processed":1' /tmp/zapmro-broadcast-ticker.last.json 2>/dev/null; then
+      echo "[broadcast-ticker] $(date -u +%FT%TZ) enviou: $(head -c 200 /tmp/zapmro-broadcast-ticker.last.json)"
+    fi
+    if [ "${bcode:0:1}" = "2" ]; then
+      streak=0
+      sleep 5
+    else
+      streak=$((streak + 1))
+      if [ "$streak" -eq 1 ] || [ $((streak % 20)) -eq 0 ]; then
+        echo "[broadcast-ticker] $(date -u +%FT%TZ) falha HTTP $bcode (seguidas: $streak): $(head -c 300 /tmp/zapmro-broadcast-ticker.last.json 2>/dev/null)"
+      fi
+      sleep 15
+    fi
+  done
+}
+broadcast_loop &
+trap 'kill $(jobs -p) 2>/dev/null' EXIT
+
 fail_streak=0
 last_env_reload=$(date +%s)
 

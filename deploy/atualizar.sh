@@ -514,6 +514,39 @@ else
   warn "systemd indisponível; fluxos dependem apenas do pg_cron"
 fi
 
+# 5.2b — Backup diário do banco + mídias (7 dias, incremental) às 03:30.
+if command -v systemctl >/dev/null 2>&1; then
+  chmod +x "$ROOT/deploy/backup-diario.sh" 2>/dev/null || true
+  sudo_ tee /etc/systemd/system/zapmro-backup.service >/dev/null <<EOF
+[Unit]
+Description=ZapMRO - backup diário do banco e das mídias
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env bash $ROOT/deploy/backup-diario.sh
+Nice=15
+IOSchedulingClass=idle
+EOF
+  sudo_ tee /etc/systemd/system/zapmro-backup.timer >/dev/null <<EOF
+[Unit]
+Description=ZapMRO - backup diário
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+  sudo_ systemctl daemon-reload
+  if sudo_ systemctl enable --now zapmro-backup.timer >/dev/null 2>&1; then
+    ok "backup diário ativo (03:30, guarda 7 dias em /var/backups/zapmro-diario)"
+  else
+    warn "não foi possível ativar o backup diário — veja: systemctl status zapmro-backup.timer"
+  fi
+fi
+
 # 5.3 — Conversão dos vídeos dos tutoriais em qualidade adaptativa (HLS).
 if command -v systemctl >/dev/null 2>&1; then
   command -v ffmpeg >/dev/null 2>&1 || { sudo_ apt-get install -y ffmpeg >/dev/null 2>&1 || warn "não instalou ffmpeg"; }

@@ -8708,7 +8708,7 @@ const CRM = () => {
                                   className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground"
                                   aria-label="Limpar pesquisa"
                                 >
-                                  <X className="h-4 w-4" />
+                                  <LucideIcons.X className="h-4 w-4" />
                                 </button>
                               )}
                             </div>
@@ -9455,11 +9455,61 @@ const CRM = () => {
                         </div>
                       </AccordionTrigger>
                       <AccordionContent className="pt-4 md:pt-6">
-                        <div className="flex justify-end mb-4">
+                        <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-4">
+                          {templates.length > 0 && (
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 min-w-0">
+                              <div className="relative flex-1 min-w-0">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                                <Input
+                                  value={templateSearch}
+                                  onChange={(e) => setTemplateSearch(e.target.value)}
+                                  placeholder="Pesquisar template pelo nome..."
+                                  aria-label="Pesquisar templates pelo nome"
+                                  className="pl-9 pr-9 h-10 rounded-xl bg-card"
+                                />
+                                {templateSearch && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setTemplateSearch('')}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground"
+                                    aria-label="Limpar pesquisa"
+                                  >
+                                    <LucideIcons.X className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shrink-0" role="group" aria-label="Filtrar por categoria">
+                                {([
+                                  { value: 'all', label: 'Todos' },
+                                  { value: 'UTILITY', label: 'Utilidade' },
+                                  { value: 'MARKETING', label: 'Marketing' },
+                                ] as { value: TemplateCategoryFilter; label: string }[]).map((opt) => {
+                                  const count = opt.value === 'all'
+                                    ? templates.length
+                                    : templates.filter((t) => matchesTemplateCategory(t.category, opt.value)).length;
+                                  const active = templateCategoryFilter === opt.value;
+                                  return (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={() => setTemplateCategoryFilter(opt.value)}
+                                      aria-pressed={active}
+                                      className={cn(
+                                        "flex-1 sm:flex-none h-8 px-3 rounded-lg text-xs font-bold transition-colors whitespace-nowrap",
+                                        active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                                      )}
+                                    >
+                                      {opt.label} <span className="opacity-70">({count})</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                           <Button 
                             variant="link" 
                             size="sm" 
-                            className="text-primary font-bold"
+                            className="text-primary font-bold self-end lg:self-auto shrink-0"
                             onClick={() => {
                               openMetaTemplatesManager();
                             }}
@@ -9468,8 +9518,13 @@ const CRM = () => {
                           </Button>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 pb-6">
+                          {templates.length > 0 && !templates.some((t) => matchesSearch(t.name, templateSearch) && matchesTemplateCategory(t.category, templateCategoryFilter)) && (
+                            <div className="col-span-full py-12 text-center bg-card rounded-2xl border-2 border-dashed border-muted text-sm text-muted-foreground">
+                              Nenhum template encontrado com essa pesquisa/filtro.
+                            </div>
+                          )}
                           {templates.length > 0 ? (
-                            templates.map((template) => {
+                            templates.filter((t) => matchesSearch(t.name, templateSearch) && matchesTemplateCategory(t.category, templateCategoryFilter)).map((template) => {
                               const header = template.components?.find((c: any) => c.type === 'HEADER');
                               const body = template.components?.find((c: any) => c.type === 'BODY');
                               const footer = template.components?.find((c: any) => c.type === 'FOOTER');

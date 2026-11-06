@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { getActiveWhatsAppNumberId } from '@/lib/activeNumberContext';
 import { uploadDedupedMedia } from '@/lib/mediaStorage';
+import { MissingMediaWarning, clearMediaAvailabilityCache } from '@/components/crm/MissingMediaWarning';
 
 type MediaKind = 'document' | 'image' | 'audio' | 'video';
 
@@ -85,6 +86,7 @@ export function AiDocumentsLibrary() {
         file_name: file.name, mime_type: file.type || null,
       });
       if (error) throw error;
+      clearMediaAvailabilityCache(uploaded.url);
       toast({ title: `Arquivo ${finalCode} adicionado` });
       setCode(''); setTitle(''); setDescription(''); setFile(null);
       await load();
@@ -114,7 +116,7 @@ export function AiDocumentsLibrary() {
             O Agente envia sozinho quando pedirem ou quando entender que deve. Vale só para este WhatsApp.
           </p>
         </div>
-        <Button type="button" variant="ghost" size="icon" onClick={() => void load()} aria-label="Atualizar lista">
+        <Button type="button" variant="ghost" size="icon" onClick={() => { clearMediaAvailabilityCache(); void load(); }} aria-label="Atualizar lista">
           <RefreshCcw className={loading ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} />
         </Button>
       </div>
@@ -132,6 +134,7 @@ export function AiDocumentsLibrary() {
                 </div>
                 <a href={d.media_url} target="_blank" rel="noopener noreferrer" className="block truncate text-xs hover:underline">{d.title}</a>
                 {d.description && <p className="truncate text-[10px] text-muted-foreground">{d.description}</p>}
+                <MissingMediaWarning url={d.media_url} />
               </div>
               <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Copiar código"
                 onClick={() => { void navigator.clipboard?.writeText(`(${d.code})`); toast({ title: `(${d.code}) copiado` }); }}>

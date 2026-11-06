@@ -20,6 +20,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsToolti
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { matchesSearch, matchesTemplateCategory, type TemplateCategoryFilter } from "@/lib/listSearch";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -1004,6 +1005,9 @@ const CRM = () => {
     language?: string;
   } | null>(null);
    const [previewTemplate, setPreviewTemplate] = useState<any>(null);
+  const [flowSearch, setFlowSearch] = useState('');
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateCategoryFilter, setTemplateCategoryFilter] = useState<TemplateCategoryFilter>('all');
   const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'image' | 'video'; fileName?: string; mimeType?: string } | null>(null);
   const [previewDocument, setPreviewDocument] = useState<{ url: string; fileName?: string } | null>(null);
   // Busca de mensagens dentro da conversa aberta

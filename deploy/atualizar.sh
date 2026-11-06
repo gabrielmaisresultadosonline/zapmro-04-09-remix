@@ -234,6 +234,10 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA storage TO service_role;
 SQLBOOT
 ok "roles e schemas prontos"
 
+# Tarefas agendadas apontando para uma base que não existe mais (ex.: banco
+# restaurado com outro nome) passam a rodar na base atual.
+psql "$DB" -v ON_ERROR_STOP=0 -q -c "update cron.job set database=current_database() where database not in (select datname from pg_database)" >/dev/null 2>&1 || true
+
 aplicados=0
 shopt -s nullglob
 arquivos=("$SQLDIR"/*.sql)

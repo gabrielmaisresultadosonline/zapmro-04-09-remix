@@ -15,10 +15,11 @@ psql_() { docker exec -i zapmro-db psql -U postgres -d postgres -v ON_ERROR_STOP
 
 psql_ -v base="$BASE" -v aplicar="$APLICAR" <<'SQL' | tee "$OUT"
 \pset footer off
+SELECT set_config('zap.base', :'base', false), set_config('zap.aplicar', :'aplicar', false) \gset _
 CREATE TEMP TABLE _links(tabela text, coluna text, linhas bigint);
 CREATE TEMP TABLE _arquivos(caminho text PRIMARY KEY);
 DO $$
-DECLARE r record; n bigint; aplicar boolean := :'aplicar' = '1'; base text := :'base';
+DECLARE r record; n bigint; aplicar boolean := current_setting('zap.aplicar') = '1'; base text := current_setting('zap.base');
 BEGIN
   FOR r IN
     SELECT c.table_schema s, c.table_name t, c.column_name col, c.data_type dt

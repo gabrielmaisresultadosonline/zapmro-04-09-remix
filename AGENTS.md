@@ -26,3 +26,4 @@
 - Daily host backups (deploy/backup-diario.sh via zapmro-backup.timer) dump the database and rsync the Storage volume incrementally with --link-dest into /var/backups/zapmro-diario; cleanup scripts must never touch that directory, because media lives only on that one volume.
 - Flow media blocks whose file is missing from Storage are skipped at send time (the flow continues) and flagged in the editor via MissingMediaWarning, so one lost file never stops a whole flow.
 - One-time user popups are rows in crm_user_notices seeded by migration for the target audience; the popup shows while dismissed_at is NULL, so new signups never get past notices and dismissal follows the user across devices.
+- Deduplicated uploads (uploadDedupedMedia) reuse an existing hash path only after its public URL answers; Storage metadata alone can outlive lost files, so a missing file is re-uploaded to the same path.

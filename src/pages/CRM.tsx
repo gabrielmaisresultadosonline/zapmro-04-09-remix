@@ -5510,6 +5510,7 @@ const CRM = () => {
   };
 
   const fetchScheduledMessages = async (contactId: string) => {
+    if (!currentUserId) return;
     const { data } = await supabase
       .from('crm_scheduled_messages')
       .select('*')
@@ -5524,6 +5525,7 @@ const CRM = () => {
   };
 
   const fetchAllScheduledMessages = async () => {
+    if (!currentUserId) return;
     const { data, error } = await scopeQueryToActiveNumberStrict(supabase
       .from('crm_scheduled_messages')
       .select(`

@@ -4963,31 +4963,35 @@ const guessMedia = (params: any) => {
  * do bucket no Storage local antes de desistir.
  */
 async function fetchMediaWithFallback(url: string) {
-  let response: Response | null = null;
-  try {
-    response = await fetch(url);
-  } catch (err: any) {
-    console.warn(`[UPLOAD] Falha de rede ao baixar mídia (${url}):`, err?.message || err);
-  }
-
-  if (response?.ok) return response;
-
-
-  const storageMatch = url.match(/\/storage\/v1\/object\/(?:public\/)?(.+)$/);
-  const localBase = (Deno.env.get('PUBLIC_API_URL') || Deno.env.get('SUPABASE_URL') || '').replace(/\/$/, '');
-  if (storageMatch && localBase && !url.startsWith(localBase)) {
-    const fallbackUrl = `${localBase}/storage/v1/object/public/${storageMatch[1]}`;
-    console.log(`[UPLOAD] Tentando fallback no Storage local: ${fallbackUrl}`);
-    try {
-      const fallbackResponse = await fetch(fallbackUrl);
-      if (fallbackResponse.ok) return fallbackResponse;
-      console.error(`[UPLOAD] Fallback local também falhou (${fallbackResponse.status})`);
-    } catch (err: any) {
-      console.error('[UPLOAD] Erro no fallback local:', err?.message || err);
+  // Arquivos do Storage são lidos primeiro dentro da própria VPS (gateway
+  // interno), depois pelo domínio público e só por último no endereço salvo.
+  // Assim links antigos (*.supabase.co) nunca travam o envio esperando um
+  // servidor que não existe mais.
+  const storageMatch = url.match(/\/storage\/v1\/object\/(?:public\/)?([^?]+)/);
+  const candidates: string[] = [];
+  if (storageMatch) {
+    for (const base of [Deno.env.get('SUPABASE_URL'), Deno.env.get('PUBLIC_API_URL')]) {
+      const clean = (base || '').replace(/\/$/, '');
+      if (clean) candidates.push(`${clean}/storage/v1/object/public/${storageMatch[1]}`);
     }
   }
-
-  throw new Error(`Falha ao baixar mídia (${response?.status ?? 'sem resposta'}) — arquivo pode ter ficado no Storage antigo: ${url}`);
+  candidates.push(url);
+  const tried = new Set<string>();
+  let lastStatus: string = 'sem resposta';
+  for (const candidate of candidates) {
+    if (tried.has(candidate)) continue;
+    tried.add(candidate);
+    try {
+      const response = await fetch(candidate, { signal: AbortSignal.timeout(25_000) });
+      if (response.ok) return response;
+      lastStatus = String(response.status);
+      console.warn(`[UPLOAD] Mídia indisponível (${response.status}) em ${candidate}`);
+    } catch (err: any) {
+      lastStatus = err?.name === 'TimeoutError' ? 'tempo esgotado' : 'falha de rede';
+      console.warn(`[UPLOAD] Falha ao baixar mídia em ${candidate}:`, err?.message || err);
+    }
+  }
+  throw new Error(`Falha ao baixar mídia (${lastStatus}) — o arquivo não foi encontrado no Storage da VPS: ${url}`);
 }
 
 async function uploadMediaToMeta(accessToken: string, phoneNumberId: string, media: { type: string; url: string; mime: string; fileName: string }) {

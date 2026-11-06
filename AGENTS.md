@@ -25,3 +25,4 @@
 - Tutorial videos stream as adaptive HLS produced by the host service zapmro-tutorial-transcoder (queue in sales_tutorials.transcode_status); the original MP4 is never modified and remains the player fallback.
 - Daily host backups (deploy/backup-diario.sh via zapmro-backup.timer) dump the database and rsync the Storage volume incrementally with --link-dest into /var/backups/zapmro-diario; cleanup scripts must never touch that directory, because media lives only on that one volume.
 - Flow media blocks whose file is missing from Storage are skipped at send time (the flow continues) and flagged in the editor via MissingMediaWarning, so one lost file never stops a whole flow.
+- One-time user popups are rows in crm_user_notices seeded by migration for the target audience; the popup shows while dismissed_at is NULL, so new signups never get past notices and dismissal follows the user across devices.

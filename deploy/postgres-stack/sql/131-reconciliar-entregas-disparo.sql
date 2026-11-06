@@ -22,9 +22,11 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  affected_broadcasts uuid[];
+  affected_broadcasts uuid[] := '{}';
+  step_ids uuid[];
   total_changed integer := 0;
   n integer;
+  b uuid;
 BEGIN
   -- 1) Falha assíncrona já registrada na mensagem.
   WITH corrigidos AS (
@@ -41,7 +43,8 @@ BEGIN
     RETURNING i.broadcast_id
   )
   SELECT count(*), COALESCE(array_agg(DISTINCT broadcast_id), '{}')
-    INTO n, affected_broadcasts FROM corrigidos;
+    INTO n, step_ids FROM corrigidos;
+  affected_broadcasts := affected_broadcasts || step_ids;
   total_changed := total_changed + COALESCE(n, 0);
 
   -- 2) Nunca confirmou entrega em 24h: não pode constar como enviado.
@@ -62,13 +65,14 @@ BEGIN
     RETURNING i.broadcast_id
   )
   SELECT count(*), COALESCE(array_agg(DISTINCT broadcast_id), '{}')
-    INTO n, affected_broadcasts FROM sem_confirmacao;
+    INTO n, step_ids FROM sem_confirmacao;
+  affected_broadcasts := affected_broadcasts || step_ids;
   total_changed := total_changed + COALESCE(n, 0);
 
   -- 3) Recalcula as campanhas afetadas.
   IF array_length(affected_broadcasts, 1) IS NOT NULL THEN
-    FOR n IN SELECT DISTINCT unnest(affected_broadcasts) LOOP
-      PERFORM public.crm_refresh_broadcast_progress(n);
+    FOR b IN SELECT DISTINCT unnest(affected_broadcasts) LOOP
+      PERFORM public.crm_refresh_broadcast_progress(b);
     END LOOP;
   END IF;
 

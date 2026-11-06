@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from '@/lib/mediaStorage';
 import { resolveMediaUrl } from '@/lib/mediaUrl';
-import { MissingMediaWarning } from './MissingMediaWarning';
+import { MissingMediaWarning, clearMediaAvailabilityCache } from './MissingMediaWarning';
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import {
   type ConvertedAudio,
@@ -688,7 +688,8 @@ const FlowEditorInner: React.FC<FlowEditorProps> = ({ flow, onSave, onClose, onN
       if (type === 'image') updateData.imageUrl = publicUrl;
 
       updateNodeData(nodeId, updateData);
-      toast({ title: uploaded.reused ? "Arquivo reaproveitado (já existia)!" : "Arquivo enviado com sucesso!" });
+      clearMediaAvailabilityCache(publicUrl);
+      toast({ title: uploaded.reused ? "Arquivo já estava salvo e foi conferido!" : "Arquivo enviado e conferido!" });
 
     } finally {
       setUploading(false);

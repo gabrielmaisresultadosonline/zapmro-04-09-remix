@@ -70,11 +70,11 @@ export async function uploadDedupedMedia(options: {
   // (ex.: perda do disco). Só reaproveita se o arquivo realmente abrir;
   // caso contrário sobe de novo no mesmo caminho e o link antigo volta a funcionar.
   const listed = existing?.some((item) => item.name === fileName) ?? false;
-  const reallyExists = listed && (await fetch(url, { method: "HEAD", cache: "no-store" })
-    .then((res) => res.ok)
-    .catch(() => false));
+  const reallyExists = listed && (await mediaFileOpens(url));
   if (listed && !reallyExists) {
-    console.warn("[mediaStorage] arquivo listado mas ausente; reenviando", { bucket, path });
+    console.warn("[mediaStorage] arquivo listado mas ausente; apagando o registro órfão e reenviando", { bucket, path });
+    // Remove o registro sem arquivo para o novo envio não ser tratado como "já existe".
+    await supabase.storage.from(bucket).remove([path]).catch(() => null);
   }
 
   if (reallyExists) {
@@ -93,27 +93,39 @@ export async function uploadDedupedMedia(options: {
 
   const resolvedType = contentType || (file as File).type || "application/octet-stream";
 
-  if (onProgress) {
-    // Envio com progresso real: o SDK não expõe eventos de upload, então
-    // usamos XHR direto no endpoint do Storage (mesma autenticação).
-    try {
-      await uploadWithProgress({ bucket, path, file, contentType: resolvedType, onProgress });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (!/exists|duplicate/i.test(message)) throw e;
+  const sendOnce = async () => {
+    if (onProgress) {
+      // Envio com progresso real: o SDK não expõe eventos de upload, então
+      // usamos XHR direto no endpoint do Storage (mesma autenticação).
+      try {
+        await uploadWithProgress({ bucket, path, file, contentType: resolvedType, onProgress });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (!/exists|duplicate/i.test(message)) throw e;
+      }
+    } else {
+      const { error } = await supabase.storage.from(bucket).upload(path, file, {
+        contentType: resolvedType,
+        upsert: true,
+        cacheControl: "31536000",
+      });
+      // Corrida entre dois uploads do mesmo hash não é erro: o conteúdo é igual.
+      if (error && !/exists|duplicate/i.test(error.message)) throw error;
     }
-  } else {
-    const { error } = await supabase.storage.from(bucket).upload(path, file, {
-      contentType: resolvedType,
-      upsert: true,
-      cacheControl: "31536000",
-    });
+  };
 
-    // Corrida entre dois uploads do mesmo hash não é erro: o conteúdo é igual.
-    if (error && !/exists|duplicate/i.test(error.message)) throw error;
+  await sendOnce();
+  // Nunca diz "salvo" sem conferir: o arquivo precisa abrir de verdade.
+  if (!(await mediaFileOpens(url))) {
+    console.warn("[mediaStorage] arquivo não abriu após o envio; tentando de novo", { bucket, path });
+    await supabase.storage.from(bucket).remove([path]).catch(() => null);
+    await sendOnce();
+    if (!(await mediaFileOpens(url))) {
+      throw new Error("O servidor não salvou o arquivo (ele não abre depois do envio). Tente de novo em instantes; se continuar, avise o suporte.");
+    }
   }
 
-  console.log("[mediaStorage] arquivo enviado", { bucket, path, reused: false });
+  console.log("[mediaStorage] arquivo enviado e conferido", { bucket, path, reused: false });
   await registerMediaAsset({
     bucket,
     path,
@@ -123,6 +135,27 @@ export async function uploadDedupedMedia(options: {
     sizeBytes: (file as Blob).size ?? null,
   });
   return { url, path, reused: false, hash };
+}
+
+/**
+ * Confere se o arquivo realmente abre lendo o primeiro byte. Só "perguntar"
+ * (HEAD) não basta: o Storage pode responder pelo cadastro mesmo com o
+ * arquivo físico perdido.
+ */
+export async function mediaFileOpens(url: string): Promise<boolean> {
+  try {
+    const sep = url.includes("?") ? "&" : "?";
+    const res = await fetch(`${url}${sep}check=${Date.now()}`, {
+      method: "GET",
+      cache: "no-store",
+      headers: { Range: "bytes=0-0" },
+    });
+    if (!res.ok) return false;
+    const buf = await res.arrayBuffer().catch(() => null);
+    return !!buf && buf.byteLength > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

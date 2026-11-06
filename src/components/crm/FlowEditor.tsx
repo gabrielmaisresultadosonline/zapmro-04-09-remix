@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from '@/lib/mediaStorage';
 import { resolveMediaUrl } from '@/lib/mediaUrl';
-import { MissingMediaWarning } from './MissingMediaWarning';
+import { MissingMediaWarning, clearMediaAvailabilityCache } from './MissingMediaWarning';
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import {
   type ConvertedAudio,

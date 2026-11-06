@@ -66,7 +66,18 @@ export async function uploadDedupedMedia(options: {
     .from(bucket)
     .list(folder.replace(/\/+$/, ""), { limit: 1, search: fileName });
 
-  if (existing?.some((item) => item.name === fileName)) {
+  // O cadastro do Storage pode listar um arquivo cujo conteúdo físico sumiu
+  // (ex.: perda do disco). Só reaproveita se o arquivo realmente abrir;
+  // caso contrário sobe de novo no mesmo caminho e o link antigo volta a funcionar.
+  const listed = existing?.some((item) => item.name === fileName) ?? false;
+  const reallyExists = listed && (await fetch(url, { method: "HEAD", cache: "no-store" })
+    .then((res) => res.ok)
+    .catch(() => false));
+  if (listed && !reallyExists) {
+    console.warn("[mediaStorage] arquivo listado mas ausente; reenviando", { bucket, path });
+  }
+
+  if (reallyExists) {
     console.log("[mediaStorage] reaproveitando arquivo existente", { bucket, path });
     // Reaproveitar também tira o arquivo da lixeira, se ele estiver lá.
     await registerMediaAsset({

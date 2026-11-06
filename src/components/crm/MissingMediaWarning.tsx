@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { resolveMediaUrl } from '@/lib/mediaUrl';
+import { mediaFileOpens } from '@/lib/mediaStorage';
 
 // Uma conferência por endereço enquanto a tela estiver aberta.
 const cache = new Map<string, Promise<boolean>>();
@@ -10,10 +11,8 @@ function checkMediaExists(url: string): Promise<boolean> {
   if (!/^https?:\/\//i.test(resolved)) return Promise.resolve(true);
   let pending = cache.get(resolved);
   if (!pending) {
-    pending = fetch(resolved, { method: 'HEAD', cache: 'no-store' })
-      .then((res) => res.ok)
-      // Falha de rede do próprio navegador não prova que o arquivo sumiu.
-      .catch(() => true);
+    // Lê o primeiro byte: HEAD pode responder "ok" pelo cadastro mesmo sem o arquivo físico.
+    pending = mediaFileOpens(resolved);
     cache.set(resolved, pending);
   }
   return pending;

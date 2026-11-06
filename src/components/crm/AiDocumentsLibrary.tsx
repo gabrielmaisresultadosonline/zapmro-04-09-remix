@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FileText, Image as ImageIcon, Mic, Video, Trash2, Upload, RefreshCcw, Copy } from 'lucide-react';
+import { FileText, Image as ImageIcon, Mic, Video, Trash2, Upload, RefreshCcw, Copy, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { getActiveWhatsAppNumberId } from '@/lib/activeNumberContext';
-import { uploadDedupedMedia } from '@/lib/mediaStorage';
+import { uploadDedupedMedia, deleteMediaUrlsIfUnused } from '@/lib/mediaStorage';
 import { MissingMediaWarning, clearMediaAvailabilityCache } from '@/components/crm/MissingMediaWarning';
 
 type MediaKind = 'document' | 'image' | 'audio' | 'video';
@@ -100,6 +101,74 @@ export function AiDocumentsLibrary() {
     if (error) toast({ title: 'Erro', description: error.message, variant: 'destructive' }); else void load();
   };
 
+  // ---- Editar / substituir arquivo sem recriar o item ----
+  const [editing, setEditing] = useState<AiDocument | null>(null);
+  const [editCode, setEditCode] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editProgress, setEditProgress] = useState(0);
+
+  const openEdit = (doc: AiDocument) => {
+    setEditing(doc);
+    setEditCode(doc.code);
+    setEditTitle(doc.title);
+    setEditDescription(doc.description || '');
+    setEditFile(null);
+    setEditProgress(0);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editing) return;
+    const finalCode = editCode.trim();
+    if (!CODE_RE.test(finalCode)) { toast({ title: 'Código inválido', description: 'Use só letras, números, - ou _ (ex.: Document1).', variant: 'destructive' }); return; }
+    if (docs.some((d) => d.id !== editing.id && d.code.toLowerCase() === finalCode.toLowerCase())) { toast({ title: 'Esse código já existe', variant: 'destructive' }); return; }
+    if (!editTitle.trim()) { toast({ title: 'Dê um nome ao arquivo', variant: 'destructive' }); return; }
+    setEditSaving(true); setEditProgress(0);
+    try {
+      const patch: Record<string, unknown> = {
+        code: finalCode,
+        title: editTitle.trim(),
+        description: editDescription.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+      let newUrl: string | null = null;
+      if (editFile) {
+        const { data: auth } = await supabase.auth.getUser();
+        const userId = auth.user?.id;
+        if (!userId) throw new Error('Sua sessão expirou. Entre novamente.');
+        const ext = editFile.name.includes('.') ? editFile.name.split('.').pop() : undefined;
+        // uploadDedupedMedia só devolve sucesso depois de conferir que o arquivo abre.
+        const uploaded = await uploadDedupedMedia({
+          bucket: 'crm-media', folder: `${userId}/ai-docs`, file: editFile, contentType: editFile.type || undefined, extension: ext, onProgress: setEditProgress,
+        });
+        newUrl = uploaded.url;
+        Object.assign(patch, {
+          media_url: uploaded.url,
+          media_type: kindFromFile(editFile),
+          file_name: editFile.name,
+          mime_type: editFile.type || null,
+        });
+      }
+      const { error } = await (supabase as any).from('crm_ai_documents').update(patch).eq('id', editing.id);
+      if (error) throw error;
+      if (newUrl) {
+        clearMediaAvailabilityCache(newUrl);
+        clearMediaAvailabilityCache(editing.media_url);
+        // O arquivo antigo vai para a lixeira de 7 dias, só se nada mais o usar.
+        if (editing.media_url && editing.media_url !== newUrl) {
+          void deleteMediaUrlsIfUnused([editing.media_url], { reason: 'ai_document_replaced' }).catch(() => null);
+        }
+      }
+      toast({ title: editFile ? `Arquivo de ${finalCode} substituído` : `${finalCode} atualizado` });
+      setEditing(null);
+      await load();
+    } catch (e) {
+      toast({ title: 'Erro ao salvar', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    } finally { setEditSaving(false); }
+  };
+
   const remove = async (doc: AiDocument) => {
     if (!window.confirm(`Remover ${doc.code} (${doc.title}) da biblioteca do Agente?`)) return;
     const { error } = await (supabase as any).from('crm_ai_documents').delete().eq('id', doc.id);
@@ -140,6 +209,10 @@ export function AiDocumentsLibrary() {
                 onClick={() => { void navigator.clipboard?.writeText(`(${d.code})`); toast({ title: `(${d.code}) copiado` }); }}>
                 <Copy className="w-3.5 h-3.5" />
               </Button>
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Editar / substituir arquivo"
+                onClick={() => openEdit(d)} aria-label={`Editar ${d.code}`}>
+                <Pencil className="w-3.5 h-3.5" />
+              </Button>
               <Switch checked={d.is_active} onCheckedChange={() => void toggle(d)} aria-label="Ativo" />
               <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => void remove(d)} aria-label="Remover">
                 <Trash2 className="w-3.5 h-3.5" />
@@ -161,6 +234,54 @@ export function AiDocumentsLibrary() {
         {saving ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
         {saving ? `Enviando ${progress}%` : 'Adicionar arquivo'}
       </Button>
+
+      <Dialog open={!!editing} onOpenChange={(open) => { if (!open && !editSaving) setEditing(null); }}>
+        <DialogContent className="w-[calc(100vw-1.5rem)] max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar arquivo {editing?.code}</DialogTitle>
+            <DialogDescription>
+              Mude o nome, o código ou quando enviar. Para trocar o arquivo, escolha um novo — o Agente passa a enviar o novo no lugar do antigo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Código</Label>
+              <Input value={editCode} onChange={(e) => setEditCode(e.target.value)} className="text-xs" />
+              {editing && editCode.trim() !== editing.code && (
+                <p className="text-[10px] text-muted-foreground">Lembre de trocar ({editing.code}) por ({editCode.trim() || '...'}) no prompt.</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Nome</Label>
+              <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Quando enviar (opcional)</Label>
+              <Input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} className="text-xs" />
+            </div>
+            <div className="space-y-1 rounded-lg border border-border/60 p-2">
+              <Label className="text-xs">Arquivo atual</Label>
+              {editing && (
+                <a href={editing.media_url} target="_blank" rel="noopener noreferrer" className="block truncate text-xs text-primary hover:underline">
+                  {editing.file_name || editing.title}
+                </a>
+              )}
+              {editing && <MissingMediaWarning url={editing.media_url} />}
+              <Label className="text-xs pt-2 block">Substituir por outro arquivo (opcional)</Label>
+              <Input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*,audio/*,video/*"
+                onChange={(e) => setEditFile(e.target.files?.[0] || null)} className="text-xs" />
+              {editFile && <p className="text-[10px] text-muted-foreground truncate">Novo: {editFile.name}</p>}
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setEditing(null)} disabled={editSaving}>Cancelar</Button>
+            <Button type="button" onClick={() => void handleSaveEdit()} disabled={editSaving} className="gap-2">
+              {editSaving ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {editSaving ? (editFile ? `Enviando ${editProgress}%` : 'Salvando...') : 'Salvar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

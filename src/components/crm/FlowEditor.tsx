@@ -1,6 +1,7 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { uploadDedupedMedia, deleteMediaUrlsIfUnused, collectStorageUrls } from '@/lib/mediaStorage';
 import { resolveMediaUrl } from '@/lib/mediaUrl';
+import { MissingMediaWarning } from './MissingMediaWarning';
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import {
   type ConvertedAudio,
@@ -169,6 +170,7 @@ const AudioNode = ({ data }: any) => (
     </CardHeader>
     <CardContent className="p-3">
       <p className="text-[10px] text-muted-foreground truncate">{data.fileName || data.audioUrl || 'Nenhum áudio selecionado'}</p>
+      <MissingMediaWarning url={data.audioUrl} />
     </CardContent>
     <Handle type="source" position={Position.Bottom} />
   </Card>
@@ -184,6 +186,7 @@ const VideoNode = ({ data }: any) => (
     </CardHeader>
     <CardContent className="p-3">
       <p className="text-[10px] text-muted-foreground truncate">{data.fileName || data.videoUrl || 'Nenhum vídeo selecionado'}</p>
+      <MissingMediaWarning url={data.videoUrl} />
     </CardContent>
     <Handle type="source" position={Position.Bottom} />
   </Card>
@@ -205,6 +208,7 @@ const ImageNode = ({ data }: any) => (
       ) : (
         <p className="text-[9px] text-muted-foreground truncate">{data.fileName || 'Nenhuma imagem'}</p>
       )}
+      <MissingMediaWarning url={data.imageUrl} />
     </CardContent>
     <Handle type="source" position={Position.Bottom} />
   </Card>

@@ -2377,7 +2377,7 @@ const CRM = () => {
       let pageCursor: { updatedAt: string; id: string } | null = null;
 
       for (let page = 0; page < MAX_PAGES; page++) {
-        let q = requestedNumberId === primaryNumberIdRef.current
+        let q = requestedNumberId && requestedNumberId === primaryNumberIdRef.current
           ? (supabase
               .from('crm_contacts')
               .select('*')

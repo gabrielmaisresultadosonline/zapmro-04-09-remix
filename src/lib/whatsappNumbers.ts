@@ -44,7 +44,7 @@ const unlockedKey = (userId: string, numberId: string) =>
 
 export function getActiveNumberId(userId: string): string | null {
   try {
-    return localStorage.getItem(activeKey(userId));
+    return sessionStorage.getItem(activeKey(userId));
   } catch {
     return null;
   }
@@ -52,8 +52,9 @@ export function getActiveNumberId(userId: string): string | null {
 
 export function setActiveNumberId(userId: string, numberId: string | null) {
   try {
-    if (numberId) localStorage.setItem(activeKey(userId), numberId);
-    else localStorage.removeItem(activeKey(userId));
+    // Por aba: trocar o número num navegador nunca muda o outro.
+    if (numberId) sessionStorage.setItem(activeKey(userId), numberId);
+    else sessionStorage.removeItem(activeKey(userId));
   } catch {
     /* storage indisponível — segue sem persistir */
   }

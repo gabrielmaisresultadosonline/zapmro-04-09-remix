@@ -27,3 +27,4 @@
 - Flow media blocks whose file is missing from Storage are skipped at send time (the flow continues) and flagged in the editor via MissingMediaWarning, so one lost file never stops a whole flow.
 - One-time user popups are rows in crm_user_notices seeded by migration for the target audience; the popup shows while dismissed_at is NULL, so new signups never get past notices and dismissal follows the user across devices.
 - Deduplicated uploads (uploadDedupedMedia) reuse a hash path only when mediaFileOpens reads its first byte, and every new upload is read back before reporting success; Storage metadata (list/HEAD) can outlive lost files.
+- The open WhatsApp number is per browser tab (sessionStorage) and its credentials overlay shared crm_settings in the UI, so switching numbers in one browser never changes another.

@@ -154,7 +154,7 @@ export default function TrialsPanel({ creds }: Props) {
       }
       // backend requires a valid plan key; use "mensal" as label placeholder for custom durations
       planToSend = "mensal";
-      if (!confirm(`Liberar ${days} dia(s) para ${t.email}?\n\n${senhaAviso}`)) return;
+      if (!confirm(`Liberar ${days} dia(s) contados da data de início do teste para ${t.email}? (não soma com o prazo atual)\n\n${senhaAviso}`)) return;
     } else {
       if (!confirm(`Liberar ${plan.toUpperCase()} para ${t.email}?\n\n${senhaAviso}`)) return;
     }
@@ -170,6 +170,7 @@ export default function TrialsPanel({ creds }: Props) {
           email: t.email,
           plan: planToSend,
           days,
+          fromTrialStart: plan === "custom",
           // só troca a senha (e envia a nova no email) se o admin marcar
           resetPassword: willResetPassword,
           requestId,

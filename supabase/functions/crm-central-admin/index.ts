@@ -1219,7 +1219,7 @@ serve(async (req) => {
     }
 
     if (action === "grant_access") {
-      const { email, plan, days, resetPassword } = body as any;
+      const { email, plan, days, resetPassword, fromTrialStart } = body as any;
       if (!email || !plan) return json({ success: false, error: "email e plan obrigatórios" });
       const PLANS: Record<string, { label: string; amount: number; days: number }> = {
         mensal: { label: "Plano Mensal", amount: 97, days: 30 },
@@ -1271,6 +1271,28 @@ serve(async (req) => {
             .maybeSingle();
           grantFullName = prof?.full_name || "";
           grantAccessUntil = prof?.access_until || undefined;
+
+          // Personalizado: o prazo é exato a partir do início do teste e
+          // substitui (nunca soma) o vencimento anterior.
+          if (fromTrialStart === true && Number(days) > 0) {
+            const { data: p2 } = await supabase
+              .from("crm_profiles")
+              .select("created_at, trial_ends_at")
+              .eq("user_id", grantUserId)
+              .maybeSingle();
+            const start = p2?.created_at
+              ? new Date(p2.created_at)
+              : p2?.trial_ends_at
+                ? new Date(new Date(p2.trial_ends_at).getTime() - 2 * 86400000)
+                : new Date();
+            const fixedUntil = new Date(start.getTime() + Number(days) * 86400000).toISOString();
+            const { error: fixErr } = await supabase
+              .from("crm_profiles")
+              .update({ access_until: fixedUntil })
+              .eq("user_id", grantUserId);
+            if (fixErr) console.error("[grant_access] fixed days error:", fixErr);
+            else grantAccessUntil = fixedUntil;
+          }
 
           // Porquê: liberar plano NÃO deve mexer na senha do cliente. Antes o
           // padrão era resetar (`!== false`), então quem já tinha cadastro

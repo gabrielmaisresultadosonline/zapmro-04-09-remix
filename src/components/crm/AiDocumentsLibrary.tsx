@@ -29,10 +29,24 @@ const KIND_LABEL: Record<MediaKind, string> = { document: 'Documento', image: 'I
 const CODE_RE = /^[A-Za-z0-9_-]{1,40}$/;
 
 const kindFromFile = (file: File): MediaKind => {
-  if (file.type.startsWith('image/')) return 'image';
-  if (file.type.startsWith('audio/')) return 'audio';
-  if (file.type.startsWith('video/')) return 'video';
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'image';
+  if (file.type.startsWith('audio/') || ['mp3', 'ogg', 'opus', 'm4a', 'aac', 'amr', 'wav'].includes(ext)) return 'audio';
+  if (file.type.startsWith('video/') || ['mp4', '3gp', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'video';
   return 'document';
+};
+
+/** Formatos que o WhatsApp aceita; retorna aviso quando não aceita. */
+export const unsupportedMediaReason = (file: File): string | null => {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const kind = kindFromFile(file);
+  if (kind === 'video' && !['mp4', '3gp'].includes(ext)) return 'O WhatsApp só aceita vídeo MP4 ou 3GP. Converta o vídeo para MP4 e envie de novo.';
+  if (kind === 'audio' && ['wav'].includes(ext)) return 'O WhatsApp não aceita áudio WAV. Use MP3, M4A, OGG ou AAC.';
+  if (kind === 'image' && ext === 'webp') return 'O WhatsApp só aceita imagem JPG ou PNG.';
+  if (kind === 'video' && file.size > 16 * 1024 * 1024) return 'O WhatsApp aceita vídeos de até 16 MB.';
+  if (kind === 'audio' && file.size > 16 * 1024 * 1024) return 'O WhatsApp aceita áudios de até 16 MB.';
+  if (kind === 'image' && file.size > 5 * 1024 * 1024) return 'O WhatsApp aceita imagens de até 5 MB.';
+  return null;
 };
 
 /** Biblioteca de arquivos que o Agente I.A. envia sozinho quando o código é pedido. Separada por WhatsApp. */

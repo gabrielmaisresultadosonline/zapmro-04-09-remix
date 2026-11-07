@@ -149,6 +149,10 @@ export function AiDocumentsLibrary() {
         updated_at: new Date().toISOString(),
       };
       let newUrl: string | null = null;
+      if (editFile && unsupportedMediaReason(editFile)) {
+        toast({ title: 'Formato não aceito pelo WhatsApp', description: unsupportedMediaReason(editFile)!, variant: 'destructive' });
+        return;
+      }
       if (editFile) {
         const { data: auth } = await supabase.auth.getUser();
         const userId = auth.user?.id;

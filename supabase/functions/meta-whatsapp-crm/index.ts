@@ -5050,9 +5050,24 @@ async function uploadMediaToMeta(accessToken: string, phoneNumberId: string, med
       console.log(`[UPLOAD-AUDIO] Webm detectado. Convertendo MIME para audio/ogg.`);
     }
     
-    // Forçamos o tipo para audio/ogg com codec opus para garantir que a Meta aceite como PTT
-    contentType = 'audio/ogg; codecs=opus';
-    fileName = 'voice.ogg';
+    // Só OGG/Opus (ou WebM gravado no CRM) pode virar "gravado na hora".
+    // MP3/M4A/AAC/AMR enviados como arquivo eram rotulados como OGG e a Meta
+    // recusava; agora vão com o tipo real e chegam como áudio normal.
+    const b = new Uint8Array(arrayBuffer.slice(0, 12));
+    const head = String.fromCharCode(...b);
+    const isOgg = head.startsWith('OggS');
+    const isMp3 = head.startsWith('ID3') || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0 && (b[1] & 0x06) !== 0);
+    const isMp4 = head.slice(4, 8) === 'ftyp';
+    const isAmr = head.startsWith('#!AMR');
+    const isAdts = b[0] === 0xff && (b[1] & 0xf6) === 0xf0;
+    if (isOgg || isWebm) {
+      contentType = 'audio/ogg; codecs=opus';
+      fileName = 'voice.ogg';
+    } else if (isMp3) { contentType = 'audio/mpeg'; fileName = 'audio.mp3'; (media as any).notVoice = true; }
+    else if (isMp4) { contentType = 'audio/mp4'; fileName = 'audio.m4a'; (media as any).notVoice = true; }
+    else if (isAmr) { contentType = 'audio/amr'; fileName = 'audio.amr'; (media as any).notVoice = true; }
+    else if (isAdts) { contentType = 'audio/aac'; fileName = 'audio.aac'; (media as any).notVoice = true; }
+    else { contentType = 'audio/ogg; codecs=opus'; fileName = 'voice.ogg'; }
     
     console.log(`[UPLOAD-AUDIO] Enviando para Meta: type=audio, contentType=${contentType}, fileName=${fileName}`);
     
@@ -5322,10 +5337,9 @@ async function handleInternalSendMessage(supabase: any, phoneNumberId: string, a
     // Se der erro 400 novamente, usaremos um fallback via VPS Transcoder se disponível.
     payload.type = media.type;
     if (media.type === 'audio') {
-      payload.audio = { 
-        id: mediaId,
-        voice: true // Crucial: para aparecer como gravado (blue mic)
-      };
+      payload.audio = (media as any).notVoice
+        ? { id: mediaId }
+        : { id: mediaId, voice: true }; // OGG/Opus aparece como gravado (blue mic)
       console.log(`[MEDIA-SEND] Enviando áudio ID: ${mediaId} como 'audio'. OGG/Opus detectado. voice=true`);
     } else if (media.type === 'video') {
       payload.video = { id: mediaId, ...(params.text ? { caption: String(params.text) } : {}) };

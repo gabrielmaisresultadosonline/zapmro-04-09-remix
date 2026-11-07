@@ -61,6 +61,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import MetaPricingCalculator from "@/components/whatsapp/MetaPricingCalculator";
@@ -254,6 +255,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   // Recipient preview / management
   const [excludedNumbers, setExcludedNumbers] = useState<Set<string>>(new Set());
   const [recipientSearch, setRecipientSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
   const [savedLists, setSavedLists] = useState<{ name: string; numbers: string[]; createdAt: string }[]>([]);
   const [showRecipients, setShowRecipients] = useState(false);
   const [only24h, setOnly24h] = useState(false);
@@ -473,6 +475,52 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
       if (next.has(wa)) next.delete(wa); else next.add(wa);
       return next;
     });
+  };
+
+  const allVisibleSelected = visibleRecipients.length > 0 && visibleRecipients.every(r => selectedRecipients.has(r.wa_id));
+
+  const toggleSelectRecipient = (wa: string) => {
+    setSelectedRecipients(prev => {
+      const next = new Set(prev);
+      if (next.has(wa)) next.delete(wa); else next.add(wa);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedRecipients(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleRecipients.forEach(r => next.delete(r.wa_id));
+      } else {
+        visibleRecipients.forEach(r => next.add(r.wa_id));
+      }
+      return next;
+    });
+  };
+
+  const removeSelectedFromDispatch = () => {
+    if (selectedRecipients.size === 0) return;
+    const count = selectedRecipients.size;
+    setExcludedNumbers(prev => {
+      const next = new Set(prev);
+      selectedRecipients.forEach(wa => next.add(wa));
+      return next;
+    });
+    setSelectedRecipients(new Set());
+    toast({ title: `${count} contato(s) removido(s) do disparo` });
+  };
+
+  const restoreSelectedToDispatch = () => {
+    if (selectedRecipients.size === 0) return;
+    const count = selectedRecipients.size;
+    setExcludedNumbers(prev => {
+      const next = new Set(prev);
+      selectedRecipients.forEach(wa => next.delete(wa));
+      return next;
+    });
+    setSelectedRecipients(new Set());
+    toast({ title: `${count} contato(s) restaurado(s) ao disparo` });
   };
 
   const handleSaveListForLater = () => {

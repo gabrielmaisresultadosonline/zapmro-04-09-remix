@@ -2862,6 +2862,22 @@ const CRM = () => {
          activeNumberIdRef.current = validStored;
          setActiveWhatsAppNumberId(validStored);
          setActiveNumberId(validStored);
+          // A conta compartilha crm_settings; esta aba mostra sempre as
+          // credenciais do SEU número, mesmo que outro navegador troque.
+          const tabNumber = validStored ? numbers.find((n) => n.id === validStored) : null;
+          if (tabNumber) {
+            setMetaSettings((prev: any) => ({
+              ...prev,
+              meta_access_token: tabNumber.meta_access_token || '',
+              meta_phone_number_id: tabNumber.meta_phone_number_id || '',
+              meta_waba_id: tabNumber.meta_waba_id || '',
+              meta_display_phone_number: tabNumber.meta_display_phone_number || '',
+              meta_verified_name: tabNumber.meta_verified_name || '',
+            }));
+            setWhatsAppConnectionConfirmed(
+              !!(tabNumber.meta_access_token && tabNumber.meta_phone_number_id && tabNumber.meta_waba_id)
+            );
+          }
           const legacyScopeChanged = previousPrimaryNumberId !== primaryNumberIdRef.current;
           if (numberChanged || legacyScopeChanged) {
             await contactsSyncPromise;

@@ -19,7 +19,7 @@ let activeNumberId: string | null = readInitial();
 
 function readInitial(): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEY) || null;
+    return sessionStorage.getItem(STORAGE_KEY) || null;
   } catch {
     return null;
   }
@@ -30,12 +30,12 @@ export function getActiveWhatsAppNumberId(): string | null {
   return activeNumberId;
 }
 
-/** Define/limpa o número aberto. Persistido para sobreviver a recargas. */
+/** Define/limpa o número aberto. Fica por aba (sessionStorage): cada navegador/aba trabalha com seu próprio número. */
 export function setActiveWhatsAppNumberId(numberId: string | null): void {
   activeNumberId = numberId;
   try {
-    if (numberId) localStorage.setItem(STORAGE_KEY, numberId);
-    else localStorage.removeItem(STORAGE_KEY);
+    if (numberId) sessionStorage.setItem(STORAGE_KEY, numberId);
+    else sessionStorage.removeItem(STORAGE_KEY);
   } catch {
     /* storage indisponível — mantém apenas em memória */
   }

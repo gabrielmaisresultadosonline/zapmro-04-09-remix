@@ -86,6 +86,7 @@ export function AiDocumentsLibrary() {
     if (docs.some((d) => d.code.toLowerCase() === finalCode.toLowerCase())) { toast({ title: 'Esse código já existe', variant: 'destructive' }); return; }
     if (!title.trim()) { toast({ title: 'Dê um nome ao arquivo', variant: 'destructive' }); return; }
     if (!file) { toast({ title: 'Escolha o arquivo', variant: 'destructive' }); return; }
+    { const bad = unsupportedMediaReason(file); if (bad) { toast({ title: 'Formato não aceito pelo WhatsApp', description: bad, variant: 'destructive' }); return; } }
     setSaving(true); setProgress(0);
     try {
       const { data: auth } = await supabase.auth.getUser();

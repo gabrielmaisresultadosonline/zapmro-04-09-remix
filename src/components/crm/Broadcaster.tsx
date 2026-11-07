@@ -61,6 +61,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import MetaPricingCalculator from "@/components/whatsapp/MetaPricingCalculator";
@@ -254,6 +255,7 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
   // Recipient preview / management
   const [excludedNumbers, setExcludedNumbers] = useState<Set<string>>(new Set());
   const [recipientSearch, setRecipientSearch] = useState('');
+  const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
   const [savedLists, setSavedLists] = useState<{ name: string; numbers: string[]; createdAt: string }[]>([]);
   const [showRecipients, setShowRecipients] = useState(false);
   const [only24h, setOnly24h] = useState(false);
@@ -473,6 +475,52 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
       if (next.has(wa)) next.delete(wa); else next.add(wa);
       return next;
     });
+  };
+
+  const allVisibleSelected = visibleRecipients.length > 0 && visibleRecipients.every(r => selectedRecipients.has(r.wa_id));
+
+  const toggleSelectRecipient = (wa: string) => {
+    setSelectedRecipients(prev => {
+      const next = new Set(prev);
+      if (next.has(wa)) next.delete(wa); else next.add(wa);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedRecipients(prev => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleRecipients.forEach(r => next.delete(r.wa_id));
+      } else {
+        visibleRecipients.forEach(r => next.add(r.wa_id));
+      }
+      return next;
+    });
+  };
+
+  const removeSelectedFromDispatch = () => {
+    if (selectedRecipients.size === 0) return;
+    const count = selectedRecipients.size;
+    setExcludedNumbers(prev => {
+      const next = new Set(prev);
+      selectedRecipients.forEach(wa => next.add(wa));
+      return next;
+    });
+    setSelectedRecipients(new Set());
+    toast({ title: `${count} contato(s) removido(s) do disparo` });
+  };
+
+  const restoreSelectedToDispatch = () => {
+    if (selectedRecipients.size === 0) return;
+    const count = selectedRecipients.size;
+    setExcludedNumbers(prev => {
+      const next = new Set(prev);
+      selectedRecipients.forEach(wa => next.delete(wa));
+      return next;
+    });
+    setSelectedRecipients(new Set());
+    toast({ title: `${count} contato(s) restaurado(s) ao disparo` });
   };
 
   const handleSaveListForLater = () => {
@@ -1710,6 +1758,30 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                       className="h-8 pl-7 rounded-lg bg-[#111b21] border-none text-[#e9edef] text-xs"
                     />
                   </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-[10px] md:text-xs text-[#8696a0] cursor-pointer select-none">
+                      <Checkbox
+                        checked={allVisibleSelected}
+                        onCheckedChange={toggleSelectAllVisible}
+                        className="border-[#8696a0] data-[state=checked]:bg-[#00a884] data-[state=checked]:border-[#00a884]"
+                      />
+                      Selecionar todos os encontrados ({visibleRecipients.length})
+                    </label>
+                    {selectedRecipients.size > 0 && (
+                      <>
+                        <span className="text-[10px] font-bold text-[#e9edef]">{selectedRecipients.size} selecionado(s)</span>
+                        <Button type="button" variant="outline" size="sm" className="h-7 text-[10px] text-red-400 border-red-500/30 hover:bg-red-500/10 hover:text-red-300" onClick={removeSelectedFromDispatch}>
+                          <X className="w-3 h-3 mr-1" /> Remover selecionados
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" className="h-7 text-[10px] text-[#00a884] border-[#00a884]/30 hover:bg-[#00a884]/10" onClick={restoreSelectedToDispatch}>
+                          <Plus className="w-3 h-3 mr-1" /> Restaurar selecionados
+                        </Button>
+                        <button type="button" className="text-[10px] underline text-[#8696a0] hover:text-[#e9edef]" onClick={() => setSelectedRecipients(new Set())}>
+                          Limpar seleção
+                        </button>
+                      </>
+                    )}
+                  </div>
                   <ScrollArea className="h-[180px] rounded-lg bg-[#111b21] border border-white/5">
                     <div className="p-1">
                       {visibleRecipients.length === 0 ? (
@@ -1721,6 +1793,11 @@ const Broadcaster = ({ templates, flows, contacts, statuses }: BroadcasterProps)
                             "flex items-center justify-between gap-2 px-2 py-1.5 rounded-md transition-colors",
                             isExcluded ? "opacity-40" : "hover:bg-[#202c33]"
                           )}>
+                            <Checkbox
+                              checked={selectedRecipients.has(r.wa_id)}
+                              onCheckedChange={() => toggleSelectRecipient(r.wa_id)}
+                              className="shrink-0 border-[#8696a0] data-[state=checked]:bg-[#00a884] data-[state=checked]:border-[#00a884]"
+                            />
                             <div className="min-w-0 flex-1">
                               <p className={cn("text-xs text-[#e9edef] truncate", isExcluded && "line-through")}>{r.name}</p>
                               <p className="text-[9px] text-[#8696a0] font-mono flex items-center gap-1.5">

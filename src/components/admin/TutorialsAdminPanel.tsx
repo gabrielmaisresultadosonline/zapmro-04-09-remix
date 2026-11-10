@@ -736,6 +736,7 @@ function ModuleDetail({ module, onBack }: { module: Module; onBack: () => void }
                 <div className="font-semibold text-xs text-[#075E54] line-clamp-2 min-h-[2rem]">
                   {v.title}
                 </div>
+                <MissingMediaWarning url={v.video_url} />
                 <div className="flex flex-wrap gap-0.5">
                   <Button size="sm" variant="outline" onClick={() => openEdit(v)} className="h-7 px-1.5 border-[#075E54] text-[#075E54] hover:bg-[#075E54] hover:text-white">
                     <Pencil className="h-3 w-3" />

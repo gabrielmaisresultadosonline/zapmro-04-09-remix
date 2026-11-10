@@ -91,6 +91,7 @@ def main():
         step(tid, "baixando o vídeo original", 2)
         local = os.path.join(work, "src")
         last = None
+        answered = 0  # o Storage respondeu com erro (arquivo perdido), não é queda de rede
         for attempt in range(6):  # o gateway pode estar reiniciando (ex.: durante a atualização)
             try:
                 req = urllib.request.Request(f"{GW}{MARK}{obj}", headers=headers())
@@ -98,6 +99,13 @@ def main():
                     shutil.copyfileobj(r, f)
                 last = None
                 break
+            except urllib.error.HTTPError as e:
+                last = e
+                answered += 1
+                print(f"[transcoder] {tid}: Storage respondeu {e.code}, tentativa {attempt + 1}/6")
+                if e.code in (400, 404) or answered >= 3:
+                    raise RuntimeError("arquivo original não encontrado no servidor — envie o vídeo novamente pelo painel")
+                time.sleep(5)
             except Exception as e:
                 last = e
                 print(f"[transcoder] {tid}: download falhou ({e}), tentativa {attempt + 1}/6")

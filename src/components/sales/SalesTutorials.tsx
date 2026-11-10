@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { SafeImage } from "@/components/media/SafeImage";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -264,7 +265,7 @@ function ModuleSection({
       {/* Module banner */}
       {module?.cover_url ? (
         <div className="relative rounded-2xl overflow-hidden mb-5 aspect-[16/9] sm:aspect-[21/9] shadow-lg">
-          <img src={resolveMediaUrl(module.cover_url)} alt={module.name} className="w-full h-full object-cover" />
+          <SafeImage src={resolveMediaUrl(module.cover_url)} alt={module.name} className="w-full h-full object-cover" fallback={<div className="w-full h-full bg-gradient-to-br from-[#075E54] via-[#128C7E] to-[#25D366]" />} />
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
           <div className="absolute inset-x-0 bottom-0 p-5 md:p-8">
             <h3 className="text-white text-2xl md:text-4xl font-bold drop-shadow-lg">{module.name}</h3>
@@ -308,11 +309,16 @@ function ModuleSection({
           >
             <div className="relative bg-slate-900" style={{ aspectRatio: "4/5" }}>
               {v.cover_url ? (
-                <img
+                <SafeImage
                   src={resolveMediaUrl(v.cover_url)}
                   alt={v.title}
                   loading="lazy"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  fallback={
+                    <div className="w-full h-full bg-gradient-to-br from-[#075E54] via-[#128C7E] to-[#25D366] flex items-center justify-center">
+                      <span className="text-white/40 text-4xl font-bold">{i + 1}</span>
+                    </div>
+                  }
                 />
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-[#075E54] via-[#128C7E] to-[#25D366] flex items-center justify-center">

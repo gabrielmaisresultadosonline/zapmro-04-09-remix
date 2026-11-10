@@ -7,7 +7,7 @@ gera as qualidades com ffmpeg, envia ao Storage (bucket assets) e grava
 hls_url. Em falha marca 'error' — o original continua tocando normalmente.
 Saída 0 = processou algo, 3 = fila vazia, 1 = erro.
 """
-import json, os, shutil, subprocess, sys, tempfile, time, urllib.request, urllib.parse
+import json, os, shutil, subprocess, sys, tempfile, time, urllib.request, urllib.parse, urllib.error
 
 DB_CONT = os.environ.get("DB_CONT", "zapmro-db")
 GW = f"http://127.0.0.1:{os.environ.get('GATEWAY_PORT', '8000')}"

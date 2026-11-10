@@ -8,7 +8,7 @@ for f in "$ROOT/deploy/postgres-stack/.env" "$ROOT/deploy/postgres-stack/secrets
 DB="${DB_CONTAINER:-zapmro-db}"; G="https://graph.facebook.com/v25.0"
 FIM="${FINAL: -8}"
 LINHA=$(docker exec -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$DB" psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" -At -F '|' -c \
- "select meta_phone_number_id, meta_waba_id, meta_access_token from public.crm_whatsapp_numbers where regexp_replace(coalesce(meta_display_phone_number,''),'\D','','g') like '%${FIM}' and meta_access_token is not null order by updated_at desc nulls last limit 1" 2>/dev/null)
+ "select meta_phone_number_id, meta_waba_id, meta_access_token from public.crm_whatsapp_numbers where regexp_replace(coalesce(meta_display_phone_number,''),'\D','','g') like '%${FIM}' and meta_access_token is not null limit 1" 2>/dev/null)
 [ -z "$LINHA" ] && { echo "Número terminado em $FIM não encontrado com credenciais."; exit 1; }
 IFS='|' read -r PID WABA TOKEN <<<"$LINHA"
 echo "phone_number_id=$PID  waba_id=$WABA"

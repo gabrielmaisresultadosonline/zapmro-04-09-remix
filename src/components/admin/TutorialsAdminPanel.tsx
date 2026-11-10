@@ -576,6 +576,17 @@ function ModuleDetail({ module, onBack }: { module: Module; onBack: () => void }
       order_index: Number(editing.order_index) || 0,
       is_active: editing.is_active !== false,
     };
+    // Vídeo novo: descarta a versão adaptativa antiga e entra na fila de conversão.
+    const previous = editing.id ? videos.find((v) => v.id === editing.id) : null;
+    if (payload.video_url && (!previous || previous.video_url !== payload.video_url)) {
+      Object.assign(payload, {
+        hls_url: null,
+        transcode_status: "pending",
+        transcode_error: null,
+        transcode_progress: 0,
+        transcode_step: null,
+      });
+    }
     const { error } = editing.id
       ? await supabase.from("sales_tutorials").update(payload).eq("id", editing.id)
       : await supabase.from("sales_tutorials").insert(payload);

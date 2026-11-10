@@ -245,7 +245,7 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-20 bg-black/70 text-white text-sm">
           <span className="px-4 text-center">
             {missing
-              ? "Este vídeo está sendo atualizado e volta em breve."
+              ? "Este vídeo não está mais no servidor. Ele precisa ser enviado de novo pela administração."
               : "Não conseguimos carregar o vídeo agora."}
           </span>
           {!missing && <button

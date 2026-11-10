@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { mediaFileOpens } from "@/lib/mediaStorage";
 
 export interface SmoothVideoProps
   extends Omit<React.VideoHTMLAttributes<HTMLVideoElement>, "src"> {
@@ -52,6 +53,9 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
   const stallTimerRef = useRef<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  // Arquivo não existe mais no servidor: não adianta tentar de novo.
+  const [missing, setMissing] = useState(false);
+  const probedRef = useRef(false);
   // true enquanto o hls.js (ou HLS nativo do Safari) controla o vídeo.
   const [, setHlsActive] = useState(false);
   const hlsActiveRef = useRef(false);
@@ -106,6 +110,8 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
   useEffect(() => {
     retriesRef.current = 0;
     setFailed(false);
+    setMissing(false);
+    probedRef.current = false;
     setLoading(true);
     clearStallTimer();
     return clearStallTimer;
@@ -198,6 +204,17 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
   const handleError = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     clearStallTimer();
     if (hlsActiveRef.current) return; // tratado pelo hls.js / fallback
+    if (!probedRef.current && /^https?:\/\//i.test(src)) {
+      probedRef.current = true;
+      void mediaFileOpens(src).then((ok) => {
+        if (ok) return;
+        clearStallTimer();
+        retriesRef.current = MAX_AUTO_RETRIES;
+        setMissing(true);
+        setFailed(true);
+        setLoading(false);
+      });
+    }
     if (retriesRef.current < MAX_AUTO_RETRIES) {
       retriesRef.current += 1;
       // Espera progressiva: alivia o servidor quando muitos abrem ao mesmo tempo.
@@ -226,14 +243,18 @@ export const SmoothVideo: React.FC<SmoothVideoProps> = ({
 
       {failed && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 z-20 bg-black/70 text-white text-sm">
-          <span>Não conseguimos carregar o vídeo agora.</span>
-          <button
+          <span className="px-4 text-center">
+            {missing
+              ? "Este vídeo está sendo atualizado e volta em breve."
+              : "Não conseguimos carregar o vídeo agora."}
+          </span>
+          {!missing && <button
             type="button"
             onClick={handleManualRetry}
             className="inline-flex items-center gap-2 rounded-full bg-white/15 hover:bg-white/25 px-4 py-2 font-semibold transition"
           >
             <RefreshCw className="h-4 w-4" /> Tentar de novo
-          </button>
+          </button>}
         </div>
       )}
 

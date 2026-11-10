@@ -7,7 +7,7 @@ gera as qualidades com ffmpeg, envia ao Storage (bucket assets) e grava
 hls_url. Em falha marca 'error' — o original continua tocando normalmente.
 Saída 0 = processou algo, 3 = fila vazia, 1 = erro.
 """
-import json, os, shutil, subprocess, sys, tempfile, time, urllib.request, urllib.parse
+import json, os, shutil, subprocess, sys, tempfile, time, urllib.request, urllib.parse, urllib.error
 
 DB_CONT = os.environ.get("DB_CONT", "zapmro-db")
 GW = f"http://127.0.0.1:{os.environ.get('GATEWAY_PORT', '8000')}"
@@ -91,6 +91,7 @@ def main():
         step(tid, "baixando o vídeo original", 2)
         local = os.path.join(work, "src")
         last = None
+        answered = 0  # o Storage respondeu com erro (arquivo perdido), não é queda de rede
         for attempt in range(6):  # o gateway pode estar reiniciando (ex.: durante a atualização)
             try:
                 req = urllib.request.Request(f"{GW}{MARK}{obj}", headers=headers())
@@ -98,6 +99,13 @@ def main():
                     shutil.copyfileobj(r, f)
                 last = None
                 break
+            except urllib.error.HTTPError as e:
+                last = e
+                answered += 1
+                print(f"[transcoder] {tid}: Storage respondeu {e.code}, tentativa {attempt + 1}/6")
+                if e.code in (400, 404) or answered >= 3:
+                    raise RuntimeError("arquivo original não encontrado no servidor — envie o vídeo novamente pelo painel")
+                time.sleep(5)
             except Exception as e:
                 last = e
                 print(f"[transcoder] {tid}: download falhou ({e}), tentativa {attempt + 1}/6")

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SafeImage } from "@/components/media/SafeImage";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { resolveMediaUrl } from "@/lib/mediaUrl";
@@ -61,7 +62,7 @@ export default function FirstTutorialVideo({
         <div className="flex items-stretch">
           <div className="relative w-28 sm:w-32 shrink-0 bg-slate-900" style={{ aspectRatio: "4/5" }}>
             {video.cover_url ? (
-              <img src={resolveMediaUrl(video.cover_url)} alt={video.title} className="w-full h-full object-cover" />
+              <SafeImage src={resolveMediaUrl(video.cover_url)} alt={video.title} className="w-full h-full object-cover" fallback={<div className="w-full h-full bg-gradient-to-br from-[#075E54] to-[#25D366]" />} />
             ) : (
               <div className="w-full h-full bg-gradient-to-br from-[#075E54] to-[#25D366]" />
             )}

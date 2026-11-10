@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
+import { SafeImage } from "@/components/media/SafeImage";
+import { MissingMediaWarning } from "@/components/crm/MissingMediaWarning";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -709,7 +711,7 @@ function ModuleDetail({ module, onBack }: { module: Module; onBack: () => void }
             <Card key={v.id} className="overflow-hidden bg-white border-[#E8F5F1] shadow-sm">
               <div className="relative bg-slate-100" style={{ aspectRatio: "4/5" }}>
                 {v.cover_url ? (
-                  <img src={v.cover_url} alt={v.title} className="w-full h-full object-cover" />
+                  <SafeImage src={v.cover_url} alt={v.title} className="w-full h-full object-cover" fallback={<div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-destructive/10 text-destructive text-[10px] font-semibold text-center px-2"><ImageIcon className="h-8 w-8" />Capa perdida — envie de novo</div>} />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-slate-300 bg-gradient-to-br from-slate-100 to-slate-200">
                     <ImageIcon className="h-10 w-10" />
@@ -734,6 +736,7 @@ function ModuleDetail({ module, onBack }: { module: Module; onBack: () => void }
                 <div className="font-semibold text-xs text-[#075E54] line-clamp-2 min-h-[2rem]">
                   {v.title}
                 </div>
+                <MissingMediaWarning url={v.video_url} />
                 <div className="flex flex-wrap gap-0.5">
                   <Button size="sm" variant="outline" onClick={() => openEdit(v)} className="h-7 px-1.5 border-[#075E54] text-[#075E54] hover:bg-[#075E54] hover:text-white">
                     <Pencil className="h-3 w-3" />

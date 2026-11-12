@@ -47,6 +47,10 @@ function describeMessageForHistory(message: any) {
     return `${content || '[Imagem recebida]'}${message.media_url ? ` (imagem anexada: ${message.media_url})` : ''}`;
   }
 
+  if (message.message_type === 'document') {
+    return `${content || '[Documento recebido]'} (documento/PDF anexado pelo cliente)`;
+  }
+
   if (message.message_type === 'audio') {
     // O áudio já chega transcrito internamente: entregue apenas o conteúdo falado.
     return content || '[Áudio recebido]';
@@ -1331,14 +1335,14 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     12. Nunca saia do personagem.
     12.1. NEGRITO (FORMATO WHATSAPP): para destacar palavras em negrito, envolva-as com UM asterisco de cada lado, assim: *palavra*. NUNCA use dois asteriscos (**palavra**) — o WhatsApp não entende markdown e o cliente veria os asteriscos soltos no texto.
     13. MEMÓRIA DA CONVERSA: Sempre retome TODO o contexto já conversado no histórico (dados, nomes, valores, combinados, dúvidas pendentes). Nunca repita perguntas cujas respostas já estão no histórico e nunca recomece o atendimento do zero.
-    17. MENSAGENS EM SEQUÊNCIA (ANTI-REPETIÇÃO): o cliente costuma mandar várias mensagens curtas seguidas. Trate todas as mensagens recentes dele como UMA única solicitação e responda tudo de uma vez só. NUNCA repita uma resposta que já aparece no histórico, nem com palavras parecidas. Se parte do que o cliente escreveu já foi respondida antes, responda apenas o que ainda não foi respondido — sem repetir saudação, apresentação ou explicação já enviadas.${kanbanInstruction}${sendingInstruction}${documentsInstruction}`;
+    17. MENSAGENS EM SEQUÊNCIA (ANTI-REPETIÇÃO): o cliente costuma mandar várias mensagens curtas seguidas. Trate todas as mensagens recentes dele como UMA única solicitação e responda tudo de uma vez só. NUNCA repita uma resposta que já aparece no histórico, nem com palavras parecidas. Se parte do que o cliente escreveu já foi respondida antes, responda apenas o que ainda não foi respondido — sem repetir saudação, apresentação ou explicação já enviadas.
+    18. IMAGENS E PDFs RECEBIDOS (ex.: COMPROVANTES): as imagens e PDFs mais recentes enviados pelo cliente vêm anexados nesta mensagem. Analise o conteúdo real deles antes de responder (valor, nome do recebedor/favorecido, data, banco, chave Pix, status). Se as instruções pedirem para conferir um comprovante, só confirme e só envie o que foi pedido (incluindo etiquetas [[ENVIAR:CODIGO]]) quando TODOS os critérios exigidos estiverem corretos no comprovante. Se algo estiver diferente, ilegível ou faltando, não envie: explique com educação o que não confere e peça um comprovante correto. Nunca invente dados que não aparecem no arquivo. Se o arquivo não estiver anexado ou não puder ser lido, peça para o cliente reenviar.${kanbanInstruction}${sendingInstruction}${documentsInstruction}`;
   
   try {
-    const visualAttachments = (recentMessages || [])
-      .filter((m: any) => m.direction === 'inbound' && m.message_type === 'image' && m.media_url)
-      .slice(-3)
-      .map((m: any) => ({ type: 'image_url', image_url: { url: m.media_url } }));
-
+    // Anexos recebidos (imagens e PDFs, ex.: comprovantes) são baixados pela
+    // própria VPS e entregues à IA em base64, para ela ler o conteúdo real.
+    const visualAttachments = await buildAiVisualAttachments(recentMessages || []);
+    aiLog('visual_attachments', { count: visualAttachments.length });
     const userContent: any = visualAttachments.length > 0
       ? [
           { type: 'text', text: `Histórico da conversa:\n${history}\n\nNova mensagem do cliente: ${messageText || "(Nenhuma mensagem recente - inicie o atendimento)"}` },
@@ -4998,6 +5002,42 @@ const guessMedia = (params: any) => {
  * deixaram de responder após a migração; nesse caso reaproveitamos o mesmo caminho
  * do bucket no Storage local antes de desistir.
  */
+async function buildAiVisualAttachments(messages: any[]): Promise<any[]> {
+  // messages vem do mais novo para o mais antigo: pega os 3 anexos mais recentes.
+  const picked = messages
+    .filter((m: any) => m.direction === 'inbound' && m.media_url && (m.message_type === 'image' || m.message_type === 'document' || m.message_type === 'sticker'))
+    .slice(0, 3)
+    .reverse();
+  const out: any[] = [];
+  for (const m of picked) {
+    try {
+      const res = await fetchMediaWithFallback(m.media_url);
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (!buf.length || buf.length > 15 * 1024 * 1024) continue;
+      const head = Array.from(buf.slice(0, 4)).map((b) => b.toString(16).padStart(2, '0')).join('');
+      let mime = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (head === '25504446') mime = 'application/pdf';
+      else if (head.startsWith('ffd8')) mime = 'image/jpeg';
+      else if (head === '89504e47') mime = 'image/png';
+      else if (head === '52494646') mime = 'image/webp';
+      let bin = '';
+      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      const b64 = btoa(bin);
+      if (mime === 'application/pdf') {
+        const name = String(m.content || '').trim().toLowerCase().endsWith('.pdf') ? String(m.content).trim() : 'comprovante.pdf';
+        out.push({ type: 'file', file: { filename: name, file_data: `data:application/pdf;base64,${b64}` } });
+      } else if (mime.startsWith('image/')) {
+        out.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${b64}`, detail: 'high' } });
+      } else {
+        console.warn(`[AI-AGENT] Anexo ignorado (tipo ${mime || 'desconhecido'}): ${m.media_url}`);
+      }
+    } catch (err: any) {
+      console.warn(`[AI-AGENT] Não foi possível ler anexo para a IA: ${err?.message || err}`);
+    }
+  }
+  return out;
+}
+
 async function fetchMediaWithFallback(url: string) {
   // Arquivos do Storage são lidos primeiro dentro da própria VPS (gateway
   // interno), depois pelo domínio público e só por último no endereço salvo.

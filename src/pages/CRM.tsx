@@ -4887,7 +4887,7 @@ const CRM = () => {
   };
 
   const handleTriggerFlow = async (flowId: string) => {
-    if (!selectedContact || isSending(selectedContact.id)) return;
+    if (!selectedContact) return;
 
     const isColdList = isConversationExpired(selectedContact);
 
@@ -4910,7 +4910,11 @@ const CRM = () => {
     }
 
     setConfirmSend(null);
-    setContactSending(targetContactId, true);
+    // O fluxo roda no servidor e pode demorar (áudios longos, esperas). Os
+    // botões não ficam travados: o envio segue em segundo plano e a conversa
+    // continua livre para enviar outro fluxo ou mensagem na hora.
+    toast({ title: "Enviando fluxo...", description: flow?.name || undefined });
+    void (async () => {
     try {
       // Desativa o agente de IA automaticamente ao iniciar um fluxo manual
       if (selectedContact.ai_active) {
@@ -4934,10 +4938,6 @@ const CRM = () => {
 
       toast({ title: "Fluxo Iniciado!" });
 
-      // Libera os botões imediatamente após o sucesso: as atualizações abaixo
-      // são só de exibição e, se travarem na rede, não podem deixar a conversa
-      // bloqueada até o usuário recarregar a página.
-      setContactSending(targetContactId, false);
 
       // Atualização do estado local para refletir no chat e na lista (sem travar a UI)
       void (async () => {
@@ -4963,9 +4963,8 @@ const CRM = () => {
       })();
     } catch (err: any) {
       toast({ title: "Erro ao iniciar fluxo", description: err.message, variant: "destructive" });
-    } finally {
-      setContactSending(targetContactId, false);
     }
+    })();
   };
 
 

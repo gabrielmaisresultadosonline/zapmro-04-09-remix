@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { AiDocumentsLibrary } from "@/components/crm/AiDocumentsLibrary";
 
 export type PromptSource = "node" | "global" | "both";
 export type InheritMode = "global" | "on" | "off";
@@ -123,6 +124,12 @@ export function AiAgentNodeSettingsDialog({ open, onOpenChange, data, onChange }
                 <p className="text-[11px] text-muted-foreground">Esse atendente também precisa mandar um "oi" para este WhatsApp para liberar os avisos.</p>
               </div>
             )}
+          </section>
+
+          <section className="space-y-2">
+            <Label className="text-sm font-bold">Arquivos do Agente neste bloco</Label>
+            <p className="text-[11px] text-muted-foreground">O Agente deste bloco também pode enviar estes arquivos. No prompt do bloco escreva, por exemplo: "se pedirem a tabela de preços, envie (Document1)".</p>
+            <AiDocumentsLibrary />
           </section>
         </div>
 

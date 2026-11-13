@@ -311,7 +311,9 @@ shopt -u nullglob
 # "Database error querying schema". Corrigimos somente metadados/permissões;
 # nenhuma linha, senha, sessão ou identidade é alterada.
 info "validando donos e permissões internas do Auth…"
-psql "$DB" -v ON_ERROR_STOP=1 -q <<'SQLAUTH'
+timeout 120 psql "$DB" -v ON_ERROR_STOP=1 -q <<'SQLAUTH' || warn "ajuste de donos do Auth demorou/falhou; seguindo para o teste de acesso"
+SET lock_timeout = '5s';
+SET statement_timeout = '60s';
 ALTER SCHEMA auth OWNER TO supabase_auth_admin;
 GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
 
@@ -324,6 +326,7 @@ BEGIN
       JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'auth'
        AND c.relkind IN ('r', 'p', 'S', 'v', 'm')
+       AND pg_get_userbyid(c.relowner) <> 'supabase_auth_admin'
   LOOP
     IF r.relkind IN ('r', 'p') THEN
       EXECUTE format('ALTER TABLE %I.%I OWNER TO supabase_auth_admin', r.schema_name, r.object_name);
@@ -342,6 +345,7 @@ BEGIN
       JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'auth'
        AND p.prokind IN ('f', 'p')
+       AND pg_get_userbyid(p.proowner) <> 'supabase_auth_admin'
   LOOP
     EXECUTE format('ALTER ROUTINE %s OWNER TO supabase_auth_admin', r.routine_name);
   END LOOP;

@@ -90,8 +90,15 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
-SELECT cron.schedule('reconciliar-entregas-disparo', '*/15 * * * *',
-  'SELECT public.crm_reconcile_broadcast_delivery();');
+DO $$
+BEGIN
+  DELETE FROM cron.job WHERE database <> current_database()
+     AND database NOT IN (SELECT datname FROM pg_database);
+  PERFORM cron.schedule_in_database('reconciliar-entregas-disparo', '*/15 * * * *',
+    'SELECT public.crm_reconcile_broadcast_delivery();', current_database());
+EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING 'agendamento da reconciliacao nao criado: %', SQLERRM;
+END $$;
 
 -- Aplica uma vez já na atualização.
 SELECT public.crm_reconcile_broadcast_delivery();

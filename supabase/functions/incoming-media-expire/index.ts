@@ -1,6 +1,6 @@
 /**
  * incoming-media-expire — apaga mídias recebidas (crm-media/incoming/*) com mais
- * de 15 dias que não estão em fluxos, templates ou agendamentos.
+ * de 7 dias que não estão em fluxos, templates ou agendamentos.
  *
  * Também remove mídias recebidas com mais de 24 h que nenhuma mensagem cita
  * (histórico já apagado ou cópia repetida de webhook) — migração 138.
@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
     const startedAt = Date.now();
 
     for (let i = 0; i < batches && Date.now() - startedAt < budgetMs; i++) {
-      const { data, error } = await supabase.rpc("crm_incoming_media_expired_batch", { p_days: 15, p_limit: 200, p_force: force });
+      const { data, error } = await supabase.rpc("crm_incoming_media_expired_batch", { p_days: 7, p_limit: 200, p_force: force });
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as ExpiredRow[];
       if (rows.length === 0) {

@@ -1209,7 +1209,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   // 2. Obter contexto da conversa (histórico)
   const { data: recentMessages } = await supabase
     .from('crm_messages')
-    .select('id, content, direction, message_type, media_url')
+    .select('id, content, direction, message_type, media_url, created_at')
     .eq('contact_id', contact.id)
     .order('created_at', { ascending: false })
     .limit(200); // conversa completa recente para a IA entender onde parou
@@ -1243,6 +1243,9 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   // 'node' (prompt do próprio bloco) ou 'global' (prompt geral do CRM).
   const nodeId = contact.current_node_id || contact.metadata?.ai_agent_node_id;
   let resolvedFromFlow = false;
+  // Modo "Só conferir comprovante": o bloco não conversa, só lê o comprovante
+  // (imagem/PDF) que chegar e libera os Arquivos do Agente se estiver correto.
+  let receiptOnly = false;
   if (contact.current_flow_id && nodeId) {
     const { data: flowConfig } = await supabase
       .from('crm_flows')
@@ -1263,6 +1266,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
         aiPrompt = nodePrompt || globalPrompt;
       }
       labelOnTransfer = aiNode.data.labelOnHumanTransfer || labelOnTransfer;
+      receiptOnly = aiNode.data.receiptOnly === true;
       // Opções do bloco: herdar do Agente geral (padrão) ou sobrepor só neste bloco.
       const kanbanMode = String(aiNode.data.kanbanMode || 'global');
       const alertMode = String(aiNode.data.humanAlertMode || 'global');
@@ -1288,6 +1292,20 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   }
 
   if (!aiPrompt) aiPrompt = "Você é um assistente prestativo.";
+
+  // Só confere comprovante: anexos recebidos depois da última mensagem enviada.
+  const receiptMessages: any[] = [];
+  if (receiptOnly) {
+    for (const m of recentMessages || []) {
+      if (m.direction !== 'inbound') break;
+      if (m.media_url && (m.message_type === 'image' || m.message_type === 'document')) receiptMessages.push(m);
+    }
+    const newest = (recentMessages || [])[0];
+    if (!newest || newest.direction !== 'inbound' || !(newest.message_type === 'image' || newest.message_type === 'document') || receiptMessages.length === 0) {
+      aiLog('receipt_only_skipped', { reason: 'not_a_receipt_file', type: newest?.message_type || null });
+      return { success: true, skipped: 'receipt_only_waiting_file' };
+    }
+  }
   
   const kanbanInstruction = aiSettings?.ai_kanban_auto_organizer
     ? `\n14. ORGANIZADOR KANBAN (OBRIGATÓRIO): ao final de TODA resposta, inclua exatamente uma etiqueta interna: [[KANBAN:frio]], [[KANBAN:quente]], [[KANBAN:cliente]] ou [[KANBAN:humano]]. Use frio para baixo interesse, quente para intenção de compra clara, cliente para compra/contratação confirmada e humano quando pedir atendimento humano. Nunca responda sem essa etiqueta.\n14.1. AUTONOMIA DE ETIQUETAS: você também pode criar/ajustar uma etiqueta própria do CRM quando nenhuma das quatro descrever bem a conversa, usando [[ETIQUETA:Nome curto]] (ex.: [[ETIQUETA:Orçamento enviado]]). Ela será criada automaticamente no Kanban e aplicada só a este contato. Use no máximo uma por resposta e sempre em português.\n14.2. As etiquetas internas nunca são mostradas ao cliente.`
@@ -1341,7 +1359,11 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
   try {
     // Anexos recebidos (imagens e PDFs, ex.: comprovantes) são baixados pela
     // própria VPS e entregues à IA em base64, para ela ler o conteúdo real.
-    const visualAttachments = await buildAiVisualAttachments(recentMessages || []);
+    const visualAttachments = await buildAiVisualAttachments(receiptOnly ? receiptMessages : (recentMessages || []));
+    if (receiptOnly && visualAttachments.length === 0) {
+      aiLog('receipt_only_skipped', { reason: 'file_unreadable' });
+      return { success: true, skipped: 'receipt_only_unreadable' };
+    }
     aiLog('visual_attachments', { count: visualAttachments.length });
     const userContent: any = visualAttachments.length > 0
       ? [
@@ -1366,6 +1388,13 @@ INSTRUÇÕES ESPECÍFICAS DESTE ATENDIMENTO/CONTATO:
 ${aiPrompt}
 
 ${AI_CONTEXT_RESPONSE_RULE}
+${receiptOnly ? `
+MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
+- Você NÃO conversa e NÃO escreve nada para o cliente. Nenhum texto será enviado.
+- Analise apenas o(s) arquivo(s) anexado(s) e confira se é um comprovante de pagamento real que atende TODOS os critérios das instruções (valor, nome do recebedor/favorecido, chave Pix, data etc.).
+- Se for um comprovante válido e tudo conferir, responda SOMENTE: [[COMPROVANTE_OK]] seguido das etiquetas [[ENVIAR:CODIGO]] do que as instruções mandam liberar.
+- Se não for comprovante, estiver ilegível, com valor/nome diferente ou faltando algo, responda SOMENTE: [[COMPROVANTE_RECUSADO]] motivo curto.
+- Nunca invente dados que não aparecem no arquivo.` : ''}
     `.trim();
 
     const textOnlyContent = typeof userContent === 'string' ? userContent : userContent[0].text;
@@ -1379,7 +1408,7 @@ ${AI_CONTEXT_RESPONSE_RULE}
             { role: 'system', content: fullSystemPrompt },
             { role: 'user', content }
           ],
-          temperature: 0.7,
+          temperature: receiptOnly ? 0 : 0.7,
           n: 1
         }),
       });
@@ -1533,6 +1562,14 @@ ${AI_CONTEXT_RESPONSE_RULE}
     
     // Preserve classifications, but do not send text/files, renew alerts or
     // change the agent/flow state just because the client acknowledged a notice.
+    if (receiptOnly) {
+      const fullRaw = String(aiData.choices?.[0]?.message?.content || '');
+      const approved = /\[\[COMPROVANTE_OK\]\]/i.test(fullRaw) && !/\[\[COMPROVANTE_RECUSADO\]\]/i.test(fullRaw);
+      aiLog('receipt_checked', { approved, codes: documentsToSend.map((d) => d.code), reason: fullRaw.replace(/\[\[[^\]]*\]\]/g, '').trim().slice(0, 200) });
+      if (approved && documentsToSend.length > 0) await sendAiDocuments();
+      return { success: true, action: approved ? 'receipt_approved' : 'receipt_rejected' };
+    }
+
     if (responseDecision.silent) {
       aiLog('skipped_context_acknowledgment', { reason: 'no_new_request_or_pending_action' });
       return { success: true, skipped: 'context_acknowledgment' };

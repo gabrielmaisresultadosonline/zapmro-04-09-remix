@@ -1,4 +1,5 @@
-import { BrainCircuit, Tags, UserRound } from "lucide-react";
+import { BrainCircuit, Receipt, Tags, UserRound } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ export interface AiAgentNodeSettings {
   kanbanMode?: InheritMode;
   humanAlertMode?: AlertMode;
   humanAlertPhone?: string;
+  receiptOnly?: boolean;
 }
 
 export interface AiAgentNodeSettingsDialogProps {
@@ -65,6 +67,19 @@ export function AiAgentNodeSettingsDialog({ open, onOpenChange, data, onChange }
         </DialogHeader>
 
         <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-5">
+          <section className="rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="receipt-only" className="flex items-center gap-2 text-sm font-bold"><Receipt className="h-4 w-4 text-primary" /> Só conferir comprovante de pagamento</Label>
+                <p className="text-[11px] text-muted-foreground">Neste bloco a I.A. não responde nada. Ela só lê o comprovante (foto ou PDF) que o cliente mandar e, se estiver certo, envia o entregável. Se não estiver, não envia nada.</p>
+              </div>
+              <Switch id="receipt-only" checked={data.receiptOnly === true} onCheckedChange={(v) => onChange({ receiptOnly: v })} />
+            </div>
+            {data.receiptOnly && (
+              <p className="mt-2 text-[11px] text-foreground">No prompt escreva o que conferir e o que liberar. Ex.: "O comprovante precisa ter o valor de R$ 97,00 e o recebedor João da Silva. Se estiver certo, envie (Document1)."</p>
+            )}
+          </section>
+
           <section className="space-y-2">
             <Label className="text-sm font-bold">Qual prompt usar?</Label>
             <OptionGrid<PromptSource>

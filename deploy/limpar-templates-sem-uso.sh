@@ -23,7 +23,7 @@ CREATE TEMP TABLE velhos AS
 CREATE TEMP TABLE refs(src text, txt text);
 DO \$\$ DECLARE r record; BEGIN
   FOR r IN SELECT table_schema s, table_name t, column_name c FROM information_schema.columns
-           WHERE table_schema NOT IN ('storage','pg_catalog','information_schema','pg_toast','cron','auth','_realtime','realtime','supabase_functions','net','vault','extensions','graphql','graphql_public','pgsodium')
+           WHERE table_schema NOT LIKE 'pg_temp%' AND table_schema NOT LIKE 'pg_toast_temp%' AND table_schema NOT IN ('storage','pg_catalog','information_schema','pg_toast','cron','auth','_realtime','realtime','supabase_functions','net','vault','extensions','graphql','graphql_public','pgsodium')
              AND data_type IN ('text','jsonb','json','character varying','ARRAY')
   LOOP
     IF (r.s||'.'||r.t) = ANY(string_to_array('${IGNORAR:-}', ',')) THEN CONTINUE; END IF;

@@ -518,13 +518,17 @@ else
   warn "systemd indisponível; fluxos dependem apenas do pg_cron"
 fi
 
-# 5.2b — Backup diário do banco + mídias (7 dias, incremental) às 03:30.
+# 5.2b — Backup diário do banco + mídias às 03:30.
+#        2 dias no servidor quando há cópia no Backblaze B2 (senão 7), e o
+#        restante (dump do banco + espelho das mídias) vai para fora do servidor.
 if command -v systemctl >/dev/null 2>&1; then
   chmod +x "$ROOT/deploy/backup-diario.sh" 2>/dev/null || true
+  chmod +x "$ROOT/deploy/backup-b2-setup.sh" "$ROOT/deploy/restaurar-backup-b2.sh" 2>/dev/null || true
   sudo_ tee /etc/systemd/system/zapmro-backup.service >/dev/null <<EOF
 [Unit]
 Description=ZapMRO - backup diário do banco e das mídias
-After=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -545,7 +549,7 @@ WantedBy=timers.target
 EOF
   sudo_ systemctl daemon-reload
   if sudo_ systemctl enable --now zapmro-backup.timer >/dev/null 2>&1; then
-    ok "backup diário ativo (03:30, guarda 7 dias em /var/backups/zapmro-diario)"
+    ok "backup diário ativo (03:30, 2 dias no servidor + cópia fora quando o B2 estiver configurado)"
   else
     warn "não foi possível ativar o backup diário — veja: systemctl status zapmro-backup.timer"
   fi

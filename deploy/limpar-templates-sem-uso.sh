@@ -48,7 +48,7 @@ echo "Arquivos de templates com +${DIAS} dias: $TOTAL"
 echo "LIGADOS a algo (NUNCA serão apagados): $USADOS"
 echo "Sem ligação nenhuma: $SEMUSO ($TAM na lista) | prontos para apagar: $N"
 echo "Onde os arquivos são citados (tabela.coluna | quantos):"; grep '^ONDE|' "$LISTA" | cut -d'|' -f2- | sed 's/^/  /'
-echo "Exemplos que sairiam:"; grep '^APAGAR|' "$LISTA" | head -10 | cut -d'|' -f2-
+echo "Exemplos que sairiam:"; awk -F'|' '/^APAGAR\|/ && n++<10 {sub(/^APAGAR\|/,""); print}' "$LISTA"
 
 if [ "${USADOS:-0}" -eq 0 ]; then echo "ERRO: nenhuma referência encontrada — por segurança nada será apagado."; exit 1; fi
 if [ "${CONFIRMAR:-0}" != "1" ]; then echo; echo "MODO TESTE: nada foi apagado. Para apagar: CONFIRMAR=1 sudo -E bash $0"; exit 0; fi

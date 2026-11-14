@@ -20,17 +20,20 @@ CREATE TEMP TABLE velhos AS
   FROM storage.objects
   WHERE bucket_id='crm-media' AND name LIKE 'templates/%'
     AND coalesce(updated_at,created_at) < now()-interval '${DIAS} days';
-CREATE TEMP TABLE refs(txt text);
+CREATE TEMP TABLE refs(src text, txt text);
 DO \$\$ DECLARE r record; BEGIN
   FOR r IN SELECT table_schema s, table_name t, column_name c FROM information_schema.columns
            WHERE table_schema NOT IN ('storage','pg_catalog','information_schema','pg_toast','cron','auth','_realtime','realtime','supabase_functions','net','vault','extensions','graphql','graphql_public','pgsodium')
              AND data_type IN ('text','jsonb','json','character varying','ARRAY')
   LOOP
-    EXECUTE format('INSERT INTO refs SELECT %I::text FROM %I.%I WHERE %I::text LIKE %L', r.c, r.s, r.t, r.c, '%templates/%');
+    IF (r.s||'.'||r.t) = ANY(string_to_array('${IGNORAR:-}', ',')) THEN CONTINUE; END IF;
+    EXECUTE format('INSERT INTO refs SELECT %L, %I::text FROM %I.%I WHERE %I::text LIKE %L', r.s||'.'||r.t||'.'||r.c, r.c, r.s, r.t, r.c, '%templates/%');
   END LOOP;
 END \$\$;
 -- protegido se o NOME DO ARQUIVO aparecer em qualquer lugar (mais rígido que o caminho)
-CREATE TEMP TABLE usados AS SELECT DISTINCT v.name FROM velhos v JOIN refs r ON position(v.base IN r.txt) > 0;
+CREATE TEMP TABLE hits AS SELECT DISTINCT v.name, r.src FROM velhos v JOIN refs r ON position(v.base IN r.txt) > 0;
+CREATE TEMP TABLE usados AS SELECT DISTINCT name FROM hits;
+SELECT 'ONDE|'||src||'|'||count(*) FROM hits GROUP BY src ORDER BY count(*) DESC;
 SELECT 'RESUMO|'||(SELECT count(*) FROM velhos)||'|'||(SELECT count(*) FROM usados)||'|'||
        (SELECT count(*) FROM velhos v WHERE NOT EXISTS (SELECT 1 FROM usados u WHERE u.name=v.name))||'|'||
        coalesce((SELECT pg_size_pretty(sum(sz)) FROM velhos v WHERE NOT EXISTS (SELECT 1 FROM usados u WHERE u.name=v.name)),'0');
@@ -44,6 +47,7 @@ N=$(grep -c '^APAGAR|' "$LISTA" || true)
 echo "Arquivos de templates com +${DIAS} dias: $TOTAL"
 echo "LIGADOS a algo (NUNCA serão apagados): $USADOS"
 echo "Sem ligação nenhuma: $SEMUSO ($TAM na lista) | prontos para apagar: $N"
+echo "Onde os arquivos são citados (tabela.coluna | quantos):"; grep '^ONDE|' "$LISTA" | cut -d'|' -f2- | sed 's/^/  /'
 echo "Exemplos que sairiam:"; grep '^APAGAR|' "$LISTA" | head -10 | cut -d'|' -f2-
 
 if [ "${USADOS:-0}" -eq 0 ]; then echo "ERRO: nenhuma referência encontrada — por segurança nada será apagado."; exit 1; fi

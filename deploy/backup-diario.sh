@@ -51,8 +51,8 @@ if command -v rclone >/dev/null 2>&1 \
   fi
 fi
 
-# No servidor ficam 2 dias quando há cópia fora; 7 dias quando não há.
-if [ -n "$REMOTO" ]; then MANTER="${ZAPMRO_BACKUP_DIAS:-2}"; else MANTER="${ZAPMRO_BACKUP_DIAS:-7}"; fi
+# No servidor ficam sempre 2 dias; a retenção longa fica na cópia fora (B2).
+MANTER="${ZAPMRO_BACKUP_DIAS:-2}"
 REMOTO_DIAS="${ZAPMRO_BACKUP_REMOTO_DIAS:-14}"
 
 DIA="$(date +%Y%m%d-%H%M)"

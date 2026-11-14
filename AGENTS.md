@@ -28,3 +28,4 @@
 - One-time user popups are rows in crm_user_notices seeded by migration for the target audience; the popup shows while dismissed_at is NULL, so new signups never get past notices and dismissal follows the user across devices.
 - Deduplicated uploads (uploadDedupedMedia) reuse a hash path only when mediaFileOpens reads its first byte, and every new upload is read back before reporting success; Storage metadata (list/HEAD) can outlive lost files.
 - The open WhatsApp number is per browser tab (sessionStorage) and its credentials overlay shared crm_settings in the UI, so switching numbers in one browser never changes another.
+- Orphan-scan lists under /tmp/zapmro-orfaos-* are deleted when automatic cleanup ends and swept daily after 24h; the 10-minute storage cron rescans the disk at most hourly, so maintenance never fills /tmp or burns CPU.

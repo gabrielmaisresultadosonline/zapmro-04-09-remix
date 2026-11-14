@@ -76,6 +76,10 @@ fi
 sec "4) Arquivos órfãos no disco (sem registro no banco)"
 . "$ROOT/deploy/lib-orfaos-storage.sh"
 ORF_DIR="/tmp/zapmro-orfaos-$(date +%s)"
+# A lista de órfãos pode ter centenas de MB. Na limpeza automática ela é
+# apagada ao terminar; no modo relatório fica para conferência e a faxina
+# diária (liberar-espaco-diario.sh) remove as listas com mais de 24h.
+if [ "$CONFIRMAR" = "1" ]; then trap 'rm -rf -- "$ORF_DIR"' EXIT; fi
 orf_coletar "$ORF_DIR" "$IDADE_MIN" "$DB_CONT" "$ST_CONT" "${POSTGRES_DB:-postgres}" || die "falha ao ler banco/disco do storage"
 ORFAOS_FILE="$ORF_DIR/orfaos.tsv"
 info "arquivos no disco com mais de ${IDADE_MIN}min: $(wc -l < "$ORF_DIR/disk.tsv")"

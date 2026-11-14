@@ -30,10 +30,20 @@ system_logs_bytes="$(bytes_dir /var/log)"
 
 # Espaço órfão no disco: mesma conferência dos scripts de limpeza (rápida, por awk).
 . "$ROOT/deploy/lib-orfaos-storage.sh"
-orf_dir="$(mktemp -d)"; trap 'rm -rf "$orf_dir"' EXIT
-orphan_disk_bytes=0
-if orf_coletar "$orf_dir" 120 "$DB_CONT" "$ST_CONT" "$DB_NAME"; then
-  orphan_disk_bytes="$(orf_bytes "$orf_dir")"
+# A conferência lista todos os arquivos do disco e do banco; repetida a cada
+# 10 minutos ocupava CPU e /tmp sem necessidade. Mede no máximo 1x por hora e
+# reaproveita o último valor no intervalo.
+ORF_CACHE=/var/lib/zapmro/orphan-disk-bytes
+mkdir -p /var/lib/zapmro
+orphan_disk_bytes="$(cat "$ORF_CACHE" 2>/dev/null || echo 0)"
+case "$orphan_disk_bytes" in ''|*[!0-9]*) orphan_disk_bytes=0 ;; esac
+if [ ! -f "$ORF_CACHE" ] || [ -n "$(find "$ORF_CACHE" -mmin +60 2>/dev/null)" ]; then
+  orf_dir="$(mktemp -d /tmp/zapmro-orfaos-medicao.XXXXXX)"; trap 'rm -rf -- "$orf_dir"' EXIT
+  if orf_coletar "$orf_dir" 120 "$DB_CONT" "$ST_CONT" "$DB_NAME"; then
+    orphan_disk_bytes="$(orf_bytes "$orf_dir")"
+    echo "${orphan_disk_bytes:-0}" > "$ORF_CACHE"
+  fi
+  rm -rf -- "$orf_dir"
 fi
 
 q "insert into public.crm_vps_storage_snapshots(database_bytes,storage_bytes,docker_logs_bytes,backups_bytes,orphan_disk_bytes,root_total_bytes,root_used_bytes,root_available_bytes,docker_total_bytes,project_bytes,system_logs_bytes,details) values (${database_bytes:-0},${storage_bytes:-0},${docker_logs_bytes:-0},${backups_bytes:-0},${orphan_disk_bytes:-0},${root_total_bytes:-0},${root_used_bytes:-0},${root_available_bytes:-0},${docker_total_bytes:-0},${project_bytes:-0},${system_logs_bytes:-0},jsonb_build_object('host',current_setting('server_version'),'measured_at',now())); select public.crm_refresh_customer_storage_snapshots(); delete from public.crm_vps_storage_snapshots where created_at < now() - interval '90 days';" >/dev/null

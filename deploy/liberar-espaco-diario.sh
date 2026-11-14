@@ -49,6 +49,24 @@ for t in public.crm_messages public.crm_media_gc_queue public.crm_media_assets c
 done
 echo "✔ espaço morto do banco reaproveitado"
 
+# 4.1) listas temporárias de conferência de arquivos com mais de 24h.
+# Só pastas do próprio CRM, contendo apenas listas .tsv/.txt; nunca mídias.
+find /tmp -xdev -mindepth 1 -maxdepth 1 -type d -name 'zapmro-orfaos-*' -mmin +1440 -print0 2>/dev/null |
+while IFS= read -r -d '' d; do
+  if [ -z "$(find "$d" -mindepth 1 \( -type d -o -type l -o \( -type f ! -name '*.tsv' ! -name '*.txt' \) \) -print -quit 2>/dev/null)" ]; then
+    rm -rf -- "$d" && echo "✔ lista temporária removida: $d"
+  fi
+done
+
+# 4.2) caches de instalação (recriados sozinhos quando necessários)
+command -v apt-get >/dev/null && apt-get clean >/dev/null 2>&1
+if command -v snap >/dev/null; then
+  snap set system refresh.retain=2 >/dev/null 2>&1 || true
+  snap list --all 2>/dev/null | awk '/disabled/{print $1, $3}' | while read -r n r; do
+    snap remove "$n" --revision="$r" >/dev/null 2>&1 && echo "✔ versão antiga do snap removida: $n ($r)"
+  done
+fi
+
 # 5) logs e Docker sem uso (nunca volumes)
 command -v journalctl >/dev/null && journalctl --vacuum-size=200M >/dev/null 2>&1
 find /var/log -type f \( -name '*.gz' -o -name '*.[0-9]' \) -mtime +7 -delete 2>/dev/null

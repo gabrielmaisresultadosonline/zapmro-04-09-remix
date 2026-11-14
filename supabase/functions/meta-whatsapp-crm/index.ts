@@ -637,6 +637,7 @@ function cleanAiControlTags(reply: string): string {
     .replace(/\[\[ETIQUETA:[^\]]*\]\]/gi, '')
     .replace(/\[\[TRANSFER_TO_HUMAN\]\]/gi, '')
     .replace(/\[\[ENVIAR:[^\]]*\]\]/gi, '')
+    .replace(/\[\[LINK:[^\]]*\]\]/gi, '')
     .trim();
 }
 
@@ -1331,7 +1332,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     aiLog('documents_load_failed', { error: docsLoadErr?.message || String(docsLoadErr) });
   }
   const documentsInstruction = aiDocuments.length > 0
-    ? `\n16. ARQUIVOS DISPONÍVEIS PARA ENVIO: você pode enviar os arquivos abaixo ao cliente. Quando o cliente pedir um deles, ou quando o prompt mandar enviar (mesmo que o prompt escreva o código entre parênteses, como (CODIGO)), ou quando fizer sentido no atendimento, inclua EXATAMENTE a etiqueta interna [[ENVIAR:CODIGO]] (uma por arquivo) no final da sua resposta. Nunca escreva o código solto, entre parênteses ou como "ação operacional" para o cliente; use somente a etiqueta. O sistema envia o arquivo automaticamente, separado, logo após o texto. Nunca escreva o link do arquivo, nunca diga que não consegue enviar arquivos e não envie o mesmo arquivo de novo se ele já aparece enviado no histórico, a menos que o cliente peça.\n${aiDocuments.map((d) => `- ${d.code} (${d.media_type === 'document' ? 'documento/PDF' : d.media_type === 'image' ? 'imagem' : d.media_type === 'audio' ? 'áudio' : 'vídeo'}): ${d.title}${d.description ? ` — ${d.description}` : ''}`).join('\n')}`
+    ? `\n16. ARQUIVOS DISPONÍVEIS PARA ENVIO: você pode enviar os arquivos abaixo ao cliente. Quando o cliente pedir um deles, ou quando o prompt mandar enviar (mesmo que o prompt escreva o código entre parênteses, como (CODIGO)), ou quando fizer sentido no atendimento, inclua EXATAMENTE a etiqueta interna [[ENVIAR:CODIGO]] (uma por arquivo) no final da sua resposta. Nunca escreva o código solto, entre parênteses ou como "ação operacional" para o cliente; use somente a etiqueta. O sistema envia o arquivo automaticamente, separado, logo após o texto. Nunca escreva o link do arquivo, nunca diga que não consegue enviar arquivos e não envie o mesmo arquivo de novo se ele já aparece enviado no histórico, a menos que o cliente peça. Se as instruções mandarem liberar um link (área de membros, grupo, drive etc.), use a etiqueta interna [[LINK:https://endereco-completo]]; o sistema envia o link como mensagem separada.\n${aiDocuments.map((d) => `- ${d.code} (${d.media_type === 'document' ? 'documento/PDF' : d.media_type === 'image' ? 'imagem' : d.media_type === 'audio' ? 'áudio' : 'vídeo'}): ${d.title}${d.description ? ` — ${d.description}` : ''}`).join('\n')}`
     : '';
 
   const systemPrompt = `${aiPrompt}
@@ -1392,7 +1393,7 @@ ${receiptOnly ? `
 MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
 - Você NÃO conversa e NÃO escreve nada para o cliente. Nenhum texto será enviado.
 - Analise apenas o(s) arquivo(s) anexado(s) e confira se é um comprovante de pagamento real que atende TODOS os critérios das instruções (valor, nome do recebedor/favorecido, chave Pix, data etc.).
-- Se for um comprovante válido e tudo conferir, responda SOMENTE: [[COMPROVANTE_OK]] seguido das etiquetas [[ENVIAR:CODIGO]] do que as instruções mandam liberar.
+- Se for um comprovante válido e tudo conferir, responda SOMENTE: [[COMPROVANTE_OK]] seguido das etiquetas do que as instruções mandam liberar: [[ENVIAR:CODIGO]] para cada arquivo do Agente (documento/PDF, imagem, áudio ou vídeo) e/ou [[LINK:https://endereco-completo]] para um link (ex.: área de membros, grupo, drive).
 - Se não for comprovante, estiver ilegível, com valor/nome diferente ou faltando algo, responda SOMENTE: [[COMPROVANTE_RECUSADO]] motivo curto.
 - Nunca invente dados que não aparecem no arquivo.` : ''}
     `.trim();
@@ -1490,6 +1491,28 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
     } else {
       aiLog('documents_none_available', { box_id: boxId || null });
     }
+    // Links pedidos pela IA ([[LINK:https://...]]): entregáveis que não são arquivo
+    // (área de membros, grupo, drive etc.). Extraídos da resposta crua antes da
+    // limpeza das etiquetas; só URLs http/https são aceitas.
+    const linksToSend: string[] = [];
+    for (const m of rawReply.matchAll(/\[\[LINK:\s*(https?:\/\/[^\s\]]+)\s*\]\]/gi)) {
+      const url = m[1].trim();
+      if (url.length <= 1000 && !linksToSend.includes(url)) linksToSend.push(url);
+    }
+    if (linksToSend.length > 0) aiLog('links_requested', { count: linksToSend.length });
+    const sendAiLinks = async () => {
+      for (const url of linksToSend.slice(0, 3)) {
+        try {
+          await handleInternalSendMessage(supabase, aiSettings.meta_phone_number_id, aiSettings.meta_access_token,
+            { to: waId, text: url, whatsapp_number_id: boxId, metadata: { source_message_id: sourceMessageId, ai_run_id: aiRunId, ai_link: true } },
+            contact, aiSettings.vps_transcoder_url, userId || contact.user_id);
+          aiLog('link_sent', {});
+        } catch (linkErr: any) {
+          aiLog('link_send_failed', { error: linkErr?.message || String(linkErr) });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    };
     const sendAiDocuments = async () => {
       for (const d of documentsToSend.slice(0, 5)) {
         const mediaParams: any = { to: waId, whatsapp_number_id: boxId, metadata: { source_message_id: sourceMessageId, ai_run_id: aiRunId, ai_document_code: d.code } };
@@ -1565,8 +1588,11 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
     if (receiptOnly) {
       const fullRaw = String(aiData.choices?.[0]?.message?.content || '');
       const approved = /\[\[COMPROVANTE_OK\]\]/i.test(fullRaw) && !/\[\[COMPROVANTE_RECUSADO\]\]/i.test(fullRaw);
-      aiLog('receipt_checked', { approved, codes: documentsToSend.map((d) => d.code), reason: fullRaw.replace(/\[\[[^\]]*\]\]/g, '').trim().slice(0, 200) });
-      if (approved && documentsToSend.length > 0) await sendAiDocuments();
+      aiLog('receipt_checked', { approved, codes: documentsToSend.map((d) => d.code), links: linksToSend.length, reason: fullRaw.replace(/\[\[[^\]]*\]\]/g, '').trim().slice(0, 200) });
+      if (approved) {
+        if (documentsToSend.length > 0) await sendAiDocuments();
+        if (linksToSend.length > 0) await sendAiLinks();
+      }
       return { success: true, action: approved ? 'receipt_approved' : 'receipt_rejected' };
     }
 
@@ -1667,7 +1693,7 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
         next_execution_time: null
       }).eq('id', contact.id);
       
-    } else if (reply || documentsToSend.length > 0) {
+    } else if (reply || documentsToSend.length > 0 || linksToSend.length > 0) {
       // Credenciais já resolvidas no início (caixa correta + fallback validado).
       const settings = aiSettings;
 
@@ -1755,8 +1781,9 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
         aiLog('reply_sent', { parts: sentParts, phone_number_id: settings.meta_phone_number_id });
       }
       await sendAiDocuments();
-      
-      
+      if (linksToSend.length > 0) await sendAiLinks();
+
+
       console.log(`[AI-AGENT] Updating contact ${waId} to ensure continued AI interaction.`);
       await supabase.from('crm_contacts').update({ 
         flow_state: 'ai_handling',

@@ -71,12 +71,12 @@ export function AiAgentNodeSettingsDialog({ open, onOpenChange, data, onChange }
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <Label htmlFor="receipt-only" className="flex items-center gap-2 text-sm font-bold"><Receipt className="h-4 w-4 text-primary" /> Só conferir comprovante de pagamento</Label>
-                <p className="text-[11px] text-muted-foreground">Neste bloco a I.A. não responde nada. Ela só lê o comprovante (foto ou PDF) que o cliente mandar e, se estiver certo, envia o entregável. Se não estiver, não envia nada.</p>
+                <p className="text-[11px] text-muted-foreground">Neste bloco a I.A. não responde nada. Ela só lê o comprovante (foto ou PDF) que o cliente mandar e, se estiver certo, envia o entregável. Se não estiver, não envia nada. O entregável pode ser qualquer arquivo do Agente (documento, imagem, áudio, vídeo) ou um link.</p>
               </div>
               <Switch id="receipt-only" checked={data.receiptOnly === true} onCheckedChange={(v) => onChange({ receiptOnly: v })} />
             </div>
             {data.receiptOnly && (
-              <p className="mt-2 text-[11px] text-foreground">No prompt escreva o que conferir e o que liberar. Ex.: "O comprovante precisa ter o valor de R$ 97,00 e o recebedor João da Silva. Se estiver certo, envie (Document1)."</p>
+              <p className="mt-2 text-[11px] text-foreground">No prompt escreva o que conferir e o que liberar. Ex.: "O comprovante precisa ter o valor de R$ 97,00 e o recebedor João da Silva. Se estiver certo, envie (Document1)." Para liberar um link, escreva o endereço completo: "se estiver certo, envie o link https://meusite.com/area".</p>
             )}
           </section>
 

@@ -562,6 +562,72 @@ serve(async (req) => {
       return json({ success: true, users, numbers_error: numbersError, debug: adminLog });
     }
 
+    // ===== Copiar fluxos entre números de qualquer cadastro =====
+    if (action === "list_flow_copy_catalog") {
+      const allUsers: any[] = [];
+      for (let page = 1; page <= 20; page++) {
+        const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) throw error;
+        allUsers.push(...(data.users || []));
+        if (!data.users || data.users.length < 1000) break;
+      }
+      const [profiles, numbers, flows] = await Promise.all([
+        loadAll("crm_profiles", "user_id, full_name"),
+        loadAll("crm_whatsapp_numbers", "id, user_id, label, meta_display_phone_number, meta_verified_name, meta_access_token, meta_phone_number_id, created_at"),
+        loadAll("crm_flows", "id, user_id, name, is_active, whatsapp_number_id, archived_from_number_id, archived_from_label, created_at"),
+      ]);
+      const profileMap = new Map(profiles.map((p: any) => [p.user_id, p]));
+      const userMap = new Map(allUsers.map((u: any) => [u.id, u]));
+      const accountLabel = (userId: string) => {
+        const profile: any = profileMap.get(userId);
+        const user: any = userMap.get(userId);
+        return profile?.full_name || user?.email || "Cadastro removido";
+      };
+      const numberLabel = (n: any) => n.meta_display_phone_number || n.meta_verified_name || n.label || "WhatsApp";
+      const sources = numbers.map((n: any) => ({
+        key: n.id,
+        userId: n.user_id,
+        accountLabel: accountLabel(n.user_id),
+        numberLabel: numberLabel(n),
+        connected: !!(n.meta_access_token && n.meta_phone_number_id),
+        flows: flows.filter((f: any) => f.whatsapp_number_id === n.id).map((f: any) => ({
+          id: f.id, name: f.name, is_active: !!f.is_active, created_at: f.created_at,
+          archived_from_label: f.archived_from_label,
+        })),
+      }));
+      const userIds = Array.from(new Set([...allUsers.map((u: any) => u.id), ...flows.map((f: any) => f.user_id)]));
+      for (const userId of userIds) {
+        const unassigned = flows.filter((f: any) => f.user_id === userId && !f.whatsapp_number_id);
+        if (unassigned.length) sources.push({
+          key: `account:${userId}`, userId, accountLabel: accountLabel(userId),
+          numberLabel: "Fluxos sem número / arquivados", connected: false,
+          flows: unassigned.map((f: any) => ({ id: f.id, name: f.name, is_active: !!f.is_active, created_at: f.created_at, archived_from_label: f.archived_from_label })),
+        });
+      }
+      sources.sort((a, b) => `${a.accountLabel}${a.numberLabel}`.localeCompare(`${b.accountLabel}${b.numberLabel}`, "pt-BR"));
+      const targets = numbers.filter((n: any) => n.meta_access_token && n.meta_phone_number_id).map((n: any) => ({
+        id: n.id, userId: n.user_id, accountLabel: accountLabel(n.user_id), numberLabel: numberLabel(n),
+      })).sort((a, b) => `${a.accountLabel}${a.numberLabel}`.localeCompare(`${b.accountLabel}${b.numberLabel}`, "pt-BR"));
+      return json({ success: true, sources, targets });
+    }
+
+    if (action === "copy_flows_between_numbers") {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const flowIds = Array.isArray(body.flowIds)
+        ? Array.from(new Set(body.flowIds.filter((id: unknown) => typeof id === "string" && uuidPattern.test(id)))) as string[]
+        : [];
+      const targetNumberId = typeof body.targetNumberId === "string" ? body.targetNumberId : "";
+      if (!flowIds.length || flowIds.length > 100 || !uuidPattern.test(targetNumberId)) {
+        return json({ success: false, error: "Selecione de 1 a 100 fluxos e um número de destino válido" }, 400);
+      }
+      const { data, error } = await supabase.rpc("crm_admin_copy_flows_between_numbers", {
+        p_flow_ids: flowIds,
+        p_target_number_id: targetNumberId,
+      });
+      if (error) return json({ success: false, error: error.message }, 500);
+      return json({ success: true, copied: Number(data?.copied || 0), flowIds: data?.flow_ids || [] });
+    }
+
     // ===== Travar / destravar o acesso de um cadastro =====
     if (action === "lock_user" || action === "unlock_user") {
       const { userId, reason } = body as any;

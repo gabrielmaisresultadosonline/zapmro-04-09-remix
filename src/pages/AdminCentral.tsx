@@ -25,6 +25,7 @@ import TrialsPanel from "@/components/admin/TrialsPanel";
 import MigrationExtras from "@/components/admin/MigrationExtras";
 import StorageAdminPanel from "@/components/admin/StorageAdminPanel";
 import OnlineNowPanel from "@/components/admin/OnlineNowPanel";
+import FlowCopyAdminPanel from "@/components/admin/FlowCopyAdminPanel";
 import { toast } from "sonner";
 import {
   Loader2,
@@ -1202,6 +1203,7 @@ export default function AdminCentral() {
         <Tabs defaultValue="users" className="w-full">
           <TabsList className="bg-white border border-[#E8F5F1] shadow-sm flex flex-wrap h-auto gap-1">
             <TabsTrigger value="users" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Cadastros & Números</TabsTrigger>
+            <TabsTrigger value="flow-copy" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white gap-1.5"><Copy className="h-3.5 w-3.5" /> Copiar fluxos</TabsTrigger>
             <TabsTrigger value="online" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Conectados agora</TabsTrigger>
             <TabsTrigger value="trials" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Testes & Acessos</TabsTrigger>
             <TabsTrigger value="sales" className="data-[state=active]:bg-[#25D366] data-[state=active]:text-white">Vendas</TabsTrigger>
@@ -1426,6 +1428,10 @@ export default function AdminCentral() {
             )}
           </div>
         ))}
+          </TabsContent>
+
+          <TabsContent value="flow-copy" className="mt-4">
+            <FlowCopyAdminPanel creds={creds} />
           </TabsContent>
 
           <TabsContent value="announcements" className="mt-4">

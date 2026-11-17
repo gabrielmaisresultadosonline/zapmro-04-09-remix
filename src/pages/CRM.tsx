@@ -3,6 +3,7 @@ import PaidFeatureLock from "@/components/crm/PaidFeatureLock";
 import { UnsupportedMessageDiagnostic } from "@/components/crm/UnsupportedMessageDiagnostic";
 import { convertToWhatsAppVoice } from '@/lib/audioConvert';
 import { fetchNumberSettings, overlayNumberSettings, saveNumberSettings, splitNumberSettings } from "@/lib/numberSettings";
+import { buildFlowDuplicate, buildFlowStepDuplicates } from "@/lib/flowDuplication";
 import { FreeRepliesCard } from '@/components/crm/FreeRepliesCard';
 import { AiDocumentsLibrary } from '@/components/crm/AiDocumentsLibrary';
 import { PromptFromConversations } from '@/components/crm/PromptFromConversations';
@@ -5674,49 +5675,39 @@ const CRM = () => {
   const handleDuplicateFlow = async (flow: any) => {
     setSaving(true);
     try {
-      const { id, created_at, updated_at, ...flowData } = flow;
-      
-      const nodeMap: Record<string, string> = {};
-      const newNodes = (flowData.nodes || []).map((node: any) => {
-        const newId = `${node.type}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-        nodeMap[node.id] = newId;
-        return { ...node, id: newId };
-      });
-
-      const newEdges = (flowData.edges || []).map((edge: any) => ({
-        ...edge,
-        id: `e_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        source: nodeMap[edge.source] || edge.source,
-        target: nodeMap[edge.target] || edge.target
-      }));
-
-      const newFlow = {
-        name: `${flowData.name} (Cópia)`,
-        trigger_type: flowData.trigger_type || 'manual',
-        trigger_keywords: flowData.trigger_keywords || [],
-        trigger_tag: flowData.trigger_tag || null,
-        is_active: false,
-        nodes: newNodes,
-        edges: newEdges,
+      const now = new Date();
+      const newFlow = buildFlowDuplicate(flow, {
+        userId: currentUserIdRef.current,
         // Multi-WhatsApp: a cópia nasce no número aberto no momento.
         ...activeNumberOwnershipPatch(),
-        updated_at: new Date().toISOString()
-      };
+      }, now);
 
-      const { data, error } = await supabase
+      const { data: createdFlow, error } = await supabase
         .from('crm_flows')
         .insert([newFlow])
-        .select();
+        .select('id')
+        .single();
 
-      if (error) {
-        throw error;
+      if (error) throw error;
+
+      const newSteps = buildFlowStepDuplicates(
+        flow.crm_flow_steps,
+        createdFlow.id,
+        currentUserIdRef.current,
+        now,
+      );
+      if (newSteps.length > 0) {
+        const { error: stepsError } = await supabase.from('crm_flow_steps').insert(newSteps);
+        if (stepsError) {
+          // Não deixa uma cópia incompleta caso a gravação dos passos falhe.
+          const { error: rollbackError } = await supabase.from('crm_flows').delete().eq('id', createdFlow.id);
+          if (rollbackError) console.error('Erro ao desfazer fluxo incompleto:', rollbackError);
+          throw stepsError;
+        }
       }
-      
+
       toast({ title: "Fluxo duplicado com sucesso!" });
       fetchData(false);
-
-      fetchData(false);
-
     } catch (err: any) {
       console.error("Erro ao duplicar fluxo:", err);
       toast({ 

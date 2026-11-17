@@ -5,7 +5,11 @@ import { resolve } from 'node:path';
 const database = process.env.FLOW_COPY_TEST_DB;
 if (!database) throw new Error('Set FLOW_COPY_TEST_DB to a disposable PostgreSQL database.');
 const base = resolve(import.meta.dir, '../../../');
-for (const file of ['deploy/postgres-stack/tests/flow-copy-fixture.sql', 'deploy/postgres-stack/sql/144-admin-copiar-fluxos-entre-cadastros.sql']) {
+for (const file of [
+  'deploy/postgres-stack/tests/flow-copy-fixture.sql',
+  'deploy/postgres-stack/sql/144-admin-copiar-fluxos-entre-cadastros.sql',
+  'deploy/postgres-stack/sql/145-corrigir-permissao-copiar-fluxos-admin.sql',
+]) {
   const result = Bun.spawnSync(['psql', database, '-X', '-v', 'ON_ERROR_STOP=1', '-f', resolve(base, file)]);
   if (result.exitCode !== 0) throw new Error(result.stderr.toString());
 }
@@ -52,8 +56,13 @@ describe('AdminCentral — cópia real de fluxos entre cadastros', () => {
     sql(`SELECT set_config('request.jwt.claim.role','service_role',false); ${call};`);
     expect(sql(`SELECT is_active||':'||nodes FROM public.crm_flows WHERE id<>'${sourceFlow}'`)).toBe('false:[{"type": "ai"}]');
   });
+  it('aceita o service_role no formato JSON usado pelo PostgREST', () => {
+    sql(`SELECT set_config('request.jwt.claims','{"role":"service_role"}',false); ${call};`);
+    expect(sql(`SELECT user_id||':'||whatsapp_number_id FROM public.crm_flows WHERE id<>'${sourceFlow}'`)).toBe(`${targetUser}:${targetNumber}`);
+  });
   it('recusa a operação fora do service_role do AdminCentral', () => {
     expect(sqlError(`SELECT set_config('request.jwt.claim.role','authenticated',false); ${call};`)).toContain('Operação exclusiva do AdminCentral');
+    expect(sqlError(`SELECT set_config('request.jwt.claims','{"role":"authenticated"}',false); ${call};`)).toContain('Operação exclusiva do AdminCentral');
     expect(sql('SELECT count(*) FROM public.crm_flows')).toBe('1');
   });
   it('não copia para um WhatsApp desconectado', () => {

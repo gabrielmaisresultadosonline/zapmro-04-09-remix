@@ -1294,20 +1294,39 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
 
   if (!aiPrompt) aiPrompt = "Você é um assistente prestativo.";
 
-  // Só confere comprovante: anexos recebidos depois da última mensagem enviada.
+  // Só confere comprovante: anexos (imagem/PDF) e links recebidos depois da
+  // última mensagem enviada. O cliente pode mandar o arquivo e depois um texto
+  // ("segue o comprovante"), ou só um link do comprovante.
   const receiptMessages: any[] = [];
+  const receiptLinks: string[] = [];
   if (receiptOnly) {
-    for (const m of recentMessages || []) {
-      if (m.direction !== 'inbound') break;
-      if (m.media_url && (m.message_type === 'image' || m.message_type === 'document')) receiptMessages.push(m);
+    const collect = (rows: any[]) => {
+      receiptMessages.length = 0; receiptLinks.length = 0;
+      let pendingMedia = false;
+      for (const m of rows || []) {
+        if (m.direction !== 'inbound') break;
+        if (m.message_type === 'image' || m.message_type === 'document') {
+          if (m.media_url) receiptMessages.push(m); else pendingMedia = true;
+        }
+        for (const u of extractReceiptUrls(String(m.content || ''))) if (!receiptLinks.includes(u)) receiptLinks.push(u);
+      }
+      return pendingMedia;
+    };
+    let pending = collect(recentMessages || []);
+    // A mídia pode ainda estar sendo salva: espera um pouco antes de desistir.
+    for (let i = 0; pending && i < 8; i++) {
+      await wait(2500);
+      const { data: fresh } = await supabase.from('crm_messages')
+        .select('id, content, direction, message_type, media_url, created_at')
+        .eq('contact_id', contact.id).order('created_at', { ascending: false }).limit(30);
+      pending = collect(fresh || []);
     }
-    const newest = (recentMessages || [])[0];
-    if (!newest || newest.direction !== 'inbound' || !(newest.message_type === 'image' || newest.message_type === 'document') || receiptMessages.length === 0) {
-      aiLog('receipt_only_skipped', { reason: 'not_a_receipt_file', type: newest?.message_type || null });
+    if (receiptMessages.length === 0 && receiptLinks.length === 0) {
+      aiLog('receipt_only_skipped', { reason: 'no_file_or_link', type: (recentMessages || [])[0]?.message_type || null });
       return { success: true, skipped: 'receipt_only_waiting_file' };
     }
+    aiLog('receipt_only_inputs', { files: receiptMessages.length, links: receiptLinks.length });
   }
-  
   const kanbanInstruction = aiSettings?.ai_kanban_auto_organizer
     ? `\n14. ORGANIZADOR KANBAN (OBRIGATÓRIO): ao final de TODA resposta, inclua exatamente uma etiqueta interna: [[KANBAN:frio]], [[KANBAN:quente]], [[KANBAN:cliente]] ou [[KANBAN:humano]]. Use frio para baixo interesse, quente para intenção de compra clara, cliente para compra/contratação confirmada e humano quando pedir atendimento humano. Nunca responda sem essa etiqueta.\n14.1. AUTONOMIA DE ETIQUETAS: você também pode criar/ajustar uma etiqueta própria do CRM quando nenhuma das quatro descrever bem a conversa, usando [[ETIQUETA:Nome curto]] (ex.: [[ETIQUETA:Orçamento enviado]]). Ela será criada automaticamente no Kanban e aplicada só a este contato. Use no máximo uma por resposta e sempre em português.\n14.2. As etiquetas internas nunca são mostradas ao cliente.`
     : '';
@@ -1361,11 +1380,19 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     // Anexos recebidos (imagens e PDFs, ex.: comprovantes) são baixados pela
     // própria VPS e entregues à IA em base64, para ela ler o conteúdo real.
     const visualAttachments = await buildAiVisualAttachments(receiptOnly ? receiptMessages : (recentMessages || []));
-    if (receiptOnly && visualAttachments.length === 0) {
+    let receiptLinkText = '';
+    if (receiptOnly && receiptLinks.length > 0) {
+      const fromLinks = await buildReceiptLinkAttachments(receiptLinks.slice(0, 3));
+      visualAttachments.push(...fromLinks.attachments);
+      receiptLinkText = fromLinks.text;
+      aiLog('receipt_links_read', { attachments: fromLinks.attachments.length, text_length: receiptLinkText.length });
+    }
+    if (receiptOnly && visualAttachments.length === 0 && !receiptLinkText) {
       aiLog('receipt_only_skipped', { reason: 'file_unreadable' });
       return { success: true, skipped: 'receipt_only_unreadable' };
     }
     aiLog('visual_attachments', { count: visualAttachments.length });
+    if (receiptLinkText) visualAttachments.unshift({ type: 'text', text: `CONTEÚDO DOS LINKS ENVIADOS PELO CLIENTE (comprovante):\n${receiptLinkText}` });
     const userContent: any = visualAttachments.length > 0
       ? [
           { type: 'text', text: `Histórico da conversa:\n${history}\n\nNova mensagem do cliente: ${messageText || "(Nenhuma mensagem recente - inicie o atendimento)"}` },
@@ -1392,7 +1419,7 @@ ${AI_CONTEXT_RESPONSE_RULE}
 ${receiptOnly ? `
 MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
 - Você NÃO conversa e NÃO escreve nada para o cliente. Nenhum texto será enviado.
-- Analise apenas o(s) arquivo(s) anexado(s) e confira se é um comprovante de pagamento real que atende TODOS os critérios das instruções (valor, nome do recebedor/favorecido, chave Pix, data etc.).
+- Analise apenas o(s) arquivo(s) anexado(s) e o conteúdo dos links enviados pelo cliente, e confira se é um comprovante de pagamento real que atende TODOS os critérios das instruções (valor, nome do recebedor/favorecido, chave Pix, data etc.).
 - Se for um comprovante válido e tudo conferir, responda SOMENTE: [[COMPROVANTE_OK]] seguido das etiquetas do que as instruções mandam liberar: [[ENVIAR:CODIGO]] para cada arquivo do Agente (documento/PDF, imagem, áudio ou vídeo) e/ou [[LINK:https://endereco-completo]] para um link (ex.: área de membros, grupo, drive).
 - Se não for comprovante, estiver ilegível, com valor/nome diferente ou faltando algo, responda SOMENTE: [[COMPROVANTE_RECUSADO]] motivo curto.
 - Nunca invente dados que não aparecem no arquivo.` : ''}
@@ -1404,7 +1431,7 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
         method: 'POST',
         headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: receiptOnly ? 'gpt-4o' : 'gpt-4o-mini',
           messages: [
             { role: 'system', content: fullSystemPrompt },
             { role: 'user', content }
@@ -1420,7 +1447,7 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
 
     let attempt = await callOpenAi(OPENAI_API_KEY, userContent);
     // Imagem expirada/inacessível derruba a chamada inteira: tenta de novo só com texto.
-    if (!attempt.ok && attempt.status === 400 && typeof userContent !== 'string') {
+    if (!attempt.ok && attempt.status === 400 && typeof userContent !== 'string' && !receiptOnly) {
       aiLog('retry_without_images', { status: attempt.status, error: attempt.data?.error?.message });
       attempt = await callOpenAi(OPENAI_API_KEY, textOnlyContent);
     }
@@ -1430,7 +1457,7 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
       const next = await resolveOpenAiKey(supabase, { userIds: [requesterUserId, userId, contact?.user_id], whatsappNumberId: boxId });
       if (next.key && next.key !== OPENAI_API_KEY && !next.allRejected) {
         aiLog('retry_with_other_key', { status: attempt.status, source: next.source });
-        attempt = await callOpenAi(next.key, textOnlyContent);
+        attempt = await callOpenAi(next.key, receiptOnly ? userContent : textOnlyContent);
       }
     }
     const aiData = attempt.data;
@@ -1589,6 +1616,15 @@ MODO SÓ CONFERIR COMPROVANTE (TEM PRIORIDADE SOBRE TODAS AS REGRAS ACIMA):
       const fullRaw = String(aiData.choices?.[0]?.message?.content || '');
       const approved = /\[\[COMPROVANTE_OK\]\]/i.test(fullRaw) && !/\[\[COMPROVANTE_RECUSADO\]\]/i.test(fullRaw);
       aiLog('receipt_checked', { approved, codes: documentsToSend.map((d) => d.code), links: linksToSend.length, reason: fullRaw.replace(/\[\[[^\]]*\]\]/g, '').trim().slice(0, 200) });
+      if (approved && documentsToSend.length === 0 && linksToSend.length === 0) {
+        // A I.A. aprovou mas não marcou o entregável: usa o que as instruções do bloco citam.
+        for (const d of aiDocuments) {
+          const escaped = d.code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          if (new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, 'i').test(aiPrompt)) documentsToSend.push(d);
+        }
+        for (const u of extractReceiptUrls(aiPrompt)) if (!linksToSend.includes(u)) linksToSend.push(u);
+        aiLog('receipt_deliverable_from_prompt', { codes: documentsToSend.map((d) => d.code), links: linksToSend.length });
+      }
       if (approved) {
         if (documentsToSend.length > 0) await sendAiDocuments();
         if (linksToSend.length > 0) await sendAiLinks();
@@ -5066,6 +5102,69 @@ const guessMedia = (params: any) => {
  * deixaram de responder após a migração; nesse caso reaproveitamos o mesmo caminho
  * do bucket no Storage local antes de desistir.
  */
+function extractReceiptUrls(text: string): string[] {
+  const out: string[] = [];
+  for (const m of String(text || '').matchAll(/https?:\/\/[^\s<>"'\)\]]+/gi)) {
+    const u = m[0].replace(/[.,;!?]+$/, '');
+    if (u.length <= 1000 && !out.includes(u)) out.push(u);
+  }
+  return out;
+}
+
+/** Abre links de comprovante: PDF/imagem viram anexo; páginas viram texto (+ imagem principal). */
+async function buildReceiptLinkAttachments(urls: string[]): Promise<{ attachments: any[]; text: string }> {
+  const attachments: any[] = [];
+  const texts: string[] = [];
+  const toAttachment = (buf: Uint8Array, mimeHint: string, name: string) => {
+    const head = Array.from(buf.slice(0, 4)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    let mime = mimeHint;
+    if (head === '25504446') mime = 'application/pdf';
+    else if (head.startsWith('ffd8')) mime = 'image/jpeg';
+    else if (head === '89504e47') mime = 'image/png';
+    else if (head === '52494646') mime = 'image/webp';
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    const b64 = btoa(bin);
+    if (mime === 'application/pdf') return { type: 'file', file: { filename: name || 'comprovante.pdf', file_data: `data:application/pdf;base64,${b64}` } };
+    if (mime.startsWith('image/')) return { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}`, detail: 'high' } };
+    return null;
+  };
+  const get = async (url: string) => {
+    if (!/^https?:\/\//i.test(url) || /^https?:\/\/(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.)/i.test(url)) throw new Error('endereço não permitido');
+    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ZapMRO-Receipt/1.0)', 'Accept': '*/*' } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (buf.length > 15 * 1024 * 1024) throw new Error('arquivo grande demais');
+    return { buf, mime: (r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase(), finalUrl: r.url || url };
+  };
+  for (const url of urls) {
+    try {
+      const { buf, mime, finalUrl } = await get(url);
+      const name = decodeURIComponent(finalUrl.split('?')[0].split('/').pop() || '') || 'comprovante.pdf';
+      const att = toAttachment(buf, mime, name.toLowerCase().endsWith('.pdf') ? name : 'comprovante.pdf');
+      if (att) { attachments.push(att); continue; }
+      const html = new TextDecoder().decode(buf);
+      const plain = html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+      if (plain) texts.push(`[${url}]\n${plain.slice(0, 6000)}`);
+      // Imagem principal ou PDF citado na página (ex.: página de compartilhamento do comprovante).
+      const og = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1]
+        || html.match(/href=["']([^"']+\.pdf[^"']*)["']/i)?.[1];
+      if (og) {
+        try {
+          const abs = new URL(og, finalUrl).toString();
+          const sub = await get(abs);
+          const subAtt = toAttachment(sub.buf, sub.mime, 'comprovante.pdf');
+          if (subAtt) attachments.push(subAtt);
+        } catch (_) { /* opcional */ }
+      }
+    } catch (err: any) {
+      texts.push(`[${url}] não foi possível abrir: ${err?.message || err}`);
+    }
+  }
+  return { attachments: attachments.slice(0, 4), text: texts.join('\n\n').slice(0, 12000) };
+}
+
 async function buildAiVisualAttachments(messages: any[]): Promise<any[]> {
   // messages vem do mais novo para o mais antigo: pega os 3 anexos mais recentes.
   const picked = messages

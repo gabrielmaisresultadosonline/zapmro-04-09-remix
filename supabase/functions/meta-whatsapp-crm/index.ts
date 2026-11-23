@@ -1327,6 +1327,13 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     }
     aiLog('receipt_only_inputs', { files: receiptMessages.length, links: receiptLinks.length });
   }
+  // Agente normal com instrução de conferir comprovante: também abre links que o cliente mandou agora.
+  if (!receiptOnly && /comprovante/i.test(aiPrompt)) {
+    for (const m of recentMessages || []) {
+      if (m.direction !== 'inbound') break;
+      for (const u of extractReceiptUrls(String(m.content || ''))) if (!receiptLinks.includes(u)) receiptLinks.push(u);
+    }
+  }
   const kanbanInstruction = aiSettings?.ai_kanban_auto_organizer
     ? `\n14. ORGANIZADOR KANBAN (OBRIGATÓRIO): ao final de TODA resposta, inclua exatamente uma etiqueta interna: [[KANBAN:frio]], [[KANBAN:quente]], [[KANBAN:cliente]] ou [[KANBAN:humano]]. Use frio para baixo interesse, quente para intenção de compra clara, cliente para compra/contratação confirmada e humano quando pedir atendimento humano. Nunca responda sem essa etiqueta.\n14.1. AUTONOMIA DE ETIQUETAS: você também pode criar/ajustar uma etiqueta própria do CRM quando nenhuma das quatro descrever bem a conversa, usando [[ETIQUETA:Nome curto]] (ex.: [[ETIQUETA:Orçamento enviado]]). Ela será criada automaticamente no Kanban e aplicada só a este contato. Use no máximo uma por resposta e sempre em português.\n14.2. As etiquetas internas nunca são mostradas ao cliente.`
     : '';
@@ -1381,7 +1388,7 @@ async function _transcribeAudioForAi(apiKey: string, audioUrl: string) {
     // própria VPS e entregues à IA em base64, para ela ler o conteúdo real.
     const visualAttachments = await buildAiVisualAttachments(receiptOnly ? receiptMessages : (recentMessages || []));
     let receiptLinkText = '';
-    if (receiptOnly && receiptLinks.length > 0) {
+    if (receiptLinks.length > 0) {
       const fromLinks = await buildReceiptLinkAttachments(receiptLinks.slice(0, 3));
       visualAttachments.push(...fromLinks.attachments);
       receiptLinkText = fromLinks.text;

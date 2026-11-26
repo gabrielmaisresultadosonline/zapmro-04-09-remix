@@ -246,28 +246,62 @@ Deno.serve(async (req: Request) => {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const admin = supabaseUrl && serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } }) : null
 
-  let last: Response | null = null
-  let lockedBroadcast: string | null = null
-  try {
-    for (let i = 0; i < 500; i++) {
-      const res = await processOne(new Request(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(body) }), workerId)
-      const data = await res.clone().json().catch(() => ({})) as JsonRecord
-      last = res
-      const bid = typeof data.broadcast_id === 'string' ? data.broadcast_id : null
-      if (!admin || data.processed !== 1 || !bid) break
-      lockedBroadcast = bid
-      body = { ...body, broadcast_id: bid }
-      const { data: c } = await admin.from('crm_broadcasts').select('status, next_run_at').eq('id', bid).single()
-      if (!c || !['pending', 'running'].includes(String(c.status))) break
-      const wait = Math.max(0, Date.parse(String(c.next_run_at || '')) - Date.now() || 0)
-      if (Date.now() - started + wait > LOOP_BUDGET_MS) break
-      await sleep(wait)
+  if (!admin) return processOne(new Request(req.url, { method: 'POST', headers: req.headers, body: bodyText }), workerId)
+
+  // Cada campanha (um por número) roda no seu próprio laço, em paralelo e com
+  // seu próprio intervalo. Antes, uma chamada segurava só UMA campanha por até
+  // 50s e as outras ficavam na fila — por isso números do mesmo cadastro
+  // aceleravam/pausavam uns aos outros.
+  const runCampaign = async (bid: string | null, ownerId: string): Promise<Response | null> => {
+    let last: Response | null = null
+    let lockedBroadcast: string | null = null
+    let campaignBody: JsonRecord = bid ? { ...body, broadcast_id: bid } : body
+    try {
+      for (let i = 0; i < 500; i++) {
+        const currentId = typeof campaignBody.broadcast_id === 'string' ? campaignBody.broadcast_id : null
+        if (currentId) {
+          const { data: c } = await admin.from('crm_broadcasts').select('status, next_run_at').eq('id', currentId).single()
+          if (!c || !['pending', 'running'].includes(String(c.status))) break
+          const wait = Math.max(0, Date.parse(String(c.next_run_at || '')) - Date.now() || 0)
+          if (Date.now() - started + wait > LOOP_BUDGET_MS) break
+          if (wait > 0) await sleep(wait)
+        }
+        const res = await processOne(new Request(req.url, { method: 'POST', headers: req.headers, body: JSON.stringify(campaignBody) }), ownerId)
+        const data = await res.clone().json().catch(() => ({})) as JsonRecord
+        last = res
+        const processedId = typeof data.broadcast_id === 'string' ? data.broadcast_id : null
+        if (data.processed !== 1 || !processedId) break
+        lockedBroadcast = processedId
+        campaignBody = { ...campaignBody, broadcast_id: processedId }
+      }
+    } finally {
+      if (lockedBroadcast) {
+        await admin.from('crm_broadcasts').update({ worker_lease_owner: null, worker_lease_until: null })
+          .eq('id', lockedBroadcast).eq('worker_lease_owner', ownerId)
+      }
     }
-  } finally {
-    if (admin && lockedBroadcast) {
-      await admin.from('crm_broadcasts').update({ worker_lease_owner: null, worker_lease_until: null })
-        .eq('id', lockedBroadcast).eq('worker_lease_owner', workerId)
-    }
+    return last
   }
-  return last || json({ success: true, processed: 0 })
+
+  if (typeof body.broadcast_id === 'string') {
+    return (await runCampaign(body.broadcast_id, workerId)) || json({ success: true, processed: 0 })
+  }
+
+  // Chamada do cron/ticker: pega TODAS as campanhas ativas que vencem dentro do
+  // orçamento e sem outro worker segurando, e roda cada uma em paralelo.
+  const nowIso = new Date().toISOString()
+  const horizon = new Date(Date.now() + LOOP_BUDGET_MS).toISOString()
+  const { data: active } = await admin.from('crm_broadcasts')
+    .select('id, next_run_at, worker_lease_until')
+    .in('status', ['pending', 'running'])
+    .or(`next_run_at.is.null,next_run_at.lte.${horizon}`)
+    .or(`worker_lease_until.is.null,worker_lease_until.lt.${nowIso}`)
+    .limit(50)
+  const ids = (active || []).map((row) => String(row.id))
+  if (ids.length === 0) return json({ success: true, processed: 0 })
+  const results = await Promise.all(ids.map((id) => runCampaign(id, crypto.randomUUID()).catch((e) => {
+    console.error('[BROADCAST-WORKER-PARALLEL]', id, errorMessage(e)); return null
+  })))
+  const processed = results.filter(Boolean).length
+  return json({ success: true, processed: processed > 0 ? 1 : 0, campaigns: ids.length })
 })
